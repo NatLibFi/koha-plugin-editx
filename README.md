@@ -22,6 +22,7 @@ Add procurement-config.xml file to config dir and check paths exist.
 
 example:
 
+```
 <?xml version="1.0"?>
 <data>
   <settings>
@@ -41,4 +42,4 @@ example:
         <!-- <mailfrom>set_from_address@here</mailfrom> --> <!-- optionally set the address to be used as "from" in failure notifications -->
     </notifications>
 </data>
-
+```
