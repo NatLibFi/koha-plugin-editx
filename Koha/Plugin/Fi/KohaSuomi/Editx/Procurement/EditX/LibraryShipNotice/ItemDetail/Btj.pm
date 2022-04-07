@@ -1,14 +1,14 @@
 #!/usr/bin/perl
-package Koha::Procurement::EditX::LibraryShipNotice::ItemDetail::Btj;
+package Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::EditX::LibraryShipNotice::ItemDetail::Btj;
 
 use Modern::Perl;
 use Moose;
 
-extends "Koha::Procurement::EditX::LibraryShipNotice::ItemDetail";
+extends "Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::EditX::LibraryShipNotice::ItemDetail";
 
 sub BUILD {
     my $self = shift;
-    $self->setItemObjectName('Koha::Procurement::EditX::LibraryShipNotice::ItemDetail::CopyDetail::Btj');
+    $self->setItemObjectName('Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::EditX::LibraryShipNotice::ItemDetail::CopyDetail::Btj');
 }
 
 sub getNotes{

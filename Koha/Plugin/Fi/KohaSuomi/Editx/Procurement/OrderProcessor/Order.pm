@@ -1,5 +1,5 @@
 #!/usr/bin/perl
-package Koha::Procurement::OrderProcessor::Order;
+package Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::OrderProcessor::Order;
 
 use Moose;
 use C4::Context;

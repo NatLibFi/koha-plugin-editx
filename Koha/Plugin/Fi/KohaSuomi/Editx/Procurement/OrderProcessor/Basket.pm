@@ -1,5 +1,5 @@
 #!/usr/bin/perl
-package Koha::Procurement::OrderProcessor::Basket;
+package Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::OrderProcessor::Basket;
 
 use Moose;
 use C4::Acquisition;

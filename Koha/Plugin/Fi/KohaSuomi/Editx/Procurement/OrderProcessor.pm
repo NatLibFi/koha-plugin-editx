@@ -23,7 +23,7 @@ use Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::EditX::LibraryShipNotice::M
 use Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Logger;
 use Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Config;
 
-use C4::KohaSuomi::FinnaMaterialType;
+use Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::FinnaMaterialType;
 use C4::Languages qw(getlanguage);
 
 has 'schema' => (
@@ -35,14 +35,14 @@ has 'schema' => (
 
 has 'logger' => (
     is      => 'rw',
-    isa => 'Koha::Procurement::Logger',
+    isa => 'Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Logger',
     reader => 'getLogger',
     writer => 'setLogger'
 );
 
 has 'config' => (
     is      => 'rw',
-    isa => 'Koha::Procurement::Config',
+    isa => 'Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Config',
     reader => 'getConfig',
     writer => 'setConfig'
 );
@@ -51,8 +51,8 @@ sub BUILD {
     my $self = shift;
     my $schema = Koha::Database->new()->schema();
     $self->setSchema($schema);
-    $self->setLogger(new Koha::Procurement::Logger);
-    $self->setConfig(new Koha::Procurement::Config);
+    $self->setLogger(new Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Logger);
+    $self->setConfig(new Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Config);
 }
 
 
@@ -81,8 +81,8 @@ sub rollBack{
 sub process{
     my $self = shift;
     my $order = $_[0];
-    my $orderCreator = Koha::Procurement::OrderProcessor::Order->new;
-    my $basketHelper = Koha::Procurement::OrderProcessor::Basket->new;
+    my $orderCreator = Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::OrderProcessor::Order->new;
+    my $basketHelper = Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::OrderProcessor::Basket->new;
     if(!$order){
         $self->getLogger()->logError("Order not set.");
         return 0;
@@ -300,7 +300,7 @@ sub createBiblio{
     my $result = 0;
     my $data = {};
 
-    if($itemDetail->isa('Koha::Procurement::EditX::LibraryShipNotice::ItemDetail') ){
+    if($itemDetail->isa('Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::EditX::LibraryShipNotice::ItemDetail') ){
         $data->{'author'} = $itemDetail->getAuthor();
         $data->{'title'} = $itemDetail->getTitle();
         $data->{'notes'} = $itemDetail->getNotes();
@@ -347,7 +347,7 @@ sub createBiblioItem{
     my ($copyDetail, $itemDetail, $order, $biblio) = @_;
     my (@result, $id);
     my $data = {};
-    if($itemDetail->isa('Koha::Procurement::EditX::LibraryShipNotice::ItemDetail') ){
+    if($itemDetail->isa('Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::EditX::LibraryShipNotice::ItemDetail') ){
         $data->{'biblio'} = $biblio;
         $data->{'productform'} = $self->getProductForm($itemDetail->getProductForm());
 
@@ -444,7 +444,7 @@ sub createBiblioMetadata {
     my $result = 0;
     my $data = {};
 
-    if($itemDetail->isa('Koha::Procurement::EditX::LibraryShipNotice::ItemDetail') ){
+    if($itemDetail->isa('Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::EditX::LibraryShipNotice::ItemDetail') ){
         $data->{'biblio'} = $biblio;
         my $marc = $copyDetail->getMarcXml();
         utf8::decode($marc);
@@ -485,7 +485,7 @@ sub createItem{
     my $data = {};
     my $fundnr = $copyDetail->getFundNumber();
 
-    if($itemDetail->isa('Koha::Procurement::EditX::LibraryShipNotice::ItemDetail') ){
+    if($itemDetail->isa('Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::EditX::LibraryShipNotice::ItemDetail') ){
         $data->{'booksellerid'} = $order->getSellerId();
         $data->{'destinationlocation'} = $copyDetail->getBranchCode();
         $data->{'price'} = $itemDetail->getPriceFixedRPExcludingTax();

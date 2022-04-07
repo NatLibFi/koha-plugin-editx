@@ -27,7 +27,7 @@ has 'year' => (
 
 has 'config' => (
     is      => 'rw',
-    isa => 'Koha::Procurement::Config',
+    isa => 'Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Config',
     reader => 'getConfig',
     writer => 'setConfig'
 );

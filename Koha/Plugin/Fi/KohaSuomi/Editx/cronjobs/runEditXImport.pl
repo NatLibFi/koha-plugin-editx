@@ -4,6 +4,7 @@ use Modern::Perl;
 use Try::Tiny;
 use Data::Dumper;
 
+use Koha::Plugins;
 use Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Config;
 use Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::EditX::Xml::Parser;
 use Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::EditX::Xml::ObjectFactory::LibraryShipNotice;
@@ -30,7 +31,7 @@ my $orderProcessor = new Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::OrderP
 $logger->log("Started Koha::Procurement",1);
 my $parser = new Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::EditX::Xml::Parser((
     'objectFactory', new Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::EditX::Xml::ObjectFactory::LibraryShipNotice((
-            'schemaPath','/home/koha/kohaclone/Koha/Procurement/EditX/XmlSchema/'
+            'schemaPath','/var/lib/koha/plugins/Koha/Plugin/Fi/KohaSuomi/Editx/Procurement/EditX/XmlSchema/'
         ))
     ));
 

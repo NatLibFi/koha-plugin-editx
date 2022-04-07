@@ -1,12 +1,12 @@
 #!/usr/bin/perl
-package Koha::Procurement::EditX::LibraryShipNotice::ItemDetail::CopyDetail::Booky;
+package Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::EditX::LibraryShipNotice::ItemDetail::CopyDetail::Booky;
 
 use Modern::Perl;
 use Moose;
 
 use Data::Dumper;
 
-extends "Koha::Procurement::EditX::LibraryShipNotice::ItemDetail::CopyDetail";
+extends "Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::EditX::LibraryShipNotice::ItemDetail::CopyDetail";
 
 sub getBookyString {
     my $self = shift;

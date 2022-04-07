@@ -1,5 +1,5 @@
 #!/usr/bin/perl
-package Koha::Procurement::EdiMessage;
+package Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::EdiMessage;
 
 use C4::Context;
 use Data::Dumper;

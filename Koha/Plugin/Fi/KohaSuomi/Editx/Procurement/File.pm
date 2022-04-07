@@ -17,12 +17,12 @@ use Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Config;
 
 has 'objectFactory' => (
     is      => 'rw',
-    isa => 'Koha::Procurement::EditX::Xml::ObjectFactory'
+    isa => 'Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::EditX::Xml::ObjectFactory'
 );
 
 has 'logger' => (
     is      => 'rw',
-    isa => 'Koha::Procurement::Logger',
+    isa => 'Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Logger',
     reader => 'getLogger',
     writer => 'setLogger',
 );
@@ -35,7 +35,7 @@ has 'edi_msg' => (
 
 has 'config' => (
     is      => 'rw',
-    isa => 'Koha::Procurement::Config',
+    isa => 'Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Config',
     reader => 'getConfig',
     writer => 'setConfig',
 );
@@ -70,9 +70,9 @@ my %filteredFileNamesHash;
 sub BUILD {
     my $self = shift;
     my ($tmpPath, $loadPath, $archivePath, $failPath);
-    $self->setLogger(new Koha::Procurement::Logger);
-    $self->setConfig(new Koha::Procurement::Config);
-    $self->setMsgUpdater(new Koha::Procurement::EdiMessage);
+    $self->setLogger(new Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Logger);
+    $self->setConfig(new Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Config);
+    $self->setMsgUpdater(new Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::EdiMessage);
     %filteredFileNamesHash = map { $_ => 1 } @filteredFileNames;
 
     my $settings = $self->getConfig()->getSettings();

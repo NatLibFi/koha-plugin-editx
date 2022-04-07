@@ -1,5 +1,5 @@
 #!/usr/bin/perl
-package Koha::Procurement::Config;
+package Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Config;
 
 use XML::Simple;
 use File::Basename;

@@ -1,5 +1,5 @@
 #!/usr/bin/perl
-package Koha::Procurement::EditX::LibraryShipNotice::MarcHelper;
+package Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::EditX::LibraryShipNotice::MarcHelper;
 
 use Modern::Perl;
 use Moose;

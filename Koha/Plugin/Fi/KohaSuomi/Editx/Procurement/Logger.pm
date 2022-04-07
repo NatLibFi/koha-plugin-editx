@@ -1,5 +1,5 @@
 #!/usr/bin/perl
-package Koha::Procurement::Logger;
+package Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Logger;
 
 use C4::Context;
 use Data::Dumper;
