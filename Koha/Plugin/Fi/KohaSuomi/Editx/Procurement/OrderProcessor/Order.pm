@@ -12,6 +12,8 @@ sub createOrder {
     my $price = $itemDetail->getPriceFixedRPExcludingTax();
     my $tax_price = $itemDetail->getPriceFixedRPIncludingTax();
     my $budgetId = $self->getBudgetId($copyDetail->getFundNumber());
+    
+    my $orderinfo;
 
     my %hash = (
         basketno => $basketNumber,
@@ -34,7 +36,8 @@ sub createOrder {
         currency => $itemDetail->getPriceSRPECurrency(),
         orderstatus => 'new'
         );
-    $order = Koha::Acquisition::Order->new( \%hash)->insert;
+    $order = Koha::Acquisition::Order->new( \%hash)->store;
+    #my $order = Koha::Acquisition::Order->new( \%orderinfo )->store;
     return $order->{ordernumber};
 }
 
@@ -44,7 +47,7 @@ sub createOrderItem
    my $itemnumber = shift;
    my $ordernumber = shift;
 
-   my $order = Koha::Acquisition::Order->fetch({ ordernumber => $ordernumber });
+   my $order = Koha::Acquisition::Order->find({ ordernumber => $ordernumber });
    $order->add_item( $itemnumber );
 }
 

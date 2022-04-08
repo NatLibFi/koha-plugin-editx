@@ -11,11 +11,12 @@ use Koha::Item;
 use Koha::Biblio;
 use Koha::Biblioitem;
 use Koha::Biblio::Metadata;
-use C4::Biblio;
+use C4::Biblio qw( GetMarcBiblio );
 use Koha::DateUtils;
 use C4::Barcodes::ValueBuilder;
 use utf8;
 use List::MoreUtils qw(uniq);
+use Data::Dumper;
 
 use Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::OrderProcessor::Order;
 use Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::OrderProcessor::Basket;
@@ -56,7 +57,7 @@ sub BUILD {
 }
 
 
-sub startProcessing{
+sub startProcessing {
     my $self = shift;
     my $dbh = C4::Context->dbh;
     my $schema = $self->getSchema();
@@ -64,21 +65,21 @@ sub startProcessing{
 }
 
 
-sub endProcessing{
+sub endProcessing {
     my $self = shift;
     my $dbh = C4::Context->dbh;
     $dbh->do('COMMIT');
 }
 
 
-sub rollBack{
+sub rollBack {
     my $self = shift;
     my $dbh = C4::Context->dbh;
     $dbh->do('ROLLBACK');
 }
 
 
-sub process{
+sub process {
     my $self = shift;
     my $order = $_[0];
     my $orderCreator = Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::OrderProcessor::Order->new;
@@ -96,6 +97,11 @@ sub process{
     my ($item, $copyDetail, $copyQty, $barCode, $biblio, $biblioitem, $isbn, $basketNumber, $bookseller, $itemId, $orderId);
     my $authoriser = $self->getAuthoriser();
     my $basketName = $order->getBasketName();
+    
+    $self->getLogger()->log("inside process!!!!!!!!!!"); 
+  
+        $self->getLogger()->log("getAuthoriser: " . $authoriser);
+        $self->getLogger()->log("getBasketName: " . $basketName);
 
     foreach(@$itemDetails){
         $item = $_;
@@ -108,6 +114,7 @@ sub process{
                 $bookseller = $self->getBookseller($order);
                 $basketNumber = $basketHelper->getBasket($bookseller, $authoriser, $basketName );
                 $orderId = $orderCreator->createOrder($copyDetail, $item, $order, $biblio, $basketNumber);
+                $self->getLogger()->log("createOrder orderId: " . $orderId);
                 for(my $i = 0; $copyQty > $i; $i++ ){
                     $itemId = $self->createItem($copyDetail, $item, $order, $barCode, $biblio, $biblioitem);
                     $orderCreator->createOrderItem($itemId, $orderId);
@@ -125,6 +132,11 @@ sub getBiblioDatas {
     my $self = shift;
     my ($copyDetail, $itemDetail, $order) = @_;
     my ($biblio, $biblioitem, $bibliometa);
+    
+    $self->getLogger()->log("inside getBiblioDatas!!!!!!!!!!"); 
+    $self->getLogger()->log("recv copyDetail: " . $copyDetail); 
+    $self->getLogger()->log("recv itemDetail: " . $itemDetail); 
+    $self->getLogger()->log("recv order: " . $order); 
 
     if($self->getConfig()->getUseAutomatchBiblios() ne 'no'){
         ($biblio, $biblioitem) = $self->getBiblioItemData($copyDetail, $itemDetail, $order);
@@ -132,6 +144,8 @@ sub getBiblioDatas {
     if( !$biblio && !$biblioitem ){
         my $prodform;
         $biblio = $self->createBiblio($copyDetail, $itemDetail, $order);
+        my $bibdetails = Data::Dumper::Dumper $biblio; 
+        $self->getLogger()->log("createBiblio biblio: " . $bibdetails);
         if ($self->getConfig()->getUseFinnaMaterials() eq 'yes') {
             $prodform = getFinnaMaterialType($copyDetail->getMarcData(), 'fi_FI');
         } else {
@@ -140,9 +154,31 @@ sub getBiblioDatas {
         $copyDetail->addMarc942($prodform);
         $copyDetail->fixMarcIsbn();
         ($biblioitem) = $self->createBiblioItem($copyDetail, $itemDetail, $order, $biblio);
+        my $bibitemdetails = Data::Dumper::Dumper $biblioitem; 
+        $self->getLogger()->log("createBiblioItem biblioitem: " . $bibitemdetails);
+        
         ($bibliometa) = $self->createBiblioMetadata($copyDetail, $itemDetail, $order, $biblio);
-
-        my $marcBiblio = GetMarcBiblio($biblio);
+        
+        my $bibmeta = Data::Dumper::Dumper $bibliometa;
+        $self->getLogger()->log("createBiblioMetadata bibliometa: " . $bibmeta);
+        #my $marcBiblio = GetMarcBiblio($biblio);
+       
+        
+        
+        my $marcBiblio;
+        # gives undef my $marcBiblio = C4::Biblio::GetMarcBiblio({ biblionumber => $biblio });
+        eval { $marcBiblio = GetMarcBiblio({ biblionumber => $biblio }); };
+        if ($@ || !$marcBiblio) {
+            # here we do warn since catching an exception
+            # means that the bib was found but failed
+            # to be parsed
+            $self->getLogger()->log($@);
+            $self->getLogger()->log("error retrieving biblio $biblio");
+            return;
+        }
+            
+        my $marcbibdetails = Data::Dumper::Dumper $marcBiblio; 
+        $self->getLogger()->log("marcbiblio: " . $marcbibdetails);
         if(! $marcBiblio){
            die('Getting marcbiblio failed.');
         }
@@ -294,7 +330,7 @@ sub getItemByColumns {
 }
 
 
-sub createBiblio{
+sub createBiblio {
     my $self = shift;
     my ($copyDetail, $itemDetail, $order) = @_;
     my $result = 0;
@@ -325,6 +361,8 @@ sub createBiblio{
             if(defined $data->{seriestitle} && $data->{seriestitle} ne ''){
                 $biblio->set({'seriestitle', $data->{seriestitle}});
             }
+            
+            
             $biblio->store() or die($DBI::errstr);
 
             if($biblio->id){
@@ -342,7 +380,7 @@ sub createBiblio{
 }
 
 
-sub createBiblioItem{
+sub createBiblioItem {
     my $self = shift;
     my ($copyDetail, $itemDetail, $order, $biblio) = @_;
     my (@result, $id);
@@ -458,7 +496,7 @@ sub createBiblioMetadata {
             $biblioMetadata->set({'biblionumber', $data->{'biblio'}});
             $biblioMetadata->set({'metadata', $data->{'marcxml'}});
             $biblioMetadata->set({'format', $data->{'format'}});
-            $biblioMetadata->set({'marcflavour', $data->{'marcflavour'}});
+            $biblioMetadata->set({'schema', $data->{'schema'}});
 
             $biblioMetadata->store() or die($DBI::errstr);
 
@@ -478,7 +516,7 @@ sub createBiblioMetadata {
 
 
 
-sub createItem{
+sub createItem {
     my $self = shift;
     my ($copyDetail, $itemDetail, $order, $barcode, $biblio, $biblioitem) = @_;
     my $result = 0;
@@ -579,7 +617,7 @@ sub updateAqbudgetLog {
 }
 
 
-sub getBookseller{
+sub getBookseller {
     my $self = shift;
     my ($order) = @_;
     my ($san, $qualifier, $bookseller) = (0, 91, 0);
@@ -680,7 +718,7 @@ sub getItemProductForm {
     }
 }
 
-sub validate{
+sub validate {
     my $self = shift;
     my $values = $_[0];
     my ($params, $data, $param);
@@ -705,7 +743,7 @@ sub validate{
     return $result;
 }
 
-sub getAuthoriser{
+sub getAuthoriser {
     my $self = shift;
     my $authoriser;
     my $settings = $self->getConfig()->getSettings();

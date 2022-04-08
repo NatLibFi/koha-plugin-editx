@@ -30,7 +30,17 @@ sub createBasket {
     my $basket = 0;
 
     if( defined $basketName && defined $authoriser && defined $bookseller ){
-        $basket = NewBasket(($bookseller, $authoriser, $basketName));
+        print "Createbasket: \n";
+        print $basketName;
+        print $authoriser;
+        print $bookseller;
+       #$basket = NewBasket(($bookseller, $authoriser, $basketName));
+        $basket = Koha::Acquisition::Basket->new({
+    basketname => $basketName,
+    authorisedby => $authoriser,
+    booksellerid => $bookseller,
+    is_standing => 0,
+});
         $baskets->{$basketName} = $basket;
     }
     return $basket;
@@ -56,7 +66,7 @@ sub closeBasket {
         $basket = $baskets->{$basketName};
 
         if(defined $basket){
-            CloseBasket($basket);
+            $basket->close;
             $self->unsetBasket($basketName);
         }
     }
