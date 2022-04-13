@@ -4,6 +4,8 @@ package Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::OrderProcessor::Basket;
 use Moose;
 use C4::Acquisition;
 use Data::Dumper;
+use Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Logger;
+
 my $baskets = {};
 
 sub getBasket {
@@ -30,18 +32,14 @@ sub createBasket {
     my $basket = 0;
 
     if( defined $basketName && defined $authoriser && defined $bookseller ){
-        print "Createbasket: \n";
-        print $basketName;
-        print $authoriser;
-        print $bookseller;
+
        #$basket = NewBasket(($bookseller, $authoriser, $basketName));
         $basket = Koha::Acquisition::Basket->new({
-    basketname => $basketName,
-    authorisedby => $authoriser,
-    booksellerid => $bookseller,
-    is_standing => 0,
-});
-        $baskets->{$basketName} = $basket;
+        basketname => $basketName,
+        authorisedby => $authoriser,
+        booksellerid => $bookseller
+})->store;
+        $baskets->{$basketName} = $basket->unblessed;
     }
     return $basket;
 }
