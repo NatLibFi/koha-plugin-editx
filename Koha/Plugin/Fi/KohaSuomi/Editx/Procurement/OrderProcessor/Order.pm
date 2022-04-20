@@ -74,7 +74,7 @@ sub createOrderItem
    my $ordernumber = shift;
 
    #my $order = Koha::Acquisition::Order->find({ ordernumber => $ordernumber });
-   my $order = Koha::Acquisition::Order->GetOrder({ ordernumber => $ordernumber });
+   my $order = Koha::Acquisition::Orders->find({ ordernumber => $ordernumber });
    $order->add_item( $itemnumber );
 }
 

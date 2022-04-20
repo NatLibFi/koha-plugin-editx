@@ -44,7 +44,7 @@ sub createBasket {
     return $basket;
 }
 
-sub unsetBasket{
+sub unsetBasket {
     my $self = shift;
     my $basketName = $_[0];
     my $result = 0;
@@ -61,10 +61,12 @@ sub closeBasket {
     my $result = 0;
     my $basket;
     if(defined $basketName && defined $baskets->{$basketName}){
+
         $basket = $baskets->{$basketName};
 
         if(defined $basket){
-            $basket->close;
+            Koha::Acquisition::Baskets->find( $basket )->close;
+            #$basket->close;
             $self->unsetBasket($basketName);
         }
     }

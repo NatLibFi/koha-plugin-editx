@@ -12,6 +12,7 @@ use Koha::Biblio;
 use Koha::Biblioitem;
 use Koha::Biblio::Metadata;
 use C4::Biblio;
+use C4::Biblio qw( GetFrameworkCode GetMarcBiblio ModBiblio ModZebra );
 use Koha::DateUtils;
 use C4::Barcodes::ValueBuilder;
 use utf8;
@@ -120,8 +121,13 @@ sub process {
                 $self->getLogger()->log("createOrder orderId: " . $orderId);
                 for(my $i = 0; $copyQty > $i; $i++ ){
                     $itemId = $self->createItem($copyDetail, $item, $order, $barCode, $biblio, $biblioitem);
+                    $self->getLogger()->log("createOrderItem params: " . $itemId . " - " . $orderId);
                     $orderCreator->createOrderItem($itemId, $orderId);
+                    
                 }
+                $self->getLogger()->log("createOrderItems done.");
+                $self->getLogger()->log("Adding bibliographic record $biblio to Zebra queue.");
+                
                 ModZebra( $biblio, "specialUpdate", "biblioserver" );
                 $self->updateAqbudgetLog($copyDetail, $item, $order, $biblio);
             }
@@ -150,8 +156,8 @@ sub getBiblioDatas {
     if( !$biblio && !$biblioitem ){
         my $prodform;
         $biblio = $self->createBiblio($copyDetail, $itemDetail, $order);
-        my $bibdetails = Data::Dumper::Dumper $biblio; 
-        $self->getLogger()->log("createBiblio returned biblionr. inside getBibliodatas: " . $bibdetails);
+        my $bibdetails = Data::Dumper::Dumper $biblio;
+        $self->getLogger()->log("createBiblio returned biblionr. inside getBibliodatas: " . $biblio);
         if ($self->getConfig()->getUseFinnaMaterials() eq 'yes') {
             $prodform = getFinnaMaterialType($copyDetail->getMarcData(), 'fi_FI');
         } else {
@@ -522,6 +528,8 @@ sub createBiblioItem {
             Koha::Exceptions::ObjectNotCreated->throw unless $biblioItem;
             
             my $biblioitemnumber = $biblioItem->biblioitemnumber;
+            
+            $self->getLogger()->log("createBiblioItem stored biblioitemnumber: ". $biblioItem->biblioitemnumber);
 
             # if($biblioItem->id){
             #     $id = $biblioItem->id;
@@ -588,15 +596,23 @@ sub createBiblioMetadata {
                     biblionumber        => $data->{biblio},
                     metadata         => $data->{marcxml},
                     format         => $data->{format},
-                    schema     => $data->{schema}
+                    schema     => $data->{marcflavour}
                 }
             );
+            
+            $self->getLogger()->log("createBiblioMetadata format: " . $biblioMetadata->format);
+            $self->getLogger()->log("createBiblioMetadata schema(old marcflavour): " . $biblioMetadata->schema);
             
             $biblioMetadata->store or die($DBI::errstr);
             
             my $biblioMetadataid = $biblioMetadata->biblionumber;
             
             $self->getLogger()->log("createBiblioMetadata store -> " . $biblioMetadata->biblionumber);
+            
+            my $dbh = C4::Context->dbh;
+    
+    
+    
             
             if($biblioMetadataid){
                 $result = $biblioMetadataid;
@@ -617,11 +633,15 @@ sub createBiblioMetadata {
 
 
 sub createItem {
+    
+    
     my $self = shift;
     my ($copyDetail, $itemDetail, $order, $barcode, $biblio, $biblioitem) = @_;
     my $result = 0;
     my $data = {};
     my $fundnr = $copyDetail->getFundNumber();
+    
+    $self->getLogger()->log("Inside createItem! ");
 
     if($itemDetail->isa('Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::EditX::LibraryShipNotice::ItemDetail') ){
         $data->{'booksellerid'} = $order->getSellerId();
@@ -708,6 +728,7 @@ sub createItem {
             )->store or die($DBI::errstr);  
             
             if($item->itemnumber){
+                $self->getLogger()->log("Created item: ". $item->itemnumber);
                 $result = $item->itemnumber;
             }
             else{
