@@ -12,7 +12,7 @@ use MARC::Record;
 use MARC::File::XML ( BinaryEncoding => 'utf8', RecordFormat => 'MARC21' );
 use MARC::Field;
 
-sub createRecord{
+sub createRecord {
      my $self = shift;
      my ($xmlString) = @_;
      my $record = MARC::Record->new_from_xml( $xmlString, 'UTF-8' );
@@ -60,7 +60,7 @@ sub fixMarcIsbn {
     return $marcrecord;
 }
 
-sub normalizeXmlNamespace{
+sub normalizeXmlNamespace {
     my $self = shift;
     my $documentXmlObject = $_[0];
     my $marcXml = $_[1];

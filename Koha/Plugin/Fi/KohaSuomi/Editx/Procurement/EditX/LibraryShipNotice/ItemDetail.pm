@@ -52,12 +52,12 @@ sub BUILD {
     $self->setItemObjectName('Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::EditX::LibraryShipNotice::ItemDetail::CopyDetail');
 }
 
-sub getLibraryShipNotice{
+sub getLibraryShipNotice {
    my $self = shift;
    return $self->getParent();
 }
 
-sub getCopydetails{
+sub getCopydetails {
     my $self = shift;
     my $xmlData = $self->getXmlData();
     my $parser = $self->getParser();
@@ -65,7 +65,7 @@ sub getCopydetails{
     return $xmlData->findnodes('CopyDetail', $parser);
 }
 
-sub addItem{
+sub addItem {
     my $self = shift;
     my $copyDetail = $_[0];
 
@@ -74,7 +74,7 @@ sub addItem{
     }
 }
 
-sub getAuthor{
+sub getAuthor {
     my $self = shift;
     my $xmlData = $self->getXmlData();
 
@@ -82,7 +82,7 @@ sub getAuthor{
     return $result;
 }
 
-sub getTitle{
+sub getTitle {
     my $self = shift;
     my $xmlData = $self->getXmlData();
 
@@ -90,11 +90,11 @@ sub getTitle{
     return $result;
 }
 
-sub getNotes{
+sub getNotes {
     return '';
 }
 
-sub getSeriesTitle{
+sub getSeriesTitle {
     my $self = shift;
     my $xmlData = $self->getXmlData();
 
@@ -102,7 +102,7 @@ sub getSeriesTitle{
     return $result;
 }
 
-sub getProductForm{
+sub getProductForm {
     my $self = shift;
     my $xmlData = $self->getXmlData();
 
@@ -110,14 +110,14 @@ sub getProductForm{
     return $result;
 }
 
-sub getSellerIdentifier{
+sub getSellerIdentifier {
     my $self = shift;
     my $xmlData = $self->getXmlData();
     my $result = $xmlData->find('ProductID[ProductIDType/text() = "Seller" ]/Identifier')->string_value;
     return $result;
 }
 
-sub getEanIdentifier{
+sub getEanIdentifier {
     my $self = shift;
     my $xmlData = $self->getXmlData();
 
@@ -125,7 +125,7 @@ sub getEanIdentifier{
     return $result;
 }
 
-sub getProductIdType{
+sub getProductIdType {
     return '';
 }
 

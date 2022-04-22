@@ -116,7 +116,7 @@ sub process {
                 $bookseller = $self->getBookseller($order);
                 $basketNumber = $basketHelper->getBasket($bookseller, $authoriser, $basketName );
                 
-                
+                $self->getLogger()->log("createOrder copyDetail: " . $copyDetail);
                 $orderId = $orderCreator->createOrder($copyDetail, $item, $order, $biblio, $basketNumber);
                 $self->getLogger()->log("createOrder orderId: " . $orderId);
                 for(my $i = 0; $copyQty > $i; $i++ ){
@@ -126,10 +126,12 @@ sub process {
                     
                 }
                 $self->getLogger()->log("createOrderItems done.");
+
+                $self->updateAqbudgetLog($copyDetail, $item, $order, $biblio);
+                
                 $self->getLogger()->log("Adding bibliographic record $biblio to Zebra queue.");
                 
                 ModZebra( $biblio, "specialUpdate", "biblioserver" );
-                $self->updateAqbudgetLog($copyDetail, $item, $order, $biblio);
             }
         }
     }

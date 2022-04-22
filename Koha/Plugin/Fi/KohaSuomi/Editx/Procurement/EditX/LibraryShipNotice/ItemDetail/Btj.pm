@@ -11,7 +11,7 @@ sub BUILD {
     $self->setItemObjectName('Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::EditX::LibraryShipNotice::ItemDetail::CopyDetail::Btj');
 }
 
-sub getNotes{
+sub getNotes {
      return 'BtjScr12';
 }
 

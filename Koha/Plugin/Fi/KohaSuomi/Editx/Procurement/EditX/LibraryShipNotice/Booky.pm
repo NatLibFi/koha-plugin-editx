@@ -12,7 +12,7 @@ sub BUILD {
     $self->setItemObjectName('Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::EditX::LibraryShipNotice::ItemDetail::Booky');
 }
 
-sub determineObjectClass{
+sub determineObjectClass {
      my $self = shift;
      my $xmlObject = $_[0];
      my $parser = $_[1];
