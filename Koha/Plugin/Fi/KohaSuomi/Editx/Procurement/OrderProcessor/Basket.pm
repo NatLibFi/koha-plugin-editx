@@ -33,7 +33,6 @@ sub createBasket {
 
     if( defined $basketName && defined $authoriser && defined $bookseller ){
 
-       #$basket = NewBasket(($bookseller, $authoriser, $basketName));
         $basket = Koha::Acquisition::Basket->new({
         basketname => $basketName,
         authorisedby => $authoriser,
@@ -66,7 +65,6 @@ sub closeBasket {
 
         if(defined $basket){
             Koha::Acquisition::Baskets->find( $basket )->close;
-            #$basket->close;
             $self->unsetBasket($basketName);
         }
     }

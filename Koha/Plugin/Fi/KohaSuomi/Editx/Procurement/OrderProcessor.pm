@@ -94,11 +94,9 @@ sub process {
     my ($item, $copyDetail, $copyQty, $barCode, $biblio, $biblioitem, $isbn, $basketNumber, $bookseller, $itemId, $orderId);
     my $authoriser = $self->getAuthoriser();
     my $basketName = $order->getBasketName();
-    
-    $self->getLogger()->log("inside process!!!!!!!!!!"); 
   
-        $self->getLogger()->log("getAuthoriser: " . $authoriser);
-        $self->getLogger()->log("getBasketName: " . $basketName);
+    $self->getLogger()->log("getAuthoriser: " . $authoriser);
+    $self->getLogger()->log("getBasketName: " . $basketName);
 
     foreach(@$itemDetails){
         $item = $_;
@@ -106,22 +104,20 @@ sub process {
         foreach(@$copyDetails){
             $copyDetail = $_;
             ($biblio, $biblioitem) = $self->getBiblioDatas($copyDetail, $item, $order);
-            $self->getLogger()->log("getBiblioDatas returned biblio: ". $biblio); 
+            $self->getLogger()->log("getBiblioDatas biblio: ". $biblio); 
             $copyQty = $copyDetail->getCopyQuantity();
             if($copyQty > 0){
                 $bookseller = $self->getBookseller($order);
                 $basketNumber = $basketHelper->getBasket($bookseller, $authoriser, $basketName );
                 
-                $self->getLogger()->log("createOrder copyDetail: " . $copyDetail);
                 $orderId = $orderCreator->createOrder($copyDetail, $item, $order, $biblio, $basketNumber);
                 $self->getLogger()->log("createOrder orderId: " . $orderId);
                 for(my $i = 0; $copyQty > $i; $i++ ){
                     $itemId = $self->createItem($copyDetail, $item, $order, $barCode, $biblio, $biblioitem);
-                    $self->getLogger()->log("createOrderItem params: " . $itemId . " - " . $orderId);
+
                     $orderCreator->createOrderItem($itemId, $orderId);
                     
                 }
-                $self->getLogger()->log("createOrderItems done.");
 
                 $self->updateAqbudgetLog($copyDetail, $item, $order, $biblio);
                 
@@ -150,7 +146,7 @@ sub getBiblioDatas {
         my $prodform;
         $biblio = $self->createBiblio($copyDetail, $itemDetail, $order);
         my $bibdetails = Data::Dumper::Dumper $biblio;
-        $self->getLogger()->log("createBiblio returned biblionr. inside getBibliodatas: " . $biblio);
+        
         if ($self->getConfig()->getUseFinnaMaterials() eq 'yes') {
             $prodform = getFinnaMaterialType($copyDetail->getMarcData(), 'fi_FI');
         } else {
@@ -160,12 +156,12 @@ sub getBiblioDatas {
         $copyDetail->fixMarcIsbn();
         ($biblioitem) = $self->createBiblioItem($copyDetail, $itemDetail, $order, $biblio);
         my $bibitemdetails = Data::Dumper::Dumper $biblioitem; 
-        $self->getLogger()->log("createBiblioItem returned biblioitem: " . $bibitemdetails);
+        $self->getLogger()->log("createBiblioItem biblioitem: " . $bibitemdetails);
         
         $bibliometa = $self->createBiblioMetadata($copyDetail, $itemDetail, $order, $biblio);
         
         my $bibmeta = Data::Dumper::Dumper $bibliometa;
-        $self->getLogger()->log("createBiblioMetadata returned bibliometa: " . $bibmeta);
+        $self->getLogger()->log("createBiblioMetadata bibliometa: " . $bibmeta);
 
         #my $marcBiblio = GetMarcBiblio($biblio);
         my $marcBiblio;
@@ -179,8 +175,6 @@ sub getBiblioDatas {
             $self->getLogger()->log("GetMarcBiblio error retrieving biblio $biblio");
         }
             
-        my $marcbibdetails = Data::Dumper::Dumper $marcBiblio; 
-        $self->getLogger()->log("marcbiblio: " . $marcbibdetails);
         if(! $marcBiblio){
            die('Getting marcbiblio failed.');
         }
@@ -188,7 +182,6 @@ sub getBiblioDatas {
            die('Modbiblio failed.');
         }
     }
-    $self->getLogger()->log("getBiblioDatas biblio to be returned: " . $biblio);
     
     return ($biblio, $biblioitem);
 }
@@ -336,8 +329,6 @@ sub createBiblio {
     my ($copyDetail, $itemDetail, $order) = @_;
     my $result = 0;
     my $data = {};
-    
-    $self->getLogger()->log("inside createbiblio");
 
     if($itemDetail->isa('Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::EditX::LibraryShipNotice::ItemDetail') ){
         $data->{'author'} = $itemDetail->getAuthor();
@@ -366,18 +357,16 @@ sub createBiblio {
             
             $biblio->store or die($DBI::errstr);
             
+            
+            
             Koha::Exceptions::ObjectNotCreated->throw unless $biblio;
             
-            my $biblionumberret = $biblio->biblionumber;
-            
-            $self->getLogger()->log("Createbiblio returned biblionumber:" . $biblionumberret);
-            
-            $result = $biblionumberret;
+            $result = $biblio->biblionumber;
             Koha::Exceptions::ObjectNotCreated->throw unless $result;
-            
+            $self->getLogger()->log("createBiblio stored biblionumber: ". $result);         
         }
         else{
-            die('Required params not set.');
+            die('createBiblio: Required params not set.');
         }
     }
     return $result;
@@ -388,8 +377,6 @@ sub createBiblioItem {
     my ($copyDetail, $itemDetail, $order, $biblio) = @_;
     my (@result, $id);
     my $data = {};
-    
-    $self->getLogger()->log("inside createbiblioItem");
     
     if($itemDetail->isa('Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::EditX::LibraryShipNotice::ItemDetail') ){
         $data->{'biblio'} = $biblio;
@@ -464,16 +451,11 @@ sub createBiblioItem {
     return @result;
 }
 
-sub createBiblioMetadata {
-    
+sub createBiblioMetadata {  
     my $self = shift;
     my ($copyDetail, $itemDetail, $order, $biblio) = @_;
     my $result = 0;
     my $data = {};
-    
-    $self->getLogger()->log("inside createBiblioMetadata");
-    $self->getLogger()->log("createBiblioMetadata receive params biblio:" );
-    $self->getLogger()->log($biblio );
 
     if($itemDetail->isa('Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::EditX::LibraryShipNotice::ItemDetail') ){
         $data->{'biblio'} = $biblio;
@@ -495,14 +477,11 @@ sub createBiblioMetadata {
                 }
             );
             
-            $self->getLogger()->log("createBiblioMetadata format: " . $biblioMetadata->format);
-            $self->getLogger()->log("createBiblioMetadata schema(old marcflavour): " . $biblioMetadata->schema);
-            
             $biblioMetadata->store or die($DBI::errstr);
             
             my $biblioMetadataid = $biblioMetadata->biblionumber;
             
-            $self->getLogger()->log("createBiblioMetadata store -> " . $biblioMetadata->biblionumber);
+            $self->getLogger()->log("createBiblioMetadata stored biblio metadata for biblio " . $biblioMetadata->biblionumber);
             
             my $dbh = C4::Context->dbh;
 
@@ -517,21 +496,17 @@ sub createBiblioMetadata {
             die('Required params not set.');
         }
     }
-    $self->getLogger()->log("createBiblioMetadata returns " . $result);
     return $result;
 }
 
 
 
-sub createItem {
-       
+sub createItem {    
     my $self = shift;
     my ($copyDetail, $itemDetail, $order, $barcode, $biblio, $biblioitem) = @_;
     my $result = 0;
     my $data = {};
     my $fundnr = $copyDetail->getFundNumber();
-    
-    $self->getLogger()->log("Inside createItem! ");
 
     if($itemDetail->isa('Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::EditX::LibraryShipNotice::ItemDetail') ){
         $data->{'booksellerid'} = $order->getSellerId();
@@ -592,13 +567,12 @@ sub createItem {
             )->store or die($DBI::errstr);  
             
             if($item->itemnumber){
-                $self->getLogger()->log("Created item: ". $item->itemnumber);
+                $self->getLogger()->log("createItem created item: ". $item->itemnumber);
                 $result = $item->itemnumber;
             }
             else{
                 die('Itemidnumber not set after db save.')
-            }  
-            
+            }        
         }
         else{
              die('Required params not set.');

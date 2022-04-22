@@ -15,32 +15,7 @@ sub createOrder {
     
     my $orderinfo;
 
-    # my %hash = (
-    #     basketno => $basketNumber,
-    #     biblionumber => $biblio,
-    #     title => $itemDetail->getTitle(),
-    #     quantity => $copyDetail->getCopyQuantity(),
-    #     order_vendornote => $order->getFileName(),
-    #     order_internalnote => $order->getFileName(),
-    #     rrp => $itemDetail->getPriceSRPIncludingTax(),
-    #     rrp_tax_excluded => $itemDetail->getPriceSRPExcludingTax(),
-    #     rrp_tax_included => $itemDetail->getPriceSRPIncludingTax(),
-    #     ecost => $price,
-    #     ecost_tax_excluded => $price,
-    #     ecost_tax_included => $tax_price,
-    #     unitprice => $price,
-    #     unitprice_tax_excluded => $price,
-    #     unitprice_tax_included => $tax_price,
-    #     listprice => $price,
-    #     budget_id => $budgetId,
-    #     currency => $itemDetail->getPriceSRPECurrency(),
-    #     orderstatus => 'new'
-    #     );
-    # $order = Koha::Acquisition::Order->new( \%hash)->store;
-    
-    #my $order = Koha::Acquisition::Order->new( \%orderinfo )->store;
-    
-            $order = Koha::Acquisition::Order->new(
+        $order = Koha::Acquisition::Order->new(
             {
                 basketno           => $basketNumber,
                 biblionumber       => $biblio,
@@ -63,7 +38,7 @@ sub createOrder {
                 orderstatus => 'new'
             }
         )->store;
-    #return $order->{ordernumber};
+
     return $order->ordernumber;
 }
 
@@ -73,7 +48,6 @@ sub createOrderItem
    my $itemnumber = shift;
    my $ordernumber = shift;
 
-   #my $order = Koha::Acquisition::Order->find({ ordernumber => $ordernumber });
    my $order = Koha::Acquisition::Orders->find({ ordernumber => $ordernumber });
    $order->add_item( $itemnumber );
 }
