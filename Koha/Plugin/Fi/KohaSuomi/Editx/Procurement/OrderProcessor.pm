@@ -57,7 +57,6 @@ sub BUILD {
     $self->setConfig(new Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Config);
 }
 
-
 sub startProcessing {
     my $self = shift;
     my $dbh = C4::Context->dbh;
@@ -65,13 +64,11 @@ sub startProcessing {
     $dbh->do('START TRANSACTION');
 }
 
-
 sub endProcessing {
     my $self = shift;
     my $dbh = C4::Context->dbh;
     $dbh->do('COMMIT');
 }
-
 
 sub rollBack {
     my $self = shift;
@@ -79,8 +76,7 @@ sub rollBack {
     $dbh->do('ROLLBACK');
 }
 
-
-sub process {
+sub process {   
     my $self = shift;
     my $order = $_[0];
     my $orderCreator = Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::OrderProcessor::Order->new;
@@ -138,8 +134,7 @@ sub process {
     $basketHelper->closeBasket($basketName);
 }
 
-
-sub getBiblioDatas {
+sub getBiblioDatas {   
     my $self = shift;
     my ($copyDetail, $itemDetail, $order) = @_;
     my ($biblio, $biblioitem, $bibliometa);
@@ -147,10 +142,6 @@ sub getBiblioDatas {
     my $copydetails = Data::Dumper::Dumper $copyDetail; 
     my $itemdetails = Data::Dumper::Dumper $itemDetail; 
     my $orderdetails = Data::Dumper::Dumper $order; 
-    $self->getLogger()->log("inside getBiblioDatas!!!!!!!!!!"); 
-    #$self->getLogger()->log("recv copyDetail: " . $copydetails); 
-    #$self->getLogger()->log("recv itemDetail: " . $itemdetails); 
-    #$self->getLogger()->log("recv order: " . $orderdetails); 
 
     if($self->getConfig()->getUseAutomatchBiblios() ne 'no'){
         ($biblio, $biblioitem) = $self->getBiblioItemData($copyDetail, $itemDetail, $order);
@@ -175,10 +166,8 @@ sub getBiblioDatas {
         
         my $bibmeta = Data::Dumper::Dumper $bibliometa;
         $self->getLogger()->log("createBiblioMetadata returned bibliometa: " . $bibmeta);
+
         #my $marcBiblio = GetMarcBiblio($biblio);
-       
-        
-        
         my $marcBiblio;
         # gives undef my $marcBiblio = C4::Biblio::GetMarcBiblio({ biblionumber => $biblio });
         eval { $marcBiblio = C4::Biblio::GetMarcBiblio({ biblionumber => $biblio }); };
@@ -204,8 +193,7 @@ sub getBiblioDatas {
     return ($biblio, $biblioitem);
 }
 
-
-sub getBiblioItemData {
+sub getBiblioItemData {  
     my $self = shift;
     my ($copyDetail, $itemDetail, $order) = @_;
     my (@isbns, $ean, $publishercode, $editionresponsibility, $rows, $row, @result);
@@ -240,8 +228,7 @@ sub getBiblioItemData {
     return @result;
 }
 
-
-sub getFundYear {
+sub getFundYear {  
     my $self = shift;
     my $budgetCode = $_[0];
     my $budgetperiodid = $_[1];
@@ -264,7 +251,7 @@ sub getFundYear {
      return $year;
 }
 
-sub generateBarcode {
+sub generateBarcode {   
     my ($self, $args, $autoBarcodeType) = @_;
 
     my $prefix = $args->{prefix} || undef;
@@ -283,7 +270,7 @@ sub generateBarcode {
     return $barcode;
 }
 
-sub advanceBarcodeValue {
+sub advanceBarcodeValue {  
     my ($self, $date, $prefixes) = @_;
     my $dbh = C4::Context->dbh;
 
@@ -305,8 +292,7 @@ sub advanceBarcodeValue {
     $stmnt->execute();
 }
 
-
-sub getBarcodeValue {
+sub getBarcodeValue {  
     my $self = shift;
 
     my $dbh = C4::Context->dbh;
@@ -318,7 +304,7 @@ sub getBarcodeValue {
     return $nextnum;
 }
 
-sub getItemsByIsbns {
+sub getItemsByIsbns {   
     my $self = shift;
     my @isbnArray = $_[0];
     my $resultSet = $self->getSchema()->resultset(Koha::Biblioitem->_type());
@@ -330,7 +316,7 @@ sub getItemsByIsbns {
     return $result;
 }
 
-sub getItemByColumns {
+sub getItemByColumns {   
     my $self = shift;
     my $columns = $_[0];
 
@@ -345,7 +331,7 @@ sub getItemByColumns {
 }
 
 
-sub createBiblio {
+sub createBiblio {    
     my $self = shift;
     my ($copyDetail, $itemDetail, $order) = @_;
     my $result = 0;
@@ -364,24 +350,7 @@ sub createBiblio {
 
         my @paramsToValidate = ('title', 'notes', 'timestamp', 'datecreated');
         if($self->validate({'params', \@paramsToValidate , 'data', $data })){
-            #my $biblio  = new Koha::Biblio;
-            #$biblio->set({'author', $data->{author}});
-            #$biblio->set({'title', $data->{title}});
-            #$biblio->set({'notes', $data->{notes}});
-            #$biblio->set({'timestamp', $data->{timestamp}});
-            #$biblio->set({'datecreated', $data->{datecreated}});
 
-            #if(defined $data->{copyrightdate} && $data->{copyrightdate} ne ''){
-            #    $biblio->set({'copyrightdate', $data->{copyrightdate}});
-            #}
-
-            #if(defined $data->{seriestitle} && $data->{seriestitle} ne ''){
-            #    $biblio->set({'seriestitle', $data->{seriestitle}});
-            #}
-            
-            #if(defined $data->{copyrightdate} && $data->{copyrightdate} ne ''){
-            #    $biblio->set({'copyrightdate', $data->{copyrightdate}});
-            #}
             my $biblio = Koha::Biblio->new(
                 {
                     author        => $data->{author},
@@ -401,13 +370,7 @@ sub createBiblio {
             
             my $biblionumberret = $biblio->biblionumber;
             
-            $self->getLogger()->log("Createbiblio returned biblionumber:" . $biblionumberret); 
-            #if($biblio->id){
-            #    $result = $biblio->id;
-            #}
-            #else{
-            #    die('Biblioid not set after db save.')
-            #}
+            $self->getLogger()->log("Createbiblio returned biblionumber:" . $biblionumberret);
             
             $result = $biblionumberret;
             Koha::Exceptions::ObjectNotCreated->throw unless $result;
@@ -420,8 +383,7 @@ sub createBiblio {
     return $result;
 }
 
-
-sub createBiblioItem {
+sub createBiblioItem {   
     my $self = shift;
     my ($copyDetail, $itemDetail, $order, $biblio) = @_;
     my (@result, $id);
@@ -458,53 +420,7 @@ sub createBiblioItem {
         my @identifierParams = ('publishercode', 'editionresponsibility');
         if($self->validate({'params', \@paramsToValidate , 'data', $data })
             #&& ($self->validate({'params', \@isbn , 'data', $data }) || $self->validate({'params', \@ean , 'data', $data }) || $self->validate({'params', \@identifierParams , 'data', $data }) )
-        ){
-
-            # my $biblioItem  = new Koha::Biblioitem;
-            # $biblioItem->set({'biblionumber', $data->{'biblio'}});
-            # $biblioItem->set({'itemtype', $data->{'productform'}});
-            # $biblioItem->set({'timestamp', $data->{'timestamp'}});
-            # $biblioItem->set({'notes', $data->{'notes'}});
-
-            # if(defined $data->{'isbn'} && $data->{'isbn'} ne ''){
-            #     $biblioItem->set({'isbn', $data->{'isbn'}});
-            # }
-
-            # if(defined $data->{'ean'} && $data->{'ean'} ne ''){
-            #     $biblioItem->set({'ean', $data->{'ean'}});
-            # }
-
-            # if(defined $data->{'yearofpublication'} && $data->{'yearofpublication'} ne ''){
-            #     $biblioItem->set({'publicationyear', $data->{'yearofpublication'}});
-            # }
-
-            # $biblioItem->set({'publishercode', $data->{'publishername'}});
-            # if(defined $data->{'publishercode'} && $data->{'publishercode'} ne ''){
-            #     $biblioItem->set({'publishercode', $data->{'publishercode'}});
-            # }
-
-            # if(defined $data->{'editionresponsibility'} && $data->{'editionresponsibility'} ne ''){
-            #     $biblioItem->set({'editionresponsibility', $data->{'editionresponsibility'}});
-            # }
-
-            # if(defined $data->{'editionstatement'} && $data->{'editionstatement'} ne ''){
-            #     $biblioItem->set({'editionstatement', $data->{'editionstatement'}});
-            # }
-
-            # if(defined $data->{'pages'} && $data->{'pages'} ne ''){
-            #     $biblioItem->set({'pages', $data->{'pages'}});
-            # }
-
-            # if(defined $data->{'place'} && $data->{'place'} ne ''){
-            #     $biblioItem->set({'place', $data->{'place'}});
-            # }
-
-            # if(defined $data->{'url'} && $data->{'url'} ne ''){
-            #     $biblioItem->set({'url', $data->{'url'}});
-            # }
-
-            # $biblioItem->store() or die($DBI::errstr);
-            
+        ){          
             my $biblioItem = Koha::Biblioitem->new(
                 {
                     biblionumber        => $data->{biblio},
@@ -533,22 +449,13 @@ sub createBiblioItem {
             
             $self->getLogger()->log("createBiblioItem stored biblioitemnumber: ". $biblioItem->biblioitemnumber);
 
-            # if($biblioItem->id){
-            #     $id = $biblioItem->id;
-            #     @result = ($id, $data->{'selleridentifier'});
-            # }
-            # else{
-            #     die('Biblioitemid not set after db save.')
-            # }
-            
             if($biblioitemnumber){
                 $id = $biblioitemnumber;
                 @result = ($id, $data->{'selleridentifier'});
             }
             else{
                 die('Biblioitemid not set after db save.')
-            }
-            
+            }   
         }
         else{
             die('Required params not set.');
@@ -558,6 +465,7 @@ sub createBiblioItem {
 }
 
 sub createBiblioMetadata {
+    
     my $self = shift;
     my ($copyDetail, $itemDetail, $order, $biblio) = @_;
     my $result = 0;
@@ -577,22 +485,7 @@ sub createBiblioMetadata {
 
         my @paramsToValidate = ('biblio', 'marcxml');
         if($self->validate({'params', \@paramsToValidate , 'data', $data })){
-            
-            # my $biblioMetadata = new Koha::Biblio::Metadata;
-            # $biblioMetadata->set({'biblionumber', $data->{'biblio'}});
-            # $biblioMetadata->set({'metadata', $data->{'marcxml'}});
-            # $biblioMetadata->set({'format', $data->{'format'}});
-            # $biblioMetadata->set({'schema', $data->{'schema'}});
-
-            # $biblioMetadata->store() or die($DBI::errstr);
-
-            # if($biblioMetadata->id){
-            #     $result = $biblioMetadata->id;
-            # }
-            # else{
-            #     die('Bibliometaid not set after db save.')
-            # }
-            
+        
             my $biblioMetadata = Koha::Biblio::Metadata->new(
                 {
                     biblionumber        => $data->{biblio},
@@ -612,17 +505,13 @@ sub createBiblioMetadata {
             $self->getLogger()->log("createBiblioMetadata store -> " . $biblioMetadata->biblionumber);
             
             my $dbh = C4::Context->dbh;
-    
-    
-    
-            
+
             if($biblioMetadataid){
                 $result = $biblioMetadataid;
             }
             else{
                 die('Bibliometaid not set after db save.')
-            }
-            
+            } 
         }
         else{
             die('Required params not set.');
@@ -635,8 +524,7 @@ sub createBiblioMetadata {
 
 
 sub createItem {
-    
-    
+       
     my $self = shift;
     my ($copyDetail, $itemDetail, $order, $barcode, $biblio, $biblioitem) = @_;
     my $result = 0;
@@ -682,32 +570,6 @@ sub createItem {
         my @paramsToValidate = ('biblio', 'biblioitem', 'booksellerid', 'destinationlocation', 'price', 'replacementprice', 'productform', 'notes', 'datecreated', 'collectioncode');
         if($self->validate({'params', \@paramsToValidate , 'data', $data })){
             
-            # my $item  = new Koha::Item;
-            # $item->set({'biblionumber', $data->{'biblio'}});
-            # $item->set({'biblioitemnumber', $data->{'biblioitem'}});
-            # $item->set({'booksellerid', $data->{'booksellerid'}});
-            # $item->set({'homebranch', $data->{'destinationlocation'}});
-            # $item->set({'replacementprice', $data->{'replacementprice'}});
-            # $item->set({'timestamp', $data->{'timestamp'}});
-            # $item->set({'itype', $data->{'productform'}});
-            # $item->set({'coded_location_qualifier', $data->{'notes'}});
-            # $item->set({'price', $data->{'price'}});
-            # $item->set({'dateaccessioned', $data->{'datecreated'}});
-            # $item->set({'barcode', $data->{'barcode'}});
-            # $item->set({'datelastseen', $data->{'datecreated'}});
-            # $item->set({'notforloan', -1});
-            # $item->set({'holdingbranch', $data->{'destinationlocation'}});
-            # $item->set({'location', $data->{'collectioncode'}});
-            # $item->set({'permanent_location', $data->{'collectioncode'}});
-
-            # $item->store() or die($DBI::errstr);
-
-            # if($item->id){
-            #     $result = $item->id;
-            # }
-            # else{
-            #     die('Itemid not set after db save.')
-            # }
         my $item = Koha::Item->new(
                 {
                     biblionumber        => $data->{'biblio'},
@@ -745,7 +607,6 @@ sub createItem {
     return $result;
 }
 
-
 sub updateAqbudgetLog {
     my $self = shift;
     my ($copyDetail, $itemDetail, $order, $biblio) = @_;
@@ -767,7 +628,6 @@ sub updateAqbudgetLog {
     my $stmnt = $dbh->prepare(qq{INSERT INTO aqbudgets_spend_log (monetary_amount,timestamp,origin,fund,account,itemtype,copy_quantity,total_amount,location,collection,biblionumber) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)});
     $stmnt->execute($monetaryamount,$timestamp,$tied,$fundnumber,$personname,$productform,$copyquantity,$totalAmount,$destinationlocation,$collectioncode,$biblio) or die($DBI::errstr);
 }
-
 
 sub getBookseller {
     my $self = shift;
@@ -796,7 +656,6 @@ sub getBookseller {
         }
         die();
     }
-
     return $bookseller;
 }
 
@@ -891,7 +750,6 @@ sub validate {
             $result = 0;
         }
     }
-
     return $result;
 }
 
