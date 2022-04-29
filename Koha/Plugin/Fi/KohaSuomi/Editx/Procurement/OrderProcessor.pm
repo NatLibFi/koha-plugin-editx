@@ -97,6 +97,8 @@ sub process {
   
     $self->getLogger()->log("getAuthoriser: " . $authoriser);
     $self->getLogger()->log("getBasketName: " . $basketName);
+    
+    my (@copydetailstoadd, @itemstoadd, @orderstoadd, @bibliostoadd);
 
     foreach(@$itemDetails){
         $item = $_;
@@ -118,15 +120,42 @@ sub process {
                     $orderCreator->createOrderItem($itemId, $orderId);
                     
                 }
+                
 
-                $self->updateAqbudgetLog($copyDetail, $item, $order, $biblio);
+                # $self->updateAqbudgetLog($copyDetail, $item, $order, $biblio);
+                        
+                # $self->getLogger()->log("Adding bibliographic record $biblio to Zebra queue.");
+                        
+                # ModZebra( $biblio, "specialUpdate", "biblioserver" );
+
+                push @copydetailstoadd, $copyDetail;
                 
-                $self->getLogger()->log("Adding bibliographic record $biblio to Zebra queue.");
+                push @itemstoadd, $item;
                 
-                ModZebra( $biblio, "specialUpdate", "biblioserver" );
+                push @orderstoadd, $order;
+                
+                push @bibliostoadd, $biblio;
+                
             }
         }
     }
+    
+    my $arr_size = @copydetailstoadd;
+    $self->getLogger()->log("Items to add to budgets + ModZebra: ". $arr_size);
+        
+    for(my $i = 0; $i <= $arr_size -1; $i++){
+        
+        $self->getLogger()->log("Updating aqbudgets ($arr_size items)...");
+        $self->updateAqbudgetLog($copydetailstoadd[$i], $itemstoadd[$i], $orderstoadd[$i], $bibliostoadd[$i]);
+        $self->getLogger()->log("Budget updated.");
+    }
+    
+    for(my $i = 0; $i <= $arr_size -1; $i++){
+        
+        ModZebra( $bibliostoadd[$i], "specialUpdate", "biblioserver" );
+        $self->getLogger()->log("Added bibliographic record $bibliostoadd[$i] to Zebra queue.");
+    }
+
     $basketHelper->closeBasket($basketName);
 }
 

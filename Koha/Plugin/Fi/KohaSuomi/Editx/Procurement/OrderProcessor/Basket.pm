@@ -3,6 +3,7 @@ package Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::OrderProcessor::Basket;
 
 use Moose;
 use C4::Acquisition;
+use C4::Acquisition qw( GetBasket ModBasket ModBasketHeader NewBasket );
 use Data::Dumper;
 use Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Logger;
 
@@ -32,16 +33,30 @@ sub createBasket {
     my $basket = 0;
 
     if( defined $basketName && defined $authoriser && defined $bookseller ){
-
-        $basket = Koha::Acquisition::Basket->new({
-        basketname => $basketName,
-        authorisedby => $authoriser,
-        booksellerid => $bookseller
-})->store;
-        $baskets->{$basketName} = $basket->unblessed;
+        $basket = NewBasket(($bookseller, $authoriser, $basketName));
+        $baskets->{$basketName} = $basket;
     }
     return $basket;
 }
+
+# sub createBasket {
+#     my $self = shift;
+#     my $bookseller = $_[0];
+#     my $authoriser = $_[1];
+#     my $basketName = $_[2];
+#     my $basket = 0;
+
+#     if( defined $basketName && defined $authoriser && defined $bookseller ){
+
+#         $basket = Koha::Acquisition::Basket->new({
+#         basketname => $basketName,
+#         authorisedby => $authoriser,
+#         booksellerid => $bookseller
+# })->store;
+#         $baskets->{$basketName} = $basket->unblessed;
+#     }
+#     return $basket;
+# }
 
 sub unsetBasket {
     my $self = shift;
