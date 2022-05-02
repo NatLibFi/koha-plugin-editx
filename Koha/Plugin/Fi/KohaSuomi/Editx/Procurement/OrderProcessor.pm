@@ -141,20 +141,22 @@ sub process {
     }
     
     my $arr_size = @copydetailstoadd;
-    $self->getLogger()->log("Items to add to budgets + ModZebra: ". $arr_size);
+    
+    $self->getLogger()->log("Updating aqbudgets ($arr_size items)...");
         
     for(my $i = 0; $i <= $arr_size -1; $i++){
-        
-        $self->getLogger()->log("Updating aqbudgets ($arr_size items)...");
+         
         $self->updateAqbudgetLog($copydetailstoadd[$i], $itemstoadd[$i], $orderstoadd[$i], $bibliostoadd[$i]);
-        $self->getLogger()->log("Budget updated.");
     }
     
-    for(my $i = 0; $i <= $arr_size -1; $i++){
-        
-        ModZebra( $bibliostoadd[$i], "specialUpdate", "biblioserver" );
-        $self->getLogger()->log("Added bibliographic record $bibliostoadd[$i] to Zebra queue.");
-    }
+    $self->getLogger()->log("Budgets updated.");
+    
+    #   by the words of Johanna's granny concerning her 2-bristled dishwasher brush: 'You never know when you might need to use it'
+    #for(my $i = 0; $i <= $arr_size -1; $i++){
+    #    
+    #    ModZebra( $bibliostoadd[$i], "specialUpdate", "biblioserver" );
+    #    $self->getLogger()->log("Added bibliographic record $bibliostoadd[$i] to Zebra queue.");
+    #}
 
     $basketHelper->closeBasket($basketName);
 }
