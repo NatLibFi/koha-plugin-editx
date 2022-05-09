@@ -29,6 +29,7 @@ sub createOrder {
                 ecost              => $price,
                 ecost_tax_excluded => $price,
                 ecost_tax_included => $tax_price,
+                replacementprice   => $price,
                 unitprice          => $price,
                 unitprice_tax_excluded => $price,
                 unitprice_tax_included => $tax_price,
