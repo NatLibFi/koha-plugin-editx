@@ -57,24 +57,25 @@ sub BUILD {
     $self->setConfig(new Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Config);
 }
 
-sub startProcessing {
-    my $self = shift;
-    my $dbh = C4::Context->dbh;
-    my $schema = $self->getSchema();
-    $dbh->do('START TRANSACTION');
-}
+# We are old and obsolete
+# sub startProcessing {
+#     my $self = shift;
+#     my $dbh = C4::Context->dbh;
+#     my $schema = $self->getSchema();
+#     $dbh->do('START TRANSACTION');
+# }
 
-sub endProcessing {
-    my $self = shift;
-    my $dbh = C4::Context->dbh;
-    $dbh->do('COMMIT');
-}
+# sub endProcessing {
+#     my $self = shift;
+#     my $dbh = C4::Context->dbh;
+#     $dbh->do('COMMIT');
+# }
 
-sub rollBack {
-    my $self = shift;
-    my $dbh = C4::Context->dbh;
-    $dbh->do('ROLLBACK');
-}
+# sub rollBack {
+#     my $self = shift;
+#     my $dbh = C4::Context->dbh;
+#     $dbh->do('ROLLBACK');
+# }
 
 sub process {   
     my $self = shift;
