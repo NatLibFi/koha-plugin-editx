@@ -70,7 +70,7 @@ sub writeToFile{
 
 sub getTimeStamp {
     my $self = shift;
-    return strftime("%Y-%m-%d %H.%M.%S", localtime);
+    return strftime("%Y-%m-%d %H:%M:%S", localtime);
 }
 
 1;

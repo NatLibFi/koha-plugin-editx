@@ -653,11 +653,11 @@ sub getBookseller {
 
     if(!$bookseller){
         if ($san) {
-            $self->getLogger()->logError("No vendor for SAN $san (qualifier $qualifier) in vendor_edi_accounts.");
+            $self->getLogger()->log("No vendor for SAN $san (qualifier $qualifier) in vendor_edi_accounts.");
             $self->getLogger()->log("No vendor for SAN $san (qualifier $qualifier) in vendor_edi_accounts.");
         }
         else {
-            $self->getLogger()->logError("No vendor in shipment notice.");
+            $self->getLogger()->log("No vendor in shipment notice.");
             $self->getLogger()->log("No vendor in shipment notice.");
         }
         die();
