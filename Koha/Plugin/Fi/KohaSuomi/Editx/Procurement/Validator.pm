@@ -107,15 +107,6 @@ sub validateEditx {
 
   }
 
-  foreach my $title ($xc->findnodes('LibraryShipNotice/ItemDetail/ItemDescription/CityOfPublication')) {
-    my $val = $title->to_literal();
-    if ($val eq "") {
-      $logger->logError($fileforlog . "CityOfPublication not present");
-      $errors++;
-    }
-
-  }
-
   foreach my $title ($xc->findnodes('LibraryShipNotice/ItemDetail/ItemDescription/YearOfPublication')) {
     my $val = $title->to_literal();
     if ($val eq "") {
