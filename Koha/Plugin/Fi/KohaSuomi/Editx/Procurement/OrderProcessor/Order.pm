@@ -10,7 +10,7 @@ sub createOrder {
     my $self = shift;
     my ($copyDetail, $itemDetail, $order, $biblio, $basketNumber) = @_;
     my $price = $itemDetail->getPriceFixedRPExcludingTax();
-    my $tax_price = $itemDetail->getPriceFixedRPIncludingTax();
+    my $tax_price = $itemDetail->getPriceFixedRPExcludingTax();
     my $budgetId = $self->getBudgetId($copyDetail->getFundNumber());
     
     my $orderinfo;
@@ -23,9 +23,9 @@ sub createOrder {
                 quantity           => $copyDetail->getCopyQuantity(),
                 order_vendornote   => $order->getFileName(),
                 order_internalnote => $order->getFileName(),     
-                rrp                => $itemDetail->getPriceSRPIncludingTax(),
-                rrp_tax_excluded   => $itemDetail->getPriceSRPExcludingTax(),
-                rrp_tax_included   => $itemDetail->getPriceSRPIncludingTax(),
+                rrp                => $price,
+                rrp_tax_excluded   => $price,
+                rrp_tax_included   => $price,
                 ecost              => $price,
                 ecost_tax_excluded => $price,
                 ecost_tax_included => $price,
