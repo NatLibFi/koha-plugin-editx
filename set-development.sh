@@ -1,15 +1,20 @@
 #!/bin/bash
+
 kohaplugindir="$(grep -Po '(?<=<pluginsdir>).*?(?=</pluginsdir>)' $KOHA_CONF)"
+kohadir="$(grep -Po '(?<=<intranetdir>).*?(?=</intranetdir>)' $KOHA_CONF)"
+
 rm -r $kohaplugindir/Koha/Plugin/Fi/KohaSuomi/Editx
 rm $kohaplugindir/Koha/Plugin/Fi/KohaSuomi/Editx.pm
-ln -s "/home/lmstrand/EditX-plugin//koha-plugin-editx/Koha/Plugin/Fi/KohaSuomi/Editx" $kohaplugindir/Koha/Plugin/Fi/KohaSuomi/Editx
-ln -s "/home/lmstrand/EditX-plugin//koha-plugin-editx/Koha/Plugin/Fi/KohaSuomi/Editx.pm" $kohaplugindir/Koha/Plugin/Fi/KohaSuomi/Editx.pm
-DATABASE=`xmlstarlet sel -t -v 'yazgfs/config/database' $KOHA_CONF`
-HOSTNAME=`xmlstarlet sel -t -v 'yazgfs/config/hostname' $KOHA_CONF`
-PORT=`xmlstarlet sel -t -v 'yazgfs/config/port' $KOHA_CONF`
-USER=`xmlstarlet sel -t -v 'yazgfs/config/user' $KOHA_CONF`
-PASS=`xmlstarlet sel -t -v 'yazgfs/config/pass' $KOHA_CONF`
-mysql --user=$USER --password="$PASS" --port=$PORT --host=$HOST $DATABASE << END
-DELETE FROM plugin_data where plugin_class = 'Koha::Plugin::Fi::KohaSuomi::Editx';
-INSERT INTO plugin_data (plugin_class,plugin_key,plugin_value) VALUES ('Koha::Plugin::Fi::KohaSuomi::Editx','__INSTALLED__','1');
-END
+
+SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+
+ln -s "$SCRIPT_DIR/Koha/Plugin/Fi/KohaSuomi/Editx" $kohaplugindir/Koha/Plugin/Fi/KohaSuomi/Editx
+ln -s "$SCRIPT_DIR/Koha/Plugin/Fi/KohaSuomi/Editx.pm" $kohaplugindir/Koha/Plugin/Fi/KohaSuomi/Editx.pm
+
+rm $kohadir/misc/cronjobs/generate_okm_annual_statistics.pl
+ln -s $kohaplugindir/Koha/Plugin/Fi/KohaSuomi/Editx/cronjobs/generate_okm_annual_statistics.pl $kohadir/misc/cronjobs/generate_okm_annual_statistics.pl
+
+rm $kohadir/misc/cronjobs/update_biblio_data_elements.pl
+ln -s $kohaplugindir/Koha/Plugin/Fi/KohaSuomi/Editx/cronjobs/update_biblio_data_elements.pl $kohadir/misc/cronjobs/update_biblio_data_elements.pl
+
+perl $kohadir/misc/devel/install_plugins.pl
