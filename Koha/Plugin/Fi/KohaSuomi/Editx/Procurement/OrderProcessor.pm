@@ -286,7 +286,7 @@ sub generateBarcode {
     my $barcode;
     my $nextnum = $self->getBarcodeValue();
 
-    if( ($autoBarcodeType eq 'hbyyyyincr' && $prefix) ){
+    if( ($autoBarcodeType eq 'preyyyymmincr' && $prefix) ){
         $barcode = $prefix.$date.$nextnum;
     } else {
         $barcode = "HANK_".$date.$nextnum;
