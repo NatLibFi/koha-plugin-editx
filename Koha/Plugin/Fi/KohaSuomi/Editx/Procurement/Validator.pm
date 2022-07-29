@@ -233,31 +233,75 @@ sub validateEditx {
 
   }
 
-  foreach my $title ($xc->findnodes('LibraryShipNotice/ItemDetail/CopyDetail/Message/MessageLine')) {
-    my $val = $title->to_literal();
+  foreach my $title ($xc->findnodes('LibraryShipNotice/ItemDetail/CopyDetail/Message/MessageType')) {
+    my $val = $title->string_value();
+
     if ($val eq "") {
-      $logger->logError($fileforlog . "MessageLine not present ");
+      $logger->logError($fileforlog . "MessageType not present");
       $errors++;
     }
-
+    elsif ($val ne "04" && $val ne "01") {
+      $logger->logError($fileforlog . "Wrong type of MessageType found: " .$val);
+      $errors++;
+    }
+    elsif ($val eq "01") {
+      $logger->log($fileforlog . "MessageType 01 found, passing xml test");
+    }
+    elsif ($val eq "04") {
+      $logger->log($fileforlog . "MessageType 04 present, testing MessageLine xml");
     #Do tests to marcxml
-    try {
-      my $marcxml = MARC::Record::new_from_xml($val, 'UTF-8');
-
-      my $test = $marcxml->subfield('245', 'a');
-
-      if ($test eq "") {
-        $logger->logError($fileforlog . "Marcxml test value (245a) null ");
+      my $messageLine      = $title->parentNode->find('MessageLine');
+      my $xml = $messageLine->string_value();
+      #my $xml = $messageLine->nodeValue;
+      
+      if ($xml eq "") {
+        $logger->logError($fileforlog . "MessageLine not present");
         $errors++;
       }
-    } catch {
-      $errors++;
-      $logger->logError($fileforlog . "MessageLine marcxml " . "$_");
-    };
+      
+      else {
+        
+        try {         
+          my $marcxml = MARC::Record::new_from_xml($xml, 'UTF-8');
 
-    #$logger->log( "245a: " . $test . "");
-
+          my $test = $marcxml->subfield('245', 'a');
+          $logger->log("245a: " . $test);
+        
+        } catch {
+          
+          $errors++;
+          $logger->logError($fileforlog . "MessageLine marcxml ". "$_");
+        };
+      }
+    }
   }
+  
+  # old version doesn't care about messagetype and tries to parse first occurence of messageline
+  # foreach my $title ($xc->findnodes('LibraryShipNotice/ItemDetail/CopyDetail/Message/MessageLine')) {
+  #   my $val = $title->to_literal();
+  #   if ($val eq "") {
+  #     $logger->logError($fileforlog . "MessageLine not present ");
+  #     $errors++;
+  #   }
+
+  #   #Do tests to marcxml
+  #   try {
+  #     my $marcxml = MARC::Record::new_from_xml($val, 'UTF-8');
+
+  #     my $test = $marcxml->subfield('245', 'a');
+
+  #     if ($test eq "") {
+  #       $logger->logError($fileforlog . "Marcxml test value (245a) null ");
+  #       $errors++;
+  #     }
+  #   } catch {
+  #     $errors++;
+  #     $logger->logError($fileforlog . "MessageLine marcxml " . "$_");
+  #   };
+
+  #   #$logger->log( "245a: " . $test . "");
+
+  # }
   
   foreach my $title ($xc->findnodes('LibraryShipNotice/Header/BuyerParty/PartyName/NameLine')) {
     my $val = $title->to_literal();
