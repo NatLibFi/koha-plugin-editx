@@ -378,5 +378,12 @@ sub fixMarcIsbn {
     $self->setMarcRecord($record);
 }
 
+sub fixMarc005 {
+    my $self = shift;
+    my $productForm = $_[0];
+    my $record = $self->getMarcHelper()->fixMarc005($self->getMarcData());
+    $self->setMarcRecord($record);
+}
+
 
 1;
