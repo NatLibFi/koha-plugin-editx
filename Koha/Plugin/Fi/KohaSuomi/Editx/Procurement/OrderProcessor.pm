@@ -186,6 +186,7 @@ sub getBiblioDatas {
         }
         $copyDetail->addMarc942($prodform);
         $copyDetail->fixMarcIsbn();
+        $copyDetail->fixMarc005();
         ($biblioitem) = $self->createBiblioItem($copyDetail, $itemDetail, $order, $biblio);
         my $bibitemdetails = Data::Dumper::Dumper $biblioitem; 
         $self->getLogger()->log("createBiblioItem biblioitem: " . $bibitemdetails);

@@ -60,6 +60,19 @@ sub fixMarcIsbn {
     return $marcrecord;
 }
 
+sub fixMarc005 {
+    my $self = shift;
+    my $marcrecord = $_[0];
+    my $f005 = $marcrecord->field('005');
+
+    if(!defined $f005){
+        my $time=POSIX::strftime("%Y%m%d%H%M%S",localtime);
+        $marcrecord->insert_fields_ordered( MARC::Field->new('005',$time.".0") );
+    }
+
+    return $marcrecord;
+}
+
 sub normalizeXmlNamespace {
     my $self = shift;
     my $documentXmlObject = $_[0];
