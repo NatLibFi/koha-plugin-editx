@@ -24,7 +24,7 @@ sub getPriceFixedRPExcludingTax {
 sub getPriceFixedRPIncludingTax {
     my $self = shift;
     my $xmlData = $self->getXmlData();
-    return $xmlData->find('PricingDetail/Price[PriceQualifierCode/text() = "FixedRPIncludingTax"]/MonetaryAmount')->string_value;
+    return $xmlData->find('PricingDetail/Price[PriceQualifierCode/text() = "FixedRPExcludingTax"]/MonetaryAmount')->string_value;
 }
 
 sub getPriceSRPExcludingTax {
@@ -36,7 +36,7 @@ sub getPriceSRPExcludingTax {
 sub getPriceSRPIncludingTax {
     my $self = shift;
     my $xmlData = $self->getXmlData();
-    return $xmlData->find('PricingDetail/Price[PriceQualifierCode/text() = "FixedRPIncludingTax"]/MonetaryAmount')->string_value;
+    return $xmlData->find('PricingDetail/Price[PriceQualifierCode/text() = "FixedRPExcludingTax"]/MonetaryAmount')->string_value;
 }
 
 sub getPriceSRPECurrency {
