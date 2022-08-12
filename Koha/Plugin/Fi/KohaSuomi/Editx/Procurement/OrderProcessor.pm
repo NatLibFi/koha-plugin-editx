@@ -545,7 +545,7 @@ sub createItem {
         $data->{'booksellerid'} = $order->getSellerId();
         $data->{'destinationlocation'} = $copyDetail->getBranchCode();
         $data->{'price'} = $itemDetail->getPriceFixedRPExcludingTax();
-        $data->{'replacementprice'} = $itemDetail->getPriceFixedRPExcludingTax();
+        $data->{'replacementprice'} = $data->{'price'};
         $data->{'timestamp'} = $order->getTimeStamp();
         $data->{'productform'} = $self->getItemProductForm($itemDetail->getProductForm(), $fundnr);
         $data->{'notes'} = $itemDetail->getNotes();
