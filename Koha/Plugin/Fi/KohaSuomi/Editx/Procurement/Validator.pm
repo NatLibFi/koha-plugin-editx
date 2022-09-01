@@ -66,10 +66,14 @@ sub validateEditx {
   $logger->log("\nValidating file: " . $filename);
   $logger->logError("\n-- Validating file " . $fileforlog);
 
+    my $parser;
+    my $doc;
+    my $xc;
+    
   try {
-    my $parser = XML::LibXML->new();
-    my $doc    = XML::LibXML->load_xml(location => $filename);
-    my $xc     = XML::LibXML::XPathContext->new($doc);
+    $parser = XML::LibXML->new();
+    $doc    = XML::LibXML->load_xml(location => $filename);
+    $xc     = XML::LibXML::XPathContext->new($doc);
 
   } catch {
 
