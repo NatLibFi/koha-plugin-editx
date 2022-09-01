@@ -29,10 +29,6 @@ sub validateEditx {
 
   my $fileforlog = basename($filename) . ": ";
 
-  my $parser = XML::LibXML->new();
-  my $doc    = XML::LibXML->load_xml(location => $filename);
-  my $xc     = XML::LibXML::XPathContext->new($doc);
-
   my $errors = 0;
 
   my $config   = new Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Config;
@@ -69,6 +65,19 @@ sub validateEditx {
 
   $logger->log("\nValidating file: " . $filename);
   $logger->logError("\n-- Validating file " . $fileforlog);
+
+  try {
+    my $parser = XML::LibXML->new();
+    my $doc    = XML::LibXML->load_xml(location => $filename);
+    my $xc     = XML::LibXML::XPathContext->new($doc);
+
+  } catch {
+
+    $errors++;
+    $logger->logError($fileforlog . "XML parser cannot parse the file. " . "$_");
+    die;
+  };
+
   
 
   foreach my $title ($xc->findnodes('LibraryShipNotice/ItemDetail/ProductID/Identifier')) {

@@ -60,6 +60,10 @@ test -z "$pending_files" && test -z "$failed_files" && exit 0 # Exit if nothing 
     printf "on tapahtunut virhe, tai siirto palvelimelle on edelleen kesken.\n\n"
 
     for file in $pending_files; do
+    
+      printf "Ote rajapinnan virhelokista ($log_path/editx/error.log):\n"
+      
+      sed -n "H; /^-- Validating file $(basename $file)/h; \${g;p;}" "$log_path/editx/error.log" | sed '1d' | grep "$(basename $file)"
 
       if test $(stat -c %Y "$file") -lt $(($(date +%s) - 604800)); then
         printf "Sanoma $file vanhentunut ja se -hylätään-. Arkistoidaan hakemistoon $failed_archived_path.\n"
