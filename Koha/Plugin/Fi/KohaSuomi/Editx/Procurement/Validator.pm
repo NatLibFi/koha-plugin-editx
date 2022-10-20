@@ -28,6 +28,8 @@ sub validateEditx {
   my $filename = shift;
 
   my $fileforlog = basename($filename) . ": ";
+  
+  my ($parser, $doc, $xc);
 
   my $errors = 0;
 
@@ -47,9 +49,9 @@ sub validateEditx {
 
   try {
 
-    $parser = XML::LibXML->new();
-    $doc    = XML::LibXML->load_xml(location => $filename);
-    $xc     = XML::LibXML::XPathContext->new($doc);
+    my $parser = XML::LibXML->new();
+    my $doc    = XML::LibXML->load_xml(location => $filename);
+    my $xc     = XML::LibXML::XPathContext->new($doc);
 
     my $node;
 
