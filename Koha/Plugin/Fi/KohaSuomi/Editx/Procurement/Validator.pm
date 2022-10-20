@@ -101,6 +101,11 @@ sub validateEditx {
     $logger->logError($fileforlog . "LibraryShipNotice/Header/BuyerParty/PartyName/NameLine not present");
     $errors++;
   }
+  else {
+    my $val   = $node->to_literal();
+    $logger->log("Buyerparty PartyName Nameline: " . $val);
+    
+  }
 
 # LibraryShipNotice/Header/SellerParty/PartyName/NameLine
 
@@ -113,6 +118,7 @@ sub validateEditx {
   } else {
 
     my $val   = $node->to_literal();
+    $logger->log("SellerParty PartyName Nameline: " . $val);
     my $valid = $val eq 'Kirjavälitys Oy' || $val eq 'Booky.fi Oy' || $val eq 'BTJ Finland Oy';
 
     if (not $valid) {
@@ -133,7 +139,9 @@ sub validateEditx {
   } else {
 
     my $val = $node->to_literal();
-    $buyeridentifier = $val;
+    $logger->log("PartyID Vendor Identifier: " . $val);
+    #why this way round?
+    $vendoridentifier = $val;
 
   }
 
@@ -149,7 +157,9 @@ sub validateEditx {
   } else {
 
     my $val = $node->to_literal();
-    $vendoridentifier = $val;
+    $logger->log("PartyID Buyer Identifier: " . $val);
+    #why this way round?
+    $buyeridentifier = $val;
 
   }
 
