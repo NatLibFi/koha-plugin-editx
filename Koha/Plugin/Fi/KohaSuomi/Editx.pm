@@ -7,7 +7,7 @@ use base qw(Koha::Plugins::Base);
 use C4::Context;
 use utf8;
 ## Here we set our plugin version
-our $VERSION = "1.0.0";
+our $VERSION = "1.0.1";
 ## Here is our metadata, some keys are required, some are optional
 our $metadata = {
     name            => 'EDItX-plugin',
