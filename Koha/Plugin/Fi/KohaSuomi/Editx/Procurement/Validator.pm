@@ -296,37 +296,37 @@ sub validateEditx {
     }
   }
 
-# LibraryShipNotice/ItemDetail/ItemDescription/PublisherName
+# # LibraryShipNotice/ItemDetail/ItemDescription/PublisherName
 
-  @nodes = $xc->findnodes('LibraryShipNotice/ItemDetail/ItemDescription/PublisherName');
-  if (!@nodes) {
-    $logger->logError($fileforlog . "PublisherName not present ");
-    $errors++;
-  } else {
-    foreach my $node (@nodes) {
+#   @nodes = $xc->findnodes('LibraryShipNotice/ItemDetail/ItemDescription/PublisherName');
+#   if (!@nodes) {
+#     $logger->logError($fileforlog . "PublisherName not present ");
+#     $errors++;
+#   } else {
+#     foreach my $node (@nodes) {
 
-      if ($node eq "" or $node->to_literal eq "") {
-        $logger->logError($fileforlog . "PublisherName not present ");
-        $errors++;
-      }
-    }
-  }
+#       if ($node eq "" or $node->to_literal eq "") {
+#         $logger->logError($fileforlog . "PublisherName not present ");
+#         $errors++;
+#       }
+#     }
+#   }
 
-# LibraryShipNotice/ItemDetail/ItemDescription/YearOfPublication
+# # LibraryShipNotice/ItemDetail/ItemDescription/YearOfPublication
 
-  @nodes = $xc->findnodes('LibraryShipNotice/ItemDetail/ItemDescription/YearOfPublication');
-  if (!@nodes) {
-    $logger->logError($fileforlog . "YearOfPublication not present ");
-    $errors++;
-  } else {
-    foreach my $node (@nodes) {
+#   @nodes = $xc->findnodes('LibraryShipNotice/ItemDetail/ItemDescription/YearOfPublication');
+#   if (!@nodes) {
+#     $logger->logError($fileforlog . "YearOfPublication not present ");
+#     $errors++;
+#   } else {
+#     foreach my $node (@nodes) {
 
-      if ($node eq "" or $node->to_literal eq "") {
-        $logger->logError($fileforlog . "YearOfPublication not present ");
-        $errors++;
-      }
-    }
-  }
+#       if ($node eq "" or $node->to_literal eq "") {
+#         $logger->logError($fileforlog . "YearOfPublication not present ");
+#         $errors++;
+#       }
+#     }
+#   }
 
 # LibraryShipNotice/ItemDetail/QuantityShipping
 
