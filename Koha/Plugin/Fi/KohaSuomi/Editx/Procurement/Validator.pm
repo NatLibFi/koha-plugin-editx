@@ -344,37 +344,37 @@ sub validateEditx {
     }
   }
 
-# LibraryShipNotice/ItemDetail/PricingDetail/Price/MonetaryAmount
+# # LibraryShipNotice/ItemDetail/PricingDetail/Price/MonetaryAmount
 
-  @nodes = $xc->findnodes('LibraryShipNotice/ItemDetail/PricingDetail/Price/MonetaryAmount');
-  if (!@nodes) {
-    $logger->logError($fileforlog . "MonetaryAmount not present ");
-    $errors++;
-  } else {
-    foreach my $node (@nodes) {
+#   @nodes = $xc->findnodes('LibraryShipNotice/ItemDetail/PricingDetail/Price/MonetaryAmount');
+#   if (!@nodes) {
+#     $logger->logError($fileforlog . "MonetaryAmount not present ");
+#     $errors++;
+#   } else {
+#     foreach my $node (@nodes) {
 
-      if ($node eq "" or $node->to_literal eq "") {
-        $logger->logError($fileforlog . "MonetaryAmount not present ");
-        $errors++;
-      }
-    }
-  }
+#       if ($node eq "" or $node->to_literal eq "") {
+#         $logger->logError($fileforlog . "MonetaryAmount not present ");
+#         $errors++;
+#       }
+#     }
+#   }
 
-# LibraryShipNotice/ItemDetail/PricingDetail/Price/PriceQualifierCode
+# # LibraryShipNotice/ItemDetail/PricingDetail/Price/PriceQualifierCode
 
-  @nodes = $xc->findnodes('LibraryShipNotice/ItemDetail/PricingDetail/Price/PriceQualifierCode');
-  if (!@nodes) {
-    $logger->logError($fileforlog . "PriceQualifierCode not present ");
-    $errors++;
-  } else {
-    foreach my $node (@nodes) {
+#   @nodes = $xc->findnodes('LibraryShipNotice/ItemDetail/PricingDetail/Price/PriceQualifierCode');
+#   if (!@nodes) {
+#     $logger->logError($fileforlog . "PriceQualifierCode not present ");
+#     $errors++;
+#   } else {
+#     foreach my $node (@nodes) {
 
-      if ($node eq "" or $node->to_literal eq "") {
-        $logger->logError($fileforlog . "PriceQualifierCode not present ");
-        $errors++;
-      }
-    }
-  }
+#       if ($node eq "" or $node->to_literal eq "") {
+#         $logger->logError($fileforlog . "PriceQualifierCode not present ");
+#         $errors++;
+#       }
+#     }
+#   }
 
 # LibraryShipNotice/ItemDetail/PricingDetail/Price/Tax/TaxTypeCode
 
@@ -488,21 +488,21 @@ sub validateEditx {
     }
   }
 
-# LibraryShipNotice/ItemDetail/CopyDetail/CopyValue/MonetaryAmount
+# # LibraryShipNotice/ItemDetail/CopyDetail/CopyValue/MonetaryAmount
 
-  @nodes = $xc->findnodes('LibraryShipNotice/ItemDetail/CopyDetail/CopyValue/MonetaryAmount');
-  if (!@nodes) {
-    $logger->logError($fileforlog . "CopyValue MonetaryAmount not present ");
-    $errors++;
-  } else {
-    foreach my $node (@nodes) {
+#   @nodes = $xc->findnodes('LibraryShipNotice/ItemDetail/CopyDetail/CopyValue/MonetaryAmount');
+#   if (!@nodes) {
+#     $logger->logError($fileforlog . "CopyValue MonetaryAmount not present ");
+#     $errors++;
+#   } else {
+#     foreach my $node (@nodes) {
 
-      if ($node eq "" or $node->to_literal eq "") {
-        $logger->logError($fileforlog . "CopyValue MonetaryAmount not present ");
-        $errors++;
-      }
-    }
-  }
+#       if ($node eq "" or $node->to_literal eq "") {
+#         $logger->logError($fileforlog . "CopyValue MonetaryAmount not present ");
+#         $errors++;
+#       }
+#     }
+#   }
 
 # LibraryShipNotice/ItemDetail/CopyDetail/FundDetail/MonetaryAmount
 
