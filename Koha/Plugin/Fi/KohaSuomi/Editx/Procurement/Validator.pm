@@ -49,6 +49,8 @@ sub validateEditx {
   $logger->logError("\n-- Validating file " . $fileforlog);
 
   try {
+    
+    system("xmllint --noout $filename");
 
     $parser = XML::LibXML->new();
     $doc    = XML::LibXML->load_xml(location => $filename);
