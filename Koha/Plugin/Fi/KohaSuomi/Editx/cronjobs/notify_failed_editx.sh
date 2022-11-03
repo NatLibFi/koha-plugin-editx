@@ -88,7 +88,7 @@ test -z "$pending_files" && test -z "$failed_files" && exit 0 # Exit if nothing 
       
       printf "Ote rajapinnan virhelokista ($log_path/editx/error.log):\n"
       
-      sed -n "H; /^-- Validating file $(basename $file)/h; \${g;p;}" "$log_path/editx/error.log" | sed '1d' | grep "$(basename $file)"
+      sed -n "H; /^-- Validating file $(basename $file)/h; \${g;p;}" "$log_path/editx/error.log" | sed '1d' | grep --text "$(basename $file)"
       
       unset affected_locations
       for location in $($xmllint --xpath "*/ItemDetail/CopyDetail/DeliverToLocation" $file | sed 's/<\/*DeliverToLocation\/*>/\n/ig' | sort -u); do
