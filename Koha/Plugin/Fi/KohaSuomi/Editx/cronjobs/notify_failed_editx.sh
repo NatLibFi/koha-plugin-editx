@@ -125,6 +125,24 @@ test -z "$pending_files" && test -z "$failed_files" && exit 0 # Exit if nothing 
 
 ) | $mailer $mailfrom -s "EDItX tilaussanomien käsittelyssä oli ongelmia" $mailto
 
+# Get EDItX errors related to Elasticsearch and send emails
+result=$( grep "$(date +"%Y-%m-%d")" "$log_path/editx/error.log" | grep -B 1 "Elasticsearch" )
+
+if [ -n "$result" ]; then
+
+(
+  printf "$timestamp"
+
+  printf "\nSeuraavat EDItX sanomat on saatettu käsitellä tuplasti (Elasticsearch-virhe):\n\n"
+  printf '%s\n' "$result"
+    
+  printf "\n"
+  printf "Katso lisätietoja EDItX rajapinnan parametroinnista ja tyypillisten virhetilanteiden korjaamisesta:\n"
+  printf "https://tiketti.koha-suomi.fi/projects/koha-suomen-dokumentaatio/wiki/EditX-hankinta#43-Erilaisia-virhetilanteita\n"
+
+) | $mailer $mailfrom -s "EDItX tilaussanomien käsittelyssä oli ongelmia (Elasticsearch)" $mailto
+fi
+
 #All done, exit gracefully
 
 
