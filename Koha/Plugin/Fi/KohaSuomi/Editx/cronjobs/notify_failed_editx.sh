@@ -40,21 +40,33 @@ test -n "$failed_path" || die "No path to failed EDItX messages in $config_file.
 test -n "$failed_archived_path" || die "No path to failed_archived EDItX messages in $config_file."
 test -n "$log_path" || die "No path to logs in $KOHA_CONF."
 
+# Get EDItX errors related to Elasticsearch and send emails
+
+export result=$( grep -B 1 "Elasticsearch" "$log_path/editx/error.log" )
+if test -n "$result"; then
+  (
+
+    printf "\nSeuraavat EDItX sanomat on saatettu käsitellä tuplasti (Elasticsearch-virhe):\n\n"
+    printf "$result\n"
+    
+    printf "\n"
+    printf "Katso lisätietoja EDItX rajapinnan parametroinnista ja tyypillisten virhetilanteiden korjaamisesta:\n"
+    printf "https://tiketti.koha-suomi.fi/projects/koha-suomen-dokumentaatio/wiki/EditX-hankinta#43-Erilaisia-virhetilanteita\n"
+  ) | $mailer $mailfrom -s "EDItX tilaussanomien käsittelyssä oli ongelmia (Elasticsearch)" $mailto
+fi
+
 # Get postponed and failed EDItX notices and send emails
 
 export pending_files="$(ls -1 $tmp_path/*.xml 2> /dev/null)"
 export failed_files="$(ls -1 $failed_path/*.xml 2> /dev/null)"
-timestamp=$(date +"%Y-%m-%d %T")
 
 test -z "$pending_files" && test -z "$failed_files" && exit 0 # Exit if nothing to report
 
 (
 
   if test -n "$pending_files"; then
-  
-  printf "$timestamp"
 
-  printf "\nSeuraavat EDItX sanomat odottavat edelleen käsittelyä:\n\n"
+    printf "\nSeuraavat EDItX sanomat odottavat edelleen käsittelyä:\n\n"
 
     printf "Sanomien muodostamisessa aineistontoimittajan järjestelmässä tai niiden siirrossa Koha-palvelimelle\n"
     printf "on tapahtunut virhe, tai siirto palvelimelle on edelleen kesken.\n\n"
@@ -124,24 +136,6 @@ test -z "$pending_files" && test -z "$failed_files" && exit 0 # Exit if nothing 
   printf "https://tiketti.koha-suomi.fi/projects/koha-suomen-dokumentaatio/wiki/EditX-hankinta#43-Erilaisia-virhetilanteita\n"
 
 ) | $mailer $mailfrom -s "EDItX tilaussanomien käsittelyssä oli ongelmia" $mailto
-
-# Get EDItX errors related to Elasticsearch and send emails
-result=$( grep "$(date +"%Y-%m-%d")" "$log_path/editx/error.log" | grep -B 1 "Elasticsearch" )
-
-if [ -n "$result" ]; then
-
-(
-  printf "$timestamp"
-
-  printf "\nSeuraavat EDItX sanomat on saatettu käsitellä tuplasti (Elasticsearch-virhe):\n\n"
-  printf '%s\n' "$result"
-    
-  printf "\n"
-  printf "Katso lisätietoja EDItX rajapinnan parametroinnista ja tyypillisten virhetilanteiden korjaamisesta:\n"
-  printf "https://tiketti.koha-suomi.fi/projects/koha-suomen-dokumentaatio/wiki/EditX-hankinta#43-Erilaisia-virhetilanteita\n"
-
-) | $mailer $mailfrom -s "EDItX tilaussanomien käsittelyssä oli ongelmia (Elasticsearch)" $mailto
-fi
 
 #All done, exit gracefully
 
