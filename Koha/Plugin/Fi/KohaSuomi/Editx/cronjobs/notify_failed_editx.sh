@@ -16,8 +16,8 @@ die() { printf "$@\n" ; exit 1 ; }
 export xmllint="$(which xmllint)"
 test -n "$xmllint" || die "No xmllint, apt install libxml2-utils."
 
-#mailer="$(which mail)"
-#test -n "$mailer" || die "No mail, apt install heirloom-mailx."
+mailer="$(which mail)"
+test -n "$mailer" || die "No mail, apt install heirloom-mailx."
 
 test -e "$KOHA_CONF" || die "No KOHA_CONF."
 
@@ -138,5 +138,3 @@ test -z "$pending_files" && test -z "$failed_files" && exit 0 # Exit if nothing 
 ) | $mailer $mailfrom -s "EDItX tilaussanomien käsittelyssä oli ongelmia" $mailto
 
 #All done, exit gracefully
-
-
