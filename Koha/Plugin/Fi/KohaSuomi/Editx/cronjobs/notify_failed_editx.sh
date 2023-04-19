@@ -42,7 +42,7 @@ test -n "$log_path" || die "No path to logs in $KOHA_CONF."
 
 # Get EDItX errors related to Elasticsearch and send emails
 
-export result=$( grep -B 1 "Elasticsearch" "$log_path/editx/error.log" )
+export result="$( grep -B 1 Elasticsearch $log_path/editx/error.log)"
 if test -n "$result"; then
   (
 
