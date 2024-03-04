@@ -38,19 +38,75 @@ sub new {
 ## or false if it failed.
 sub install() {
     my ( $self, $args ) = @_;
-    return 1;
+
+
+    my $success = 1;
+
+    # my $table_sequences = $self->get_qualified_table_name('sequences');
+        # CREATE TABLE IF NOT EXISTS `$table_sequences` (
+    $success &&= C4::Context->dbh->do( "
+        CREATE TABLE IF NOT EXISTS `editx_sequences` (
+          `invoicenumber` int(11) NOT NULL,
+          `item_barcode_nextval` int(11) NOT NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    " );
+
+    # my $table_map_productform = $self->get_qualified_table_name('map_productform');
+        # CREATE TABLE `$table_map_productform` (
+    $success &&= C4::Context->dbh->do( "
+        CREATE TABLE IF NOT EXISTS `editx_map_productform` (
+          `onix_code` varchar(10) NOT NULL,
+          `productform` varchar(10) NOT NULL,
+          `productform_alternative` varchar(10) NOT NULL,
+          PRIMARY KEY (`onix_code`),
+          KEY `fk_productform_itemtypes` (`productform`),
+          KEY `fk_productformalt_itemtypes` (`productform_alternative`),
+          CONSTRAINT `fk_productform_itemtypes` FOREIGN KEY (`productform`) REFERENCES `itemtypes` (`itemtype`),
+          CONSTRAINT `fk_productformalt_itemtypes` FOREIGN KEY (`productform_alternative`) REFERENCES `itemtypes` (`itemtype`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    " );
+
+    return $success;
 }
+
 ## This is the 'upgrade' method. It will be triggered when a newer version of a
 ## plugin is installed over an existing older version of a plugin
 sub upgrade {
     my ( $self, $args ) = @_;
-    return 1;
+
+    my $dt = dt_from_string();
+    $self->store_data( { last_upgraded => $dt->ymd('-') . ' ' . $dt->hms(':') } );
+
+    my $success = 1;
+
+    if ( !C4::Context->dbh->do("SHOW TABLES LIKE 'sequences'") ) {
+        # rename table 'sequences' to 'editx_sequences'
+        $success &&= C4::Context->dbh->do("RENAME TABLE `sequences` TO `editx_sequences`");
+    }
+
+    if ( !C4::Context->dbh->do("SHOW TABLES LIKE 'map_productform'") ) {
+        # rename table 'map_productform' to 'editx_map_productform'
+        $success &&= C4::Context->dbh->do("RENAME TABLE `map_productform` TO `editx_map_productform`");
+    }
+
+    return $success;
 }
 ## This method will be run just before the plugin files are deleted
 ## when a plugin is uninstalled. It is good practice to clean up
 ## after ourselves!
 sub uninstall() {
     my ( $self, $args ) = @_;
-    return 1;
+
+    # my $table_sequences = $self->get_qualified_table_name('sequences');
+    # my $table_map_productform = $self->get_qualified_table_name('map_productform');
+        # DROP TABLE IF EXISTS `$table_sequences` (
+
+    my $success = 1;
+
+    $success &&= C4::Context->dbh->do("DROP TABLE IF EXISTS `editx_sequences`");
+    $success &&= C4::Context->dbh->do("DROP TABLE IF EXISTS `editx_map_productform`");
+
+    return $success;
 }
+
 1;

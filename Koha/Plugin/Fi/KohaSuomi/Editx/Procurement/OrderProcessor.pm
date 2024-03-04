@@ -299,14 +299,14 @@ sub advanceBarcodeValue {
     my $regex = sprintf "%s$date|" x @$prefixes, @$prefixes;
     $regex .= "HANK_$date";
 
-    my $update_query = "UPDATE sequences set item_barcode_nextval = item_barcode_nextval+1";
-    my $query = 'SELECT MAX(CAST(SUBSTRING(barcode,-5) AS signed)) from items where barcode REGEXP "'.$regex.'"';
+    my $update_query = "UPDATE editx_sequences SET item_barcode_nextval = item_barcode_nextval+1";
+    my $query = 'SELECT MAX(CAST(SUBSTRING(barcode,-5) AS signed)) FROM items WHERE barcode REGEXP "'.$regex.'"';
     my $stmnt = $dbh->prepare($query);
     $stmnt->execute();
 
     while (my ($count)= $stmnt->fetchrow_array) {
         if(!$count || $count == 9999){
-            $update_query = "UPDATE sequences set item_barcode_nextval = 1";
+            $update_query = "UPDATE editx_sequences SET item_barcode_nextval = 1";
         }
     }
 
@@ -318,7 +318,7 @@ sub getBarcodeValue {
     my $self = shift;
 
     my $dbh = C4::Context->dbh;
-    my $stmnt = $dbh->prepare("SELECT max(item_barcode_nextval) from sequences");
+    my $stmnt = $dbh->prepare("SELECT max(item_barcode_nextval) FROM editx_sequences");
     $stmnt->execute();
 
     my $nextnum = sprintf("%0*d", "5",$stmnt->fetchrow_array());
@@ -668,7 +668,7 @@ sub getProductForm {
 
     if($productForm){       
         my $dbh = C4::Context->dbh;
-        my $stmnt = $dbh->prepare("SELECT max(productform) from map_productform where onix_code = ?");
+        my $stmnt = $dbh->prepare("SELECT max(productform) from editx_map_productform where onix_code = ?");
         $stmnt->execute($productForm) or die($DBI::errstr);
         $result = $stmnt->fetchrow_array();
     }
@@ -689,7 +689,7 @@ sub getItemProductForm {
     if($productForm){
 
         my $dbh = C4::Context->dbh;
-        my $stmnt = $dbh->prepare("SELECT productform_alternative from map_productform where onix_code = ?");
+        my $stmnt = $dbh->prepare("SELECT productform_alternative from editx_map_productform where onix_code = ?");
         $stmnt->execute($productForm) or die($DBI::errstr);
         $result = $stmnt->fetchrow_array();
 
@@ -711,7 +711,7 @@ sub getItemProductForm {
             }
         }
 
-        $stmnt = $dbh->prepare("SELECT productform from map_productform where onix_code = ?");
+        $stmnt = $dbh->prepare("SELECT productform from editx_map_productform where onix_code = ?");
         $stmnt->execute($productForm) or die($DBI::errstr);
         $result = $stmnt->fetchrow_array();
 
