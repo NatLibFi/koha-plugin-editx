@@ -12,7 +12,6 @@ use Koha::Biblio;
 use Koha::Biblioitem;
 use Koha::Biblio::Metadata;
 use C4::Biblio;
-use C4::Biblio qw( GetFrameworkCode ModBiblio ModZebra );
 use Koha::DateUtils;
 use C4::Barcodes::ValueBuilder;
 use utf8;
@@ -128,7 +127,7 @@ sub process {
                         
                 # $self->getLogger()->log("Adding bibliographic record $biblio to Zebra queue.");
                         
-                # ModZebra( $biblio, "specialUpdate", "biblioserver" );
+                # C4::Biblio::ModZebra( $biblio, "specialUpdate", "biblioserver" );
 
                 push @copydetailstoadd, $copyDetail;
                 
@@ -156,7 +155,7 @@ sub process {
     #   by the words of Johanna's granny concerning her 2-bristled dishwasher brush: 'You never know when you might need to use it'
     #for(my $i = 0; $i <= $arr_size -1; $i++){
     #    
-    #    ModZebra( $bibliostoadd[$i], "specialUpdate", "biblioserver" );
+    #    C4::Biblio::ModZebra( $bibliostoadd[$i], "specialUpdate", "biblioserver" );
     #    $self->getLogger()->log("Added bibliographic record $bibliostoadd[$i] to Zebra queue.");
     #}
 
@@ -197,26 +196,20 @@ sub getBiblioDatas {
         my $bibmeta = Data::Dumper::Dumper $bibliometa;
         $self->getLogger()->log("createBiblioMetadata bibliometa: " . $bibmeta);
 
-        #my $marcBiblio = GetMarcBiblio($biblio);
+        my $biblio_object = Koha::Biblios->find($biblio);
+        if(! $biblio){
+           die "Getting Biblio $biblio failed.";
+        }
         my $marcBiblio;
-        
-        my $bibliocheck = Koha::Biblios->find($biblio);
-        my $record = $bibliocheck->metadata->record({ embed_items => 1 });
-        # gives undef my $marcBiblio = C4::Biblio::GetMarcBiblio({ biblionumber => $biblio });
-        eval { $marcBiblio = $record };
-        if ($@ || !$marcBiblio) {
-            # here we do warn since catching an exception
-            # means that the bib was found but failed
-            # to be parsed
-            $self->getLogger()->log($@);
-            $self->getLogger()->log("GetMarcBiblio error retrieving biblio $biblio");
+        eval { $marcBiblio = $biblio_object->metadata->record({ embed_items => 1 }); };
+        if ($@) {
+            $self->getLogger()->log("Getting metadata record for Biblio $biblio died: " . $@);
         }
-            
-        if(! $marcBiblio){
-           die('Getting marcbiblio failed.');
+        if (! $marcBiblio) {
+            $self->getLogger()->log("Getting metadata record for Biblio $biblio returned empty result.");
         }
-        if(! ModBiblio($marcBiblio, $biblio, '')){
-           die('Modbiblio failed.');
+        if(! C4::Biblio::ModBiblio($marcBiblio, $biblio, '')){
+           die('C4::Biblio::Modbiblio failed.');
         }
     }
     
