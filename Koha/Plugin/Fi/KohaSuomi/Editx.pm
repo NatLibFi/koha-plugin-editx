@@ -7,14 +7,14 @@ use base qw(Koha::Plugins::Base);
 use C4::Context;
 use utf8;
 ## Here we set our plugin version
-our $VERSION = "1.0.1";
+our $VERSION = "{VERSION}";
 ## Here is our metadata, some keys are required, some are optional
 our $metadata = {
     name            => 'EDItX-plugin',
     author          => 'Lari Strand',
     date_authored   => '2022-04-05',
-    date_updated    => '2022-04-05',
-    minimum_version => '21.05',
+    date_updated    => '1900-01-01',
+    minimum_version => '23.11',
     maximum_version => '',
     version         => $VERSION,
     description     => 'Adds EDItX functionality to Koha',
