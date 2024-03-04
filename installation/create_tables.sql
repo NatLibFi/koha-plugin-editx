@@ -1,9 +1,13 @@
-CREATE TABLE IF NOT EXISTS `sequences` (
+
+RENAME TABLE IF EXISTS `sequences` TO `editx_sequences`;
+RENAME TABLE IF EXISTS `map_productform` TO `editx_map_productform`;
+
+CREATE TABLE IF NOT EXISTS `editx_sequences` (
   `invoicenumber` int(11) NOT NULL,
   `item_barcode_nextval` int(11) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE IF NOT EXISTS `map_productform` (
+CREATE TABLE IF NOT EXISTS `editx_map_productform` (
   `onix_code` varchar(10) NOT NULL,
   `productform` varchar(10) NOT NULL,
   `productform_alternative` varchar(10) NOT NULL,
@@ -15,7 +19,7 @@ CREATE TABLE IF NOT EXISTS `map_productform` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 # these values obtained from map_productform_uusi.xlsx:
-INSERT INTO map_productform (onix_code, productform, productform_alternative) VALUES
+INSERT INTO editx_map_productform (onix_code, productform, productform_alternative) VALUES
 ('AA', '28VRK', '28VRKLN'),
 ('AB', '28VRKAV', '28VRKLNAV'),
 ('AC', '28VRKAV', '28VRKLNAV'),
