@@ -1,0 +1,10 @@
+# place this into /etc/cron.d/
+# also, put proper "KOHA_INSTANCE" value of current Koha user,
+# and uncomment last line below + set proper frequency you need.
+
+SHELL=/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+
+KOHA_INSTANCE=library
+
+# */5 * * * * $KOHA_INSTANCE-koha /var/lib/koha/$KOHA_INSTANCE/plugins/Koha/Plugin/Fi/KohaSuomi/Editx/cronjobs/runEditXImport.pl
