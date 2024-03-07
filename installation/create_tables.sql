@@ -3,7 +3,7 @@ CREATE TABLE IF NOT EXISTS `sequences` (
   `item_barcode_nextval` int(11) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE `map_productform` (
+CREATE TABLE IF NOT EXISTS `map_productform` (
   `onix_code` varchar(10) NOT NULL,
   `productform` varchar(10) NOT NULL,
   `productform_alternative` varchar(10) NOT NULL,
