@@ -36,7 +36,7 @@ sub new {
 ## be done when the plugin if first installed should be executed in this method.
 ## The installation method should always return true if the installation succeeded
 ## or false if it failed.
-sub install() {
+sub install {
     my ( $self, $args ) = @_;
     return 1;
 }
