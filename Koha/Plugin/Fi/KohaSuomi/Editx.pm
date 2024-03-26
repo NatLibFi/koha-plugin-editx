@@ -28,7 +28,7 @@ sub new {
     $args->{'metadata'}->{'class'} = $class;
     ## Here, we call the 'new' method for our base class
     ## This runs some additional magic and checking
-    ## and returns our actual 
+    ## and returns our actual
     my $self = $class->SUPER::new($args);
     return $self;
 }
