@@ -7,6 +7,8 @@ PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 
 KOHA_INSTANCE=library
 
+# */5 * * * * $KOHA_INSTANCE-koha /var/lib/koha/$KOHA_INSTANCE/plugins/Koha/Plugin/Fi/KohaSuomi/Editx/cronjobs/fetch_editx_sftp.sh
+
 # */5 * * * * $KOHA_INSTANCE-koha /var/lib/koha/$KOHA_INSTANCE/plugins/Koha/Plugin/Fi/KohaSuomi/Editx/cronjobs/runEditXImport.pl
 
 # */15 * * * * $KOHA_INSTANCE-koha /var/lib/koha/$KOHA_INSTANCE/plugins/Koha/Plugin/Fi/KohaSuomi/Editx/cronjobs/notify_failed_editx.sh

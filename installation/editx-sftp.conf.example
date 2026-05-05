@@ -1,0 +1,28 @@
+# shellcheck shell=sh
+# shellcheck disable=SC2034
+# Copy to /etc/koha/sites/<instance>/editx-sftp.conf and keep it out of git.
+# The Koha instance user must be able to read this file.
+
+SFTP_HOST=sftp.example.org
+SFTP_PORT=22
+SFTP_USER=editx-user
+
+# Prefer SSH keys and host-key pinning. Do not store SFTP passwords here.
+SFTP_IDENTITY_FILE=/var/lib/koha/<instance>/.ssh/editx_sftp
+SFTP_KNOWN_HOSTS_FILE=/var/lib/koha/<instance>/.ssh/known_hosts
+SFTP_STRICT_HOST_KEY_CHECKING=yes
+
+SFTP_REMOTE_DIR=/outgoing/editx
+SFTP_PATTERN='*.xml'
+
+# Must match <import_tmp_path> from procurement-config.xml.
+SFTP_LOCAL_DIR=/var/spool/koha/<instance>/editx/tmp
+
+# keep: leave remote files as-is
+# archive: move downloaded remote files to SFTP_REMOTE_ARCHIVE_DIR
+# delete: delete downloaded remote files
+SFTP_AFTER_DOWNLOAD=archive
+SFTP_REMOTE_ARCHIVE_DIR=/outgoing/editx/archive
+
+# Optional local log file. Cron mail is used when unset.
+# SFTP_LOG_FILE=/var/log/koha/<instance>/editx/sftp-download.log
