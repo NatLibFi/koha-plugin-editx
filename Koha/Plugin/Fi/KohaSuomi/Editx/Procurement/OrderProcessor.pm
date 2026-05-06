@@ -28,6 +28,10 @@ use Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Config;
 use Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::FinnaMaterialType;
 use C4::Languages qw(getlanguage);
 
+my $editx_plugin_class = 'Koha::Plugin::Fi::KohaSuomi::Editx';
+my $sequences_table = _quote_identifier( _plugin_table_name('sequences') );
+my $map_productform_table = _quote_identifier( _plugin_table_name('map_productform') );
+
 has 'schema' => (
     is      => 'rw',
     isa => 'DBIx::Class::Schema',
@@ -55,6 +59,27 @@ sub BUILD {
     $self->setSchema($schema);
     $self->setLogger(new Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Logger);
     $self->setConfig(new Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Config);
+}
+
+sub _plugin_table_name {
+    my ($table_name) = @_;
+
+    return lc( join( '_', split( '::', $editx_plugin_class ), $table_name ) );
+}
+
+sub _quote_identifier {
+    my ($identifier) = @_;
+
+    $identifier =~ s/`/``/g;
+    return "`$identifier`";
+}
+
+sub _sequences_table {
+    return $sequences_table;
+}
+
+sub _map_productform_table {
+    return $map_productform_table;
 }
 
 # We are old and obsolete
@@ -297,18 +322,19 @@ sub generateBarcode {
 sub advanceBarcodeValue {  
     my ($self, $date, $prefixes) = @_;
     my $dbh = C4::Context->dbh;
+    my $sequences_table = $self->_sequences_table();
 
     my $regex = sprintf "%s$date|" x @$prefixes, @$prefixes;
     $regex .= "HANK_$date";
 
-    my $update_query = "UPDATE editx_sequences SET item_barcode_nextval = item_barcode_nextval+1";
+    my $update_query = "UPDATE $sequences_table SET item_barcode_nextval = item_barcode_nextval+1";
     my $query = 'SELECT MAX(CAST(SUBSTRING(barcode,-5) AS signed)) FROM items WHERE barcode REGEXP "'.$regex.'"';
     my $stmnt = $dbh->prepare($query);
     $stmnt->execute();
 
     while (my ($count)= $stmnt->fetchrow_array) {
         if(!$count || $count == 9999){
-            $update_query = "UPDATE editx_sequences SET item_barcode_nextval = 1";
+            $update_query = "UPDATE $sequences_table SET item_barcode_nextval = 1";
         }
     }
 
@@ -320,7 +346,8 @@ sub getBarcodeValue {
     my $self = shift;
 
     my $dbh = C4::Context->dbh;
-    my $stmnt = $dbh->prepare("SELECT max(item_barcode_nextval) FROM editx_sequences");
+    my $sequences_table = $self->_sequences_table();
+    my $stmnt = $dbh->prepare("SELECT max(item_barcode_nextval) FROM $sequences_table");
     $stmnt->execute();
 
     my $nextnum = sprintf("%0*d", "5",$stmnt->fetchrow_array());
@@ -684,62 +711,73 @@ sub getBookseller {
 sub getProductForm {
     my $self = shift;
     my $productForm = $_[0];
-    my $result;
 
-    if($productForm){       
-        my $dbh = C4::Context->dbh;
-        my $stmnt = $dbh->prepare("SELECT max(productform) from editx_map_productform where onix_code = ?");
-        $stmnt->execute($productForm) or die($DBI::errstr);
-        $result = $stmnt->fetchrow_array();
-    }
-
-    if($result){
-        $productForm = $result;
-    }
-    return $productForm;
+    my $mapping = $self->_get_productform_mapping($productForm);
+    return $self->_validate_mapped_productform( $productForm, $mapping->{productform}, 'productform' );
 }
 
 sub getItemProductForm {
     my $self = shift;
     my $productForm = $_[0];
-    my $productFormAlternative;
     my $location = $_[1];
-    my $result;
 
-    if($productForm){
+    my $mapping = $self->_get_productform_mapping($productForm);
+    my $settings = $self->getConfig()->getSettings();
+    my $productform_alternatives = $settings->{settings}->{productform_alternative_triggers} // '';
+    my @productform_alternatives = grep { $_ ne '' } map {
+        my $trigger = $_;
+        $trigger =~ s/\A\s+|\s+\z//g;
+        $trigger;
+    } split( ',', $productform_alternatives );
 
-        my $dbh = C4::Context->dbh;
-        my $stmnt = $dbh->prepare("SELECT productform_alternative from editx_map_productform where onix_code = ?");
-        $stmnt->execute($productForm) or die($DBI::errstr);
-        $result = $stmnt->fetchrow_array();
-
-        if($result){
-            $productFormAlternative = $result;
-
-            my $settings = $self->getConfig()->getSettings();
-            if(defined $settings->{settings}->{productform_alternative_triggers} ){
-                my $productform_alternatives = $settings->{settings}->{productform_alternative_triggers};
-
-                my @productform_alternatives = split(',', $productform_alternatives);
-
-                foreach my $pf_alternative_trigger (@productform_alternatives) {
-                    if($location eq $pf_alternative_trigger)
-                    {
-                        return $productFormAlternative;
-                    }
-                }
-            }
-        }
-
-        $stmnt = $dbh->prepare("SELECT productform from editx_map_productform where onix_code = ?");
-        $stmnt->execute($productForm) or die($DBI::errstr);
-        $result = $stmnt->fetchrow_array();
-
-        if($result){
-            $productForm = $result;
-            return $productForm;
+    foreach my $pf_alternative_trigger (@productform_alternatives) {
+        if ( defined $location && $location eq $pf_alternative_trigger ) {
+            return $self->_validate_mapped_productform(
+                $productForm,
+                $mapping->{productform_alternative},
+                "productform_alternative for location '$location'"
+            );
         }
     }
+
+    return $self->_validate_mapped_productform( $productForm, $mapping->{productform}, 'productform' );
+}
+
+sub _get_productform_mapping {
+    my ( $self, $productForm ) = @_;
+
+    die 'EDItX ProductForm is missing.' unless $productForm;
+
+    my $dbh = C4::Context->dbh;
+    my $map_productform_table = $self->_map_productform_table();
+    my $stmnt = $dbh->prepare("SELECT productform, productform_alternative FROM $map_productform_table WHERE onix_code = ?");
+    $stmnt->execute($productForm) or die($DBI::errstr);
+
+    my $mapping = $stmnt->fetchrow_hashref();
+    die "No Koha item type mapping found for EDItX ProductForm '$productForm'." unless $mapping;
+
+    return $mapping;
+}
+
+sub _validate_mapped_productform {
+    my ( $self, $productForm, $mapped_itemtype, $mapping_column ) = @_;
+
+    die "EDItX ProductForm '$productForm' has no Koha item type in $mapping_column."
+        unless defined $mapped_itemtype && $mapped_itemtype ne '';
+    die "Mapped Koha item type '$mapped_itemtype' for EDItX ProductForm '$productForm' does not exist."
+        unless $self->_itemtype_exists($mapped_itemtype);
+
+    return $mapped_itemtype;
+}
+
+sub _itemtype_exists {
+    my ( $self, $itemtype ) = @_;
+
+    return unless $itemtype;
+
+    my $dbh = C4::Context->dbh;
+    my ($exists) = $dbh->selectrow_array( 'SELECT COUNT(*) FROM itemtypes WHERE itemtype = ?', undef, $itemtype );
+    return $exists ? 1 : 0;
 }
 
 sub validate {

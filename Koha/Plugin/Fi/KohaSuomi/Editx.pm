@@ -5,6 +5,7 @@ use Modern::Perl;
 use base qw(Koha::Plugins::Base);
 ## We will also need to include any Koha libraries we want to access
 use C4::Context;
+use Koha::DateUtils qw(dt_from_string);
 use utf8;
 ## Here we set our plugin version
 our $VERSION = "{VERSION}";
@@ -39,32 +40,43 @@ sub new {
 sub install() {
     my ( $self, $args ) = @_;
 
+    return $self->_install_or_upgrade_tables();
+}
 
-    my $success = 1;
+sub _install_or_upgrade_tables {
+    my ($self) = @_;
 
-    # my $table_sequences = $self->get_qualified_table_name('sequences');
-        # CREATE TABLE IF NOT EXISTS `$table_sequences` (
-    $success &&= C4::Context->dbh->do( "
-        CREATE TABLE IF NOT EXISTS `editx_sequences` (
+    my $dbh = C4::Context->dbh;
+    my $sequences_table = $self->_quote_identifier( $self->get_qualified_table_name('sequences') );
+    my $map_productform_table = $self->_quote_identifier( $self->get_qualified_table_name('map_productform') );
+
+    my $success = $dbh->do( "
+        CREATE TABLE IF NOT EXISTS $sequences_table (
           `invoicenumber` int(11) NOT NULL,
           `item_barcode_nextval` int(11) NOT NULL
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     " );
 
-    # my $table_map_productform = $self->get_qualified_table_name('map_productform');
-        # CREATE TABLE `$table_map_productform` (
-    $success &&= C4::Context->dbh->do( "
-        CREATE TABLE IF NOT EXISTS `editx_map_productform` (
+    warn "Failed to create sequences table: " . $dbh->errstr unless $success;
+
+    $success &&= $dbh->do( "
+        CREATE TABLE IF NOT EXISTS $map_productform_table (
           `onix_code` varchar(10) NOT NULL,
-          `productform` varchar(10) NOT NULL,
-          `productform_alternative` varchar(10) NOT NULL,
+          `productform` varchar(10) DEFAULT NULL,
+          `productform_alternative` varchar(10) DEFAULT NULL,
           PRIMARY KEY (`onix_code`),
           KEY `fk_productform_itemtypes` (`productform`),
-          KEY `fk_productformalt_itemtypes` (`productform_alternative`),
-          CONSTRAINT `fk_productform_itemtypes` FOREIGN KEY (`productform`) REFERENCES `itemtypes` (`itemtype`),
-          CONSTRAINT `fk_productformalt_itemtypes` FOREIGN KEY (`productform_alternative`) REFERENCES `itemtypes` (`itemtype`)
+          KEY `fk_productformalt_itemtypes` (`productform_alternative`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     " );
+
+    warn "Failed to create map_productform table: " . $dbh->errstr unless $success;
+
+    $success &&= $self->_drop_map_productform_foreign_keys();
+    $success &&= $self->_allow_nullable_map_productform_columns();
+    $success &&= $self->_migrate_legacy_sequences_table();
+    $success &&= $self->_migrate_legacy_map_productform_table();
+    $success &&= $self->_ensure_sequences_row();
 
     return $success;
 }
@@ -77,19 +89,7 @@ sub upgrade {
     my $dt = dt_from_string();
     $self->store_data( { last_upgraded => $dt->ymd('-') . ' ' . $dt->hms(':') } );
 
-    my $success = 1;
-
-    if ( !C4::Context->dbh->do("SHOW TABLES LIKE 'sequences'") ) {
-        # rename table 'sequences' to 'editx_sequences'
-        $success &&= C4::Context->dbh->do("RENAME TABLE `sequences` TO `editx_sequences`");
-    }
-
-    if ( !C4::Context->dbh->do("SHOW TABLES LIKE 'map_productform'") ) {
-        # rename table 'map_productform' to 'editx_map_productform'
-        $success &&= C4::Context->dbh->do("RENAME TABLE `map_productform` TO `editx_map_productform`");
-    }
-
-    return $success;
+    return $self->_install_or_upgrade_tables();
 }
 ## This method will be run just before the plugin files are deleted
 ## when a plugin is uninstalled. It is good practice to clean up
@@ -97,16 +97,131 @@ sub upgrade {
 sub uninstall() {
     my ( $self, $args ) = @_;
 
-    # my $table_sequences = $self->get_qualified_table_name('sequences');
-    # my $table_map_productform = $self->get_qualified_table_name('map_productform');
-        # DROP TABLE IF EXISTS `$table_sequences` (
-
     my $success = 1;
+    my $sequences_table = $self->_quote_identifier( $self->get_qualified_table_name('sequences') );
+    my $map_productform_table = $self->_quote_identifier( $self->get_qualified_table_name('map_productform') );
 
-    $success &&= C4::Context->dbh->do("DROP TABLE IF EXISTS `editx_sequences`");
-    $success &&= C4::Context->dbh->do("DROP TABLE IF EXISTS `editx_map_productform`");
+    $success &&= C4::Context->dbh->do("DROP TABLE IF EXISTS $sequences_table");
+    $success &&= C4::Context->dbh->do("DROP TABLE IF EXISTS $map_productform_table");
 
     return $success;
+}
+
+sub _migrate_legacy_sequences_table {
+    my ($self) = @_;
+
+    my $dbh = C4::Context->dbh;
+    my $target = $self->get_qualified_table_name('sequences');
+    my $quoted_target = $self->_quote_identifier($target);
+
+    for my $source ( 'editx_sequences', 'sequences' ) {
+        next if $source eq $target;
+        next unless $self->_table_exists($source);
+
+        my $quoted_source = $self->_quote_identifier($source);
+        my ($target_count) = $dbh->selectrow_array("SELECT COUNT(*) FROM $quoted_target");
+        next if $target_count;
+
+        $dbh->do( "
+            INSERT INTO $quoted_target (invoicenumber, item_barcode_nextval)
+            SELECT invoicenumber, item_barcode_nextval FROM $quoted_source LIMIT 1
+        " ) or return;
+    }
+
+    return 1;
+}
+
+sub _migrate_legacy_map_productform_table {
+    my ($self) = @_;
+
+    my $dbh = C4::Context->dbh;
+    my $target = $self->get_qualified_table_name('map_productform');
+    my $quoted_target = $self->_quote_identifier($target);
+    my ($target_count) = $dbh->selectrow_array("SELECT COUNT(*) FROM $quoted_target");
+
+    return 1 if $target_count;
+
+    for my $source ( 'editx_map_productform', 'map_productform' ) {
+        next if $source eq $target;
+        next unless $self->_table_exists($source);
+
+        my $quoted_source = $self->_quote_identifier($source);
+        $dbh->do( "
+            INSERT INTO $quoted_target (onix_code, productform, productform_alternative)
+            SELECT onix_code, productform, productform_alternative FROM $quoted_source
+            ON DUPLICATE KEY UPDATE
+                productform = VALUES(productform),
+                productform_alternative = VALUES(productform_alternative)
+        " ) or return;
+
+        return 1;
+    }
+
+    return 1;
+}
+
+sub _drop_map_productform_foreign_keys {
+    my ($self) = @_;
+
+    my $dbh = C4::Context->dbh;
+    my $table_name = $self->get_qualified_table_name('map_productform');
+    my $quoted_table_name = $self->_quote_identifier($table_name);
+    my $sth = $dbh->prepare( "
+        SELECT CONSTRAINT_NAME
+        FROM information_schema.KEY_COLUMN_USAGE
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME = ?
+          AND REFERENCED_TABLE_NAME IS NOT NULL
+    " );
+    $sth->execute($table_name);
+
+    while ( my ($constraint_name) = $sth->fetchrow_array ) {
+        my $quoted_constraint_name = $self->_quote_identifier($constraint_name);
+        $dbh->do("ALTER TABLE $quoted_table_name DROP FOREIGN KEY $quoted_constraint_name") or return;
+    }
+
+    return 1;
+}
+
+sub _allow_nullable_map_productform_columns {
+    my ($self) = @_;
+
+    my $dbh = C4::Context->dbh;
+    my $map_productform_table = $self->_quote_identifier( $self->get_qualified_table_name('map_productform') );
+
+    return $dbh->do( "
+        ALTER TABLE $map_productform_table
+          MODIFY `productform` varchar(10) DEFAULT NULL,
+          MODIFY `productform_alternative` varchar(10) DEFAULT NULL
+    " );
+}
+
+sub _ensure_sequences_row {
+    my ($self) = @_;
+
+    my $dbh = C4::Context->dbh;
+    my $sequences_table = $self->_quote_identifier( $self->get_qualified_table_name('sequences') );
+    my ($count) = $dbh->selectrow_array("SELECT COUNT(*) FROM $sequences_table");
+
+    return 1 if $count;
+
+    return $dbh->do("INSERT INTO $sequences_table (invoicenumber, item_barcode_nextval) VALUES (0, 0)");
+}
+
+sub _table_exists {
+    my ( $self, $table_name ) = @_;
+
+    my $sth = C4::Context->dbh->prepare("SHOW TABLES LIKE ?");
+    $sth->execute($table_name);
+
+    return $sth->fetchrow_array ? 1 : 0;
+}
+
+sub _quote_identifier {
+    my ( $self, $identifier ) = @_;
+
+    $identifier =~ s/`/``/g;
+    return "`$identifier`";
 }
 
 1;
