@@ -1,0 +1,57 @@
+[% USE KohaDates %]
+[% INCLUDE 'doc-head-open.inc' %]
+<title>EDItX plugin configuration</title>
+[% INCLUDE 'doc-head-close.inc' %]
+</head>
+<body>
+[% INCLUDE 'header.inc' %]
+[% INCLUDE 'cat-search.inc' %]
+
+<div id="breadcrumbs"><a href="/cgi-bin/koha/mainpage.pl">Home</a> &rsaquo; <a href="/cgi-bin/koha/plugins/plugins-home.pl">Plugins</a> &rsaquo; EDItX plugin &rsaquo; Configuration</div>
+
+<div id="doc3" style="margin: 10px;">
+    <h1>EDItX plugin configuration</h1>
+
+    [% IF saved %]
+        <div class="alert alert-success">Product form mappings saved.</div>
+    [% END %]
+
+    [% FOREACH message IN messages %]
+        <div class="alert alert-[% message.alert_class | html %]">[% message.text | html %]</div>
+    [% END %]
+
+    <form method="post">
+        <input type="hidden" name="class" value="[% CLASS | html %]" />
+        <input type="hidden" name="method" value="[% METHOD | html %]" />
+        <input type="hidden" name="save" value="1" />
+
+        <fieldset class="rows">
+            <legend>Product form mappings</legend>
+            <ol>
+                <li>
+                    <label for="mapping_csv">CSV mappings:</label>
+                    <textarea id="mapping_csv" name="mapping_csv" cols="80" rows="24" style="font-family: monospace;" wrap="off">[% mapping_csv | html %]</textarea>
+                </li>
+                <li>
+                    <span class="label">Existing Koha item types:</span>
+                    <span>[% itemtypes_text | html %]</span>
+                </li>
+            </ol>
+        </fieldset>
+
+        <fieldset class="action">
+            <input type="submit" class="btn btn-primary" value="Save configuration" />
+        </fieldset>
+    </form>
+
+    <hr />
+
+    <h2>Upgrade status</h2>
+    [% IF last_upgraded %]
+        <p>Plugin was last upgraded on this system on [% last_upgraded | $KohaDates with_hours => 1 %].</p>
+    [% ELSE %]
+        <p>Plugin has never been upgraded.</p>
+    [% END %]
+</div>
+
+[% INCLUDE 'intranet-bottom.inc' %]
