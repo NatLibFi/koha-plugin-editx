@@ -13,7 +13,7 @@
     <h1>EDItX plugin configuration</h1>
 
     [% IF saved %]
-        <div class="alert alert-success">Product form mappings saved.</div>
+        <div class="alert alert-success">Configuration saved.</div>
     [% END %]
 
     [% FOREACH message IN messages %]
@@ -24,6 +24,21 @@
         <input type="hidden" name="class" value="[% CLASS | html %]" />
         <input type="hidden" name="method" value="[% METHOD | html %]" />
         <input type="hidden" name="save" value="1" />
+
+        <fieldset class="rows">
+            <legend>Automatic synchronization</legend>
+            <ol>
+                <li>
+                    <label for="nightly_sync_enabled">Nightly EDItX synchronization:</label>
+                    [% IF nightly_sync_enabled %]
+                        <input type="checkbox" id="nightly_sync_enabled" name="nightly_sync_enabled" value="1" checked="checked" />
+                    [% ELSE %]
+                        <input type="checkbox" id="nightly_sync_enabled" name="nightly_sync_enabled" value="1" />
+                    [% END %]
+                    <span class="hint">Run SFTP download and EDItX import from Koha's nightly plugin cron hook.</span>
+                </li>
+            </ol>
+        </fieldset>
 
         <fieldset class="rows">
             <legend>Product form mappings</legend>
@@ -47,6 +62,9 @@
     <hr />
 
     <h2>Upgrade status</h2>
+    [% IF last_configured_by %]
+        <p>Plugin settings were last updated by borrowernumber [% last_configured_by | html %].</p>
+    [% END %]
     [% IF last_upgraded %]
         <p>Plugin was last upgraded on this system on [% last_upgraded | $KohaDates with_hours => 1 %].</p>
     [% ELSE %]

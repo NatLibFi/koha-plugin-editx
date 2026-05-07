@@ -29,18 +29,17 @@ Create requred SQL tables by commands (consider that $KOHA_INSTANCE should be YO
     KOHA_INSTANCE=library; mysql -u ${KOHA_INSTANCE}_main -p ${KOHA_INSTANCE}_main < installation/create_tables.sql
 ```
 
-## Fetching EDItX files from SFTP
+## Nightly EDItX synchronization
 
-The plugin importer reads incoming EDItX XML from `import_tmp_path` in `/etc/koha/sites/<instance>/procurement-config.xml`. The helper script `Koha/Plugin/Fi/KohaSuomi/Editx/cronjobs/fetch_editx_sftp.sh` can be scheduled before `runEditXImport.pl` to download SFTP files into that directory.
+The plugin importer reads incoming EDItX XML from `import_tmp_path` in `/etc/koha/sites/<instance>/procurement-config.xml`. The plugin implements Koha's `cronjob_nightly` hook, so the normal Koha nightly plugin cron can download SFTP files and import them.
 
 Copy `installation/editx-sftp.conf.example` to `/etc/koha/sites/<instance>/editx-sftp.conf`, set the SFTP host, user, SSH key, host key file, remote folder, and `SFTP_LOCAL_DIR`. Keep credentials and routing outside git.
 
-The recommended cron order is:
+Enable automatic synchronization from the plugin configuration page. When the checkbox is disabled, `cronjob_nightly` returns without doing any work.
 
-```
-*/5 * * * * <instance>-koha /var/lib/koha/<instance>/plugins/Koha/Plugin/Fi/KohaSuomi/Editx/cronjobs/fetch_editx_sftp.sh
-*/5 * * * * <instance>-koha /var/lib/koha/<instance>/plugins/Koha/Plugin/Fi/KohaSuomi/Editx/cronjobs/runEditXImport.pl
-```
+Koha packages already run `/usr/share/koha/bin/cronjobs/plugins_nightly.pl` from `koha-common.cron.daily`. For preproduction testing, you can run only this plugin with:
+
+`koha-foreach --chdir --enabled /usr/share/koha/bin/cronjobs/plugins_nightly.pl -m name=EDItX-plugin`
 
 For 3AMK preproduction testing, check these Koha settings before enabling the cron jobs:
 

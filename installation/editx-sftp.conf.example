@@ -1,6 +1,7 @@
 # shellcheck shell=sh
 # shellcheck disable=SC2034
 # Copy to /etc/koha/sites/<instance>/editx-sftp.conf and keep it out of git.
+# This is used by the plugin cronjob_nightly hook when nightly sync is enabled.
 # The Koha instance user must be able to read this file.
 
 SFTP_HOST=sftp.example.org

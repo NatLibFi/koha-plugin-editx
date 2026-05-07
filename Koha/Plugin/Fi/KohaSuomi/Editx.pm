@@ -113,6 +113,10 @@ sub configure {
     my $cgi = $self->{'cgi'};
     my @messages;
     my $saved;
+    my $nightly_sync_enabled =
+          $cgi->request_method eq 'POST'
+        ? ( $cgi->param('nightly_sync_enabled') ? 1 : 0 )
+        : $self->_nightly_sync_enabled();
 
     $self->_install_or_upgrade_tables();
 
@@ -123,9 +127,10 @@ sub configure {
 
         if ($has_blocking_errors) {
             $self->_output_configure_page(
-                mapping_csv    => $mapping_csv,
-                messages       => \@messages,
-                saved          => 0,
+                mapping_csv            => $mapping_csv,
+                messages               => \@messages,
+                nightly_sync_enabled   => $nightly_sync_enabled,
+                saved                  => 0,
             );
             return;
         }
@@ -134,20 +139,39 @@ sub configure {
         push @messages, @$save_messages;
         if (@$save_messages) {
             $self->_output_configure_page(
-                mapping_csv => $mapping_csv,
-                messages    => \@messages,
-                saved       => 0,
+                mapping_csv            => $mapping_csv,
+                messages               => \@messages,
+                nightly_sync_enabled   => $nightly_sync_enabled,
+                saved                  => 0,
             );
             return;
         }
+        $self->store_data(
+            {
+                nightly_sync_enabled => $nightly_sync_enabled,
+                last_configured_by   => ( C4::Context->userenv || {} )->{'number'},
+            }
+        );
         $saved = 1;
     }
 
     $self->_output_configure_page(
-        mapping_csv => $self->_productform_mapping_csv(),
-        messages    => \@messages,
-        saved       => $saved,
+        mapping_csv            => $self->_productform_mapping_csv(),
+        messages               => \@messages,
+        nightly_sync_enabled   => $nightly_sync_enabled,
+        saved                  => $saved,
     );
+}
+
+sub cronjob_nightly {
+    my ($self) = @_;
+
+    unless ( $self->_nightly_sync_enabled() ) {
+        print "EDItX nightly synchronization is disabled in plugin configuration.\n";
+        return 1;
+    }
+
+    return $self->_run_nightly_sync();
 }
 
 sub _migrate_legacy_sequences_table {
@@ -256,14 +280,81 @@ sub _output_configure_page {
 
     my $template = $self->get_template( { file => 'configure.tt' } );
     $template->param(
-        mapping_csv    => $params{mapping_csv},
-        messages       => $params{messages},
-        saved          => $params{saved},
-        itemtypes_text => join( ', ', @{ $self->_itemtypes() } ),
-        last_upgraded  => $self->retrieve_data('last_upgraded'),
+        mapping_csv            => $params{mapping_csv},
+        messages               => $params{messages},
+        nightly_sync_enabled   => $params{nightly_sync_enabled},
+        saved                  => $params{saved},
+        itemtypes_text         => join( ', ', @{ $self->_itemtypes() } ),
+        last_configured_by     => $self->retrieve_data('last_configured_by'),
+        last_upgraded          => $self->retrieve_data('last_upgraded'),
     );
 
     return $self->output_html( $template->output() );
+}
+
+sub _run_nightly_sync {
+    my ($self) = @_;
+
+    my $koha_instance = $ENV{KOHA_INSTANCE} || $self->_koha_instance();
+    die "KOHA_INSTANCE is not set and could not be detected from KOHA_CONF." unless $koha_instance;
+
+    local $ENV{KOHA_INSTANCE} = $koha_instance;
+
+    my $plugin_path = $self->bundle_path();
+    my $fetch_script = "$plugin_path/cronjobs/fetch_editx_sftp.sh";
+    my $import_script = "$plugin_path/cronjobs/runEditXImport.pl";
+    my $lock_instance = $koha_instance;
+    $lock_instance =~ s/[^A-Za-z0-9_.-]/_/g;
+    my $lock_dir = "/tmp/editx-nightly-$lock_instance.lock";
+
+    die "No executable EDItX SFTP fetch script: $fetch_script" unless -x $fetch_script;
+    die "No EDItX import script: $import_script" unless -f $import_script;
+
+    if ( !mkdir $lock_dir ) {
+        print "Another EDItX nightly synchronization is already active for $koha_instance.\n";
+        return 1;
+    }
+
+    my $success = eval {
+        print "Starting EDItX nightly synchronization for $koha_instance.\n";
+        $self->_run_command($fetch_script);
+        $self->_run_command( $^X, $import_script );
+        print "Finished EDItX nightly synchronization for $koha_instance.\n";
+        1;
+    };
+    my $error = $@;
+
+    rmdir $lock_dir or warn "Could not remove EDItX nightly lock $lock_dir: $!";
+    die $error unless $success;
+
+    return 1;
+}
+
+sub _run_command {
+    my ( $self, @command ) = @_;
+
+    system @command;
+
+    my $command_text = join ' ', @command;
+    die "Failed to execute $command_text: $!" if $? == -1;
+    die "$command_text died with signal " . ( $? & 127 ) if $? & 127;
+    die "$command_text exited with status " . ( $? >> 8 ) if $? != 0;
+
+    return 1;
+}
+
+sub _koha_instance {
+    my ($self) = @_;
+
+    return $ENV{KOHA_INSTANCE} if $ENV{KOHA_INSTANCE};
+    return $1 if ( $ENV{KOHA_CONF} // '' ) =~ m{/etc/koha/sites/([^/]+)/koha-conf\.xml\z};
+    return;
+}
+
+sub _nightly_sync_enabled {
+    my ($self) = @_;
+
+    return $self->retrieve_data('nightly_sync_enabled') ? 1 : 0;
 }
 
 sub _parse_productform_mapping_csv {
