@@ -246,12 +246,7 @@ sub fillLoadFolder {
             }
             if(!$self->fileAlreadyImported($tmpFile)){
                 $self->getMsgUpdater()->update($tmpFile, 'PROCESSING');
-                if(move($fullPath, $fullLoadPath)){
-                    $self->getLogger()->log("File: $fullPath moved to $fullLoadPath for import.");
-                }
-                else{
-                    $self->getLogger()->logError("File: $fullPath could not be moved!");
-                }
+                $self->_move_file_or_die( $fullPath, $fullLoadPath, "File: $fullPath moved to $fullLoadPath for import." );
             }
             else{
                 $self->discardDuplicateFile($fullPath);

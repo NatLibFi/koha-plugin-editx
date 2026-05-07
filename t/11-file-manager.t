@@ -61,6 +61,18 @@ use_ok('Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::File');
         push @{ $self->{updates} }, [ $file_name, $status ];
         return 1;
     }
+
+    sub add {
+        my ( $self, $file_name, $raw_message ) = @_;
+        push @{ $self->{added} }, [ $file_name, $raw_message ];
+        return 1;
+    }
+
+    sub findBookseller {
+        my ( $self, $file_path ) = @_;
+        push @{ $self->{bookseller_files} }, $file_path;
+        return 1;
+    }
 }
 
 {
@@ -189,6 +201,39 @@ sub _file_manager {
         ok( !-e $file_path, 'discardDuplicateFile removes the duplicate source file' );
         is_deeply( $msg_updater->{updates}, [ [ 'order.xml', 'DUPLICATE' ] ], 'discardDuplicateFile marks the EDI message duplicate' );
         like( join( "\n", @{ $logger->messages } ), qr{already imported\. Removing it\.}, 'discardDuplicateFile logs the removal' );
+    };
+
+    subtest 'fillLoadFolder dies when a file cannot be staged for import' => sub {
+        my $tmp_dir = tempdir( CLEANUP => 1 );
+        my $tmp_path = File::Spec->catdir( $tmp_dir, 'tmp' );
+        mkdir $tmp_path or die "Could not create $tmp_path: $!";
+
+        my $file_path = File::Spec->catfile( $tmp_path, 'order.xml' );
+        open my $fh, '>', $file_path or die "Could not create $file_path: $!";
+        print {$fh} '<LibraryShipNotice><Header><ShipNoticeNumber>ASN-TEST</ShipNoticeNumber></Header></LibraryShipNotice>';
+        close $fh or die "Could not close $file_path: $!";
+
+        my $logger = Editx::FileTestLogger->new;
+        my $msg_updater = Editx::FileTestMsgUpdater->new;
+        my $file_manager = bless {
+            tmp_path  => $tmp_path . '/',
+            load_path => File::Spec->catdir( $tmp_dir, 'missing_load' ) . '/',
+            logger    => $logger,
+            edi_msg   => $msg_updater,
+        }, 'Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::File';
+
+        local *Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::File::fileAlreadyImported = sub { return 0; };
+
+        my $ok = eval {
+            $file_manager->fillLoadFolder;
+            1;
+        };
+
+        ok( !$ok, 'fillLoadFolder throws on staging move failure' );
+        like( $@, qr{could not be moved to}, 'fillLoadFolder reports the staging move failure' );
+        ok( -e $file_path, 'fillLoadFolder leaves the source file in tmp when staging fails' );
+        is_deeply( $msg_updater->{updates}, [ [ 'order.xml', 'PROCESSING' ] ], 'fillLoadFolder keeps the current PROCESSING status update before move' );
+        like( join( "\n", @{ $logger->messages } ), qr{could not be moved to}, 'fillLoadFolder logs the staging move failure' );
     };
 }
 
