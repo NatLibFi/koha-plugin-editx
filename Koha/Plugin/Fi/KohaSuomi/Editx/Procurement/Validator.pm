@@ -37,6 +37,63 @@ sub parse_editx_xml {
   return ($doc, $xc);
 }
 
+sub validate_message_types {
+  my ($xc, $logger, $fileforlog) = @_;
+  my $errors = 0;
+  my @nodes = $xc->findnodes('LibraryShipNotice/ItemDetail/CopyDetail/Message/MessageType');
+
+  if (!@nodes) {
+    $logger->logError($fileforlog . "MessageType not present ");
+    return 1;
+  }
+
+  foreach my $node (@nodes) {
+
+    if ($node eq "" or $node->to_literal eq "") {
+      $logger->logError($fileforlog . "MessageType not present ");
+      $errors++;
+    } else {
+      my $val = $node->string_value();
+
+      if ($val eq "") {
+        $logger->logError($fileforlog . "MessageType not present");
+        $errors++;
+      } elsif ($val ne "04" && $val ne "01") {
+        $logger->logError($fileforlog . "Wrong type of MessageType found: " . $val);
+        $errors++;
+      } elsif ($val eq "01") {
+        $logger->debug("MessageType 01 found, passing xml test");
+      } elsif ($val eq "04") {
+        $logger->debug("MessageType 04 present, testing xml");
+
+        my $messageLine = $node->parentNode->find('MessageLine');
+        my $xml         = $messageLine->string_value();
+
+        if ($xml eq "") {
+          $logger->logError($fileforlog . "MessageLine not present");
+          $errors++;
+
+        } else {
+
+          try {
+            my $marcxml = MARC::Record::new_from_xml($xml, 'UTF-8');
+
+            my $test = $marcxml->subfield('245', 'a');
+            $logger->debug("MessageLine marcxml 245a: " . $test);
+
+          } catch {
+
+            $errors++;
+            $logger->logError($fileforlog . "MessageLine marcxml " . "$_");
+          }
+        }
+      }
+    }
+  }
+
+  return $errors;
+}
+
 sub validateEditx {
 
   my $filename = shift;
@@ -521,72 +578,7 @@ sub validateEditx {
 
 # LibraryShipNotice/ItemDetail/CopyDetail/Message/MessageType
 
-  @nodes = $xc->findnodes('LibraryShipNotice/ItemDetail/CopyDetail/Message/MessageType');
-  if (!@nodes) {
-    $logger->logError($fileforlog . "MessageType not present ");
-    $errors++;
-  } else {
-    foreach my $node (@nodes) {
-
-      if ($node eq "" or $node->to_literal eq "") {
-        $logger->logError($fileforlog . "MessageType not present ");
-        $errors++;
-      }
-    }
-  }
-
-  @nodes = $xc->findnodes('LibraryShipNotice/ItemDetail/CopyDetail/Message/MessageType');
-  if (!@nodes) {
-    $logger->logError($fileforlog . "MessageType not present ");
-    $errors++;
-  } else {
-    foreach my $node (@nodes) {
-
-      if ($node eq "" or $node->to_literal eq "") {
-        $logger->logError($fileforlog . "MessageType not present ");
-        $errors++;
-      } else {
-        my $val = $node->string_value();
-
-        if ($val eq "") {
-          $logger->logError($fileforlog . "MessageType not present");
-          $errors++;
-        } elsif ($val ne "04" && $val ne "01") {
-          $logger->logError($fileforlog . "Wrong type of MessageType found: " . $val);
-          $errors++;
-        } elsif ($val eq "01") {
-          $logger->debug("MessageType 01 found, passing xml test");
-        } elsif ($val eq "04") {
-          $logger->debug("MessageType 04 present, testing xml");
-
-          #Do tests to marcxml
-          my $messageLine = $node->parentNode->find('MessageLine');
-          my $xml         = $messageLine->string_value();
-
-          #my $xml = $messageLine->nodeValue;
-
-          if ($xml eq "") {
-            $logger->logError($fileforlog . "MessageLine not present");
-            $errors++;
-
-          } else {
-
-            try {
-              my $marcxml = MARC::Record::new_from_xml($xml, 'UTF-8');
-
-              my $test = $marcxml->subfield('245', 'a');
-              $logger->debug("MessageLine marcxml 245a: " . $test);
-
-            } catch {
-
-              $errors++;
-              $logger->logError($fileforlog . "MessageLine marcxml " . "$_");
-            }
-          }
-        }
-      }
-    }
-  }
+  $errors += validate_message_types($xc, $logger, $fileforlog);
 
 # Error handling
 
