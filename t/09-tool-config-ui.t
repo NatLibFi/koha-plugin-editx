@@ -29,6 +29,8 @@ like( $plugin_pm, qr{sub\s+tool\s*\{}, 'Plugin exposes a Koha tool page' );
 like( $plugin_pm, qr{\$method\s*\|\|=\s*'tool'}, 'Plugin method URL defaults to the tool page' );
 like( $plugin_pm, qr{tool_href\s*=>\s*\$self->plugin_method_url\('tool'\)}, 'Configure template receives tool_href' );
 like( $plugin_pm, qr{manual_run_available}, 'Tool template receives manual action availability context' );
+like( $plugin_pm, qr{get_qualified_table_name\('procurement_file'\)}, 'Plugin install uses a qualified procurement_file table' );
+like( $plugin_pm, qr{_migrate_legacy_procurement_file_table}, 'Plugin install migrates legacy procurement_file data' );
 
 like( $breadcrumbs, qr{href="\[%\s*tool_href\s*\|\s*html\s*%\]">EDItX plugin</a>}, 'Breadcrumb plugin root points to the tool page' );
 like( $breadcrumbs, qr{active_method\s*!=\s*'configure'}, 'Breadcrumb configure shortcut is hidden on the configure page' );

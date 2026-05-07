@@ -15,6 +15,9 @@ use Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Logger;
 use Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::EdiMessage;
 use Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Config;
 
+my $editx_plugin_class = 'Koha::Plugin::Fi::KohaSuomi::Editx';
+my $procurement_file_table = _quote_identifier( _plugin_table_name('procurement_file') );
+
 has 'objectFactory' => (
     is      => 'rw',
     isa => 'Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::EditX::Xml::ObjectFactory'
@@ -118,9 +121,18 @@ sub fileAlreadyImported {
     my $self = shift;
     my $fileName = $_[0];
     my $filePath = $self->getTmpPath() . $fileName;
+
+    return $self->filePathAlreadyImported( $filePath, $fileName );
+}
+
+sub filePathAlreadyImported {
+    my $self = shift;
+    my $filePath = $_[0];
+    my $fileName = $_[1] || $self->getFilenaMeFromPath($filePath);
     my ($fileData, $fileDbHashCount);
     my $hash = 0;
     my $result = 0;
+
     if(-f $filePath ){
         eval {$fileData = read_file($filePath)};
         if($fileData){
@@ -128,7 +140,7 @@ sub fileAlreadyImported {
         }
         if($hash){
             $fileDbHashCount = $self->loadFileHash($fileName, $hash);
-            if($fileDbHashCount == 1){
+            if($fileDbHashCount >= 1){
                 $result = 1;
             }
         }
@@ -188,6 +200,23 @@ sub _move_file_or_die {
     die $failMessage;
 }
 
+sub discardDuplicateFile {
+    my $self = shift;
+    my $filePath = $_[0];
+    my $fileName = $self->getFilenaMeFromPath($filePath);
+
+    $self->getMsgUpdater()->update($fileName, 'DUPLICATE');
+    if ( unlink $filePath ) {
+        $self->getLogger()->log("File: $filePath already imported. Removing it.");
+        return 1;
+    }
+
+    my $error = $! || 'unknown error';
+    my $failMessage = "File: $filePath already imported but could not be unlinked: $error";
+    $self->getLogger()->logError($failMessage);
+    die $failMessage;
+}
+
 sub fillLoadFolder {
     my $self = shift;
     my $tmpPath = $self->getTmpPath();
@@ -225,13 +254,7 @@ sub fillLoadFolder {
                 }
             }
             else{
-                $self->getMsgUpdater()->update($tmpFile, 'DUPLICATE');
-                if(unlink $fullPath){
-                    $self->getLogger()->log("File: $fullPath already imported. Removing it.");
-                }
-                else{
-                    $self->getLogger()->logError("File: $fullPath could not be unlinked!");
-                }
+                $self->discardDuplicateFile($fullPath);
             }
         }
     }
@@ -290,11 +313,15 @@ sub loadFileHash{
 
     if($fileName && $fileHash){
         my $dbh = C4::Context->dbh;
-        my $stmnt = $dbh->prepare("SELECT file_id FROM procurement_file where file_name = ? and file_hash = ?");
-        $stmnt->execute($fileName, $fileHash);
-        $result = $stmnt->rows;
+        my $procurement_file_table = _procurement_file_table();
+        ($result) = $dbh->selectrow_array(
+            "SELECT COUNT(*) FROM $procurement_file_table WHERE file_name = ? AND file_hash = ?",
+            undef,
+            $fileName,
+            $fileHash
+        );
     }
-    return $result;
+    return $result || 0;
 }
 
 sub saveFileHash{
@@ -309,14 +336,33 @@ sub saveFileHash{
             $hash = $self->hashFile($fileData);
             if($hash){
                 my $dbh = C4::Context->dbh;
-                my $stmnt = $dbh->prepare("INSERT INTO procurement_file (file_name, file_hash) VALUES (?,?)");
+                my $procurement_file_table = _procurement_file_table();
+                my $stmnt = $dbh->prepare("INSERT IGNORE INTO $procurement_file_table (file_name, file_hash) VALUES (?,?)");
                 if(!$stmnt->execute($fileName, $hash)){
-                    $self->getLogger()->logError("Saving file hash failed! Error was: $DBI::errstr");
+                    my $failMessage = "Saving file hash failed! Error was: " . ( $dbh->errstr || 'unknown error' );
+                    $self->getLogger()->logError($failMessage);
+                    die $failMessage;
                 }
             }
         }
     }
 }
 
+sub _plugin_table_name {
+    my ($table_name) = @_;
+
+    return lc( join( '_', split( '::', $editx_plugin_class ), $table_name ) );
+}
+
+sub _quote_identifier {
+    my ($identifier) = @_;
+
+    $identifier =~ s/`/``/g;
+    return "`$identifier`";
+}
+
+sub _procurement_file_table {
+    return $procurement_file_table;
+}
 
 1;

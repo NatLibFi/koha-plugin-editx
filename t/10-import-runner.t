@@ -45,7 +45,7 @@ use_ok('Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::ImportRunner');
     sub new {
         my ( $class, $events, $params ) = @_;
         $params ||= {};
-        return bless { events => $events, archived => [], failed => [], %$params }, $class;
+        return bless { events => $events, archived => [], failed => [], discarded => [], checked_imported => [], %$params }, $class;
     }
 
     sub fillLoadFolder {
@@ -67,6 +67,20 @@ use_ok('Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::ImportRunner');
         push @{ $self->{events} }, "fail:$file_name";
         die "fail move failed for $file_name" if $self->{fail_move};
         push @{ $self->{failed} }, $file_name;
+        return 1;
+    }
+
+    sub filePathAlreadyImported {
+        my ( $self, $file_name ) = @_;
+        push @{ $self->{checked_imported} }, $file_name;
+        return $self->{already_imported} && $self->{already_imported}->{$file_name} ? 1 : 0;
+    }
+
+    sub discardDuplicateFile {
+        my ( $self, $file_name ) = @_;
+        push @{ $self->{events} }, "discard:$file_name";
+        die "discard failed for $file_name" if $self->{fail_discard};
+        push @{ $self->{discarded} }, $file_name;
         return 1;
     }
 }
@@ -190,11 +204,12 @@ subtest 'run queues, parses, validates, processes, and archives a file' => sub {
 
     is_deeply(
         $result,
-        { processed => 1, failed => 0 },
+        { processed => 1, failed => 0, skipped => 0 },
         'Runner returns processed and failed counters'
     );
     is_deeply( $parser->{paths}, [ '/tmp/editx/load' ], 'Runner parses the configured load path' );
     is_deeply( \@validated, [ '/tmp/editx/load/order.xml' ], 'Runner validates the parsed file path' );
+    is_deeply( $file_manager->{checked_imported}, [ '/tmp/editx/load/order.xml' ], 'Runner checks import history before validation' );
     is_deeply( $order_processor->{processed}, ['good-order'], 'Runner sends the parsed order to the order processor' );
     is( scalar @{ $transaction_manager->{transactions} }, 1, 'Runner starts one transaction for the imported file' );
     is( $transaction_manager->{transactions}->[0]->{committed}, 1, 'Runner commits a successfully processed file' );
@@ -244,7 +259,7 @@ subtest 'process_orders moves a failing file to the fail folder' => sub {
 
     is_deeply(
         $result,
-        { processed => 0, failed => 1 },
+        { processed => 0, failed => 1, skipped => 0 },
         'Runner counts a processing failure'
     );
     is_deeply( \@validated, [ '/tmp/editx/load/bad.xml' ], 'Runner validates before processing a failing file' );
@@ -298,7 +313,7 @@ subtest 'process_orders treats archive failures as failed imports' => sub {
 
     is_deeply(
         $result,
-        { processed => 0, failed => 1 },
+        { processed => 0, failed => 1, skipped => 0 },
         'Runner counts an archive failure as a failed import'
     );
     is( $transaction_manager->{transactions}->[0]->{committed}, 1, 'Runner commits order processing before archive' );
@@ -350,7 +365,7 @@ subtest 'process_orders logs fail-folder move failures without hiding the origin
 
     is_deeply(
         $result,
-        { processed => 0, failed => 1 },
+        { processed => 0, failed => 1, skipped => 0 },
         'Runner still counts the import as failed when the fail move fails'
     );
     is_deeply( $file_manager->{failed}, [], 'Runner does not mark the file as failed when fail move dies' );
@@ -374,6 +389,51 @@ subtest 'process_orders logs fail-folder move failures without hiding the origin
         $messages,
         qr{processing failed for bad-order},
         'Runner keeps logging the original processing error'
+    );
+};
+
+subtest 'process_orders skips and discards an already imported file' => sub {
+    my @events;
+    my $logger = Editx::TestLogger->new;
+    my $file_name = '/tmp/editx/load/duplicate.xml';
+    my $file_manager = Editx::TestFileManager->new( \@events, { already_imported => { $file_name => 1 } } );
+    my $order_processor = Editx::TestOrderProcessor->new( \@events );
+    my $transaction_manager = Editx::TestTransactionManager->new( \@events );
+    my @validated;
+
+    my $runner = Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::ImportRunner->new(
+        {
+            logger              => $logger,
+            file_manager        => $file_manager,
+            order_processor     => $order_processor,
+            transaction_manager => $transaction_manager,
+            validator           => sub {
+                my ($validated_file_name) = @_;
+                push @validated, $validated_file_name;
+                push @events, "validate:$validated_file_name";
+                return 1;
+            },
+        }
+    );
+
+    my $result = $runner->process_orders( { $file_name => 'good-order' } );
+
+    is_deeply(
+        $result,
+        { processed => 0, failed => 0, skipped => 1 },
+        'Runner counts an already imported file as skipped'
+    );
+    is_deeply( \@validated, [], 'Runner does not validate an already imported file' );
+    is_deeply( $order_processor->{processed}, [], 'Runner does not process an already imported file' );
+    is_deeply( $transaction_manager->{transactions}, [], 'Runner does not start a transaction for an already imported file' );
+    is_deeply( $file_manager->{discarded}, [$file_name], 'Runner discards an already imported file' );
+    is_deeply( $file_manager->{archived}, [], 'Runner does not archive an already imported file' );
+    is_deeply( $file_manager->{failed}, [], 'Runner does not fail an already imported file' );
+    is_deeply( \@events, ["discard:$file_name"], 'Runner only discards an already imported file' );
+    like(
+        join( "\n", @{ $logger->messages } ),
+        qr{Skipping already imported EDItX file /tmp/editx/load/duplicate\.xml},
+        'Runner logs the duplicate skip'
     );
 };
 

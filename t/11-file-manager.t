@@ -63,6 +63,47 @@ use_ok('Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::File');
     }
 }
 
+{
+    package Editx::FileTestDbh;
+
+    sub new {
+        my ( $class, $params ) = @_;
+        $params ||= {};
+        return bless { queries => [], prepared => [], executed => [], %$params }, $class;
+    }
+
+    sub selectrow_array {
+        my ( $self, $sql, $attr, @bind ) = @_;
+        push @{ $self->{queries} }, [ $sql, @bind ];
+        return $self->{count} || 0;
+    }
+
+    sub prepare {
+        my ( $self, $sql ) = @_;
+        push @{ $self->{prepared} }, $sql;
+        return Editx::FileTestSth->new($self);
+    }
+
+    sub errstr {
+        return 'test db error';
+    }
+}
+
+{
+    package Editx::FileTestSth;
+
+    sub new {
+        my ( $class, $dbh ) = @_;
+        return bless { dbh => $dbh }, $class;
+    }
+
+    sub execute {
+        my ( $self, @bind ) = @_;
+        push @{ $self->{dbh}->{executed} }, \@bind;
+        return exists $self->{dbh}->{execute_result} ? $self->{dbh}->{execute_result} : 1;
+    }
+}
+
 sub _write_test_file {
     my ($file_path) = @_;
 
@@ -132,6 +173,66 @@ sub _file_manager {
         ok( -e $file_path, 'moveToFailFolder leaves the source file in place when move fails' );
         is_deeply( $msg_updater->{updates}, [ [ 'order.xml', 'FAILED' ] ], 'moveToFailFolder keeps the current EDI FAILED update before move' );
         like( join( "\n", @{ $logger->messages } ), qr{could not be moved to}, 'moveToFailFolder logs the move failure' );
+    };
+
+    subtest 'discardDuplicateFile removes an already imported file' => sub {
+        my $tmp_dir = tempdir( CLEANUP => 1 );
+        my $load_dir = File::Spec->catdir( $tmp_dir, 'load' );
+        mkdir $load_dir or die "Could not create $load_dir: $!";
+
+        my $file_path = File::Spec->catfile( $load_dir, 'order.xml' );
+        _write_test_file($file_path);
+
+        my ( $file_manager, $logger, $msg_updater ) = _file_manager( q{}, q{} );
+
+        ok( $file_manager->discardDuplicateFile($file_path), 'discardDuplicateFile returns true on unlink success' );
+        ok( !-e $file_path, 'discardDuplicateFile removes the duplicate source file' );
+        is_deeply( $msg_updater->{updates}, [ [ 'order.xml', 'DUPLICATE' ] ], 'discardDuplicateFile marks the EDI message duplicate' );
+        like( join( "\n", @{ $logger->messages } ), qr{already imported\. Removing it\.}, 'discardDuplicateFile logs the removal' );
+    };
+}
+
+{
+    no warnings qw(once redefine);
+
+    subtest 'filePathAlreadyImported checks the qualified procurement file table' => sub {
+        my $tmp_dir = tempdir( CLEANUP => 1 );
+        my $file_path = File::Spec->catfile( $tmp_dir, 'order.xml' );
+        _write_test_file($file_path);
+
+        my ( $file_manager ) = _file_manager( q{}, q{} );
+        my $dbh = Editx::FileTestDbh->new( { count => 1 } );
+
+        local *C4::Context::dbh = sub { return $dbh; };
+
+        is( $file_manager->filePathAlreadyImported($file_path), 1, 'filePathAlreadyImported returns true when a matching hash exists' );
+        like(
+            $dbh->{queries}->[0]->[0],
+            qr{`koha_plugin_fi_kohasuomi_editx_procurement_file`},
+            'filePathAlreadyImported reads from the qualified procurement file table'
+        );
+        is( $dbh->{queries}->[0]->[1], 'order.xml', 'filePathAlreadyImported binds the basename' );
+    };
+
+    subtest 'saveFileHash writes to the qualified procurement file table' => sub {
+        my $tmp_dir = tempdir( CLEANUP => 1 );
+        my $file_path = File::Spec->catfile( $tmp_dir, 'order.xml' );
+        _write_test_file($file_path);
+
+        my ( $file_manager ) = _file_manager( q{}, q{} );
+        my $dbh = Editx::FileTestDbh->new;
+
+        local *C4::Context::dbh = sub { return $dbh; };
+
+        $file_manager->saveFileHash( $file_path, 'order.xml' );
+
+        like(
+            $dbh->{prepared}->[0],
+            qr{INSERT IGNORE INTO `koha_plugin_fi_kohasuomi_editx_procurement_file`},
+            'saveFileHash inserts into the qualified procurement file table'
+        );
+        is( $dbh->{executed}->[0]->[0], 'order.xml', 'saveFileHash binds the file name' );
+        ok( $dbh->{executed}->[0]->[1], 'saveFileHash binds the file hash' );
     };
 }
 

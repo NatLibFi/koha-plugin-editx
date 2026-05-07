@@ -66,6 +66,7 @@ sub _install_or_upgrade_tables {
     my $dbh = C4::Context->dbh;
     my $sequences_table = $self->_quote_identifier( $self->get_qualified_table_name('sequences') );
     my $map_productform_table = $self->_quote_identifier( $self->get_qualified_table_name('map_productform') );
+    my $procurement_file_table = $self->_quote_identifier( $self->get_qualified_table_name('procurement_file') );
 
     my $success = $dbh->do( "
         CREATE TABLE IF NOT EXISTS $sequences_table (
@@ -97,10 +98,29 @@ sub _install_or_upgrade_tables {
         warn $message;
     }
 
+    $success &&= $dbh->do( "
+        CREATE TABLE IF NOT EXISTS $procurement_file_table (
+          `file_id` int(11) NOT NULL AUTO_INCREMENT,
+          `file_name` varchar(255) NOT NULL,
+          `file_hash` varchar(255) NOT NULL,
+          `imported_on` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (`file_id`),
+          UNIQUE KEY `file_name_hash` (`file_name`, `file_hash`),
+          KEY `file_hash` (`file_hash`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    " );
+
+    if ( !$success ) {
+        my $message = "Failed to create procurement_file table: " . $dbh->errstr;
+        $self->_log_runtime( error => $message, { operation => 'install_or_upgrade' } );
+        warn $message;
+    }
+
     $success &&= $self->_drop_map_productform_foreign_keys();
     $success &&= $self->_allow_nullable_map_productform_columns();
     $success &&= $self->_migrate_legacy_sequences_table();
     $success &&= $self->_migrate_legacy_map_productform_table();
+    $success &&= $self->_migrate_legacy_procurement_file_table();
     $success &&= $self->_ensure_sequences_row();
 
     return $success;
@@ -133,9 +153,11 @@ sub uninstall() {
     my $success = 1;
     my $sequences_table = $self->_quote_identifier( $self->get_qualified_table_name('sequences') );
     my $map_productform_table = $self->_quote_identifier( $self->get_qualified_table_name('map_productform') );
+    my $procurement_file_table = $self->_quote_identifier( $self->get_qualified_table_name('procurement_file') );
 
     $success &&= C4::Context->dbh->do("DROP TABLE IF EXISTS $sequences_table");
     $success &&= C4::Context->dbh->do("DROP TABLE IF EXISTS $map_productform_table");
+    $success &&= C4::Context->dbh->do("DROP TABLE IF EXISTS $procurement_file_table");
 
     $self->_log_runtime(
         $success ? 'info' : 'error',
@@ -392,6 +414,28 @@ sub _migrate_legacy_map_productform_table {
         " ) or return;
 
         return 1;
+    }
+
+    return 1;
+}
+
+sub _migrate_legacy_procurement_file_table {
+    my ($self) = @_;
+
+    my $dbh = C4::Context->dbh;
+    my $target = $self->get_qualified_table_name('procurement_file');
+    my $quoted_target = $self->_quote_identifier($target);
+
+    for my $source ( 'editx_procurement_file', 'procurement_file' ) {
+        next if $source eq $target;
+        next unless $self->_table_exists($source);
+
+        my $quoted_source = $self->_quote_identifier($source);
+        $dbh->do( "
+            INSERT IGNORE INTO $quoted_target (file_name, file_hash)
+            SELECT file_name, file_hash FROM $quoted_source
+            WHERE file_name IS NOT NULL AND file_hash IS NOT NULL
+        " ) or return;
     }
 
     return 1;

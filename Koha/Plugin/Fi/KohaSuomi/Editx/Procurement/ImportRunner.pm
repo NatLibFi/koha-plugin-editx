@@ -32,12 +32,12 @@ sub run {
 
     my $result = $self->process_orders( \%orders, $file_manager, $order_processor, $logger );
 
-    if ( !$result->{processed} && !$result->{failed} ) {
+    if ( !$result->{processed} && !$result->{failed} && !$result->{skipped} ) {
         $logger->info("No EDItX order files found for processing.");
     }
 
     $logger->info(
-        "Ended Koha::Plugin::Fi::KohaSuomi::Editx::Procurement: processed $result->{processed}, failed $result->{failed}.",
+        "Ended Koha::Plugin::Fi::KohaSuomi::Editx::Procurement: processed $result->{processed}, failed $result->{failed}, skipped $result->{skipped}.",
         1
     );
 
@@ -54,17 +54,23 @@ sub process_orders {
 
     my $processed = 0;
     my $failed = 0;
+    my $skipped = 0;
 
     while ( my ( $file_name, $order ) = each %$orders ) {
         try {
             $logger->info("Started processing order from file $file_name");
 
-            $self->validate_editx($file_name);
-            $self->_process_order_in_transaction( $file_name, $order, $order_processor, $logger );
-            $file_manager->archiveFile($file_name);
-            $processed++;
+            if ( $self->_skip_already_imported_file( $file_manager, $file_name, $logger ) ) {
+                $skipped++;
+            } else {
 
-            $logger->info("Ended processing order from file $file_name");
+                $self->validate_editx($file_name);
+                $self->_process_order_in_transaction( $file_name, $order, $order_processor, $logger );
+                $file_manager->archiveFile($file_name);
+                $processed++;
+
+                $logger->info("Ended processing order from file $file_name");
+            }
         } catch {
             my $error = $_;
             $self->_move_failed_file( $file_manager, $file_name, $logger );
@@ -79,7 +85,20 @@ sub process_orders {
     return {
         processed => $processed,
         failed    => $failed,
+        skipped   => $skipped,
     };
+}
+
+sub _skip_already_imported_file {
+    my ( $self, $file_manager, $file_name, $logger ) = @_;
+
+    return 0 if !$file_manager->filePathAlreadyImported($file_name);
+
+    my $message = "Skipping already imported EDItX file $file_name.";
+    $logger->warn($message);
+    $file_manager->discardDuplicateFile($file_name);
+
+    return 1;
 }
 
 sub _process_order_in_transaction {
