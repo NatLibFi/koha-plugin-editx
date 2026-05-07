@@ -30,12 +30,12 @@ Configure SFTP sources from the plugin configuration page. The YAML field accept
 
 ```yaml
 sources:
-  - id: haaga_helia
+  - id: alexandria_library
     host: sftp.example.org
     port: 22
     user: editx-user
     identity_file: /var/lib/koha/<instance>/.ssh/editx_sftp
-    remote_dir: /out/haaga-helia
+    remote_dir: /out/alexandria
     local_dir:
     pattern: "*.xml"
     after_download: keep
@@ -48,12 +48,13 @@ sources:
 Leave `local_dir` empty to use `import_tmp_path` from the plugin configuration page.
 
 Enable automatic synchronization from the plugin configuration page. When the checkbox is disabled, `cronjob_nightly` returns without doing any work.
+The configuration page also has a manual "Download and import now" test action. It uses the last saved plugin configuration and is intended for short preproduction checks; the nightly plugin cron remains the normal production path.
 
 Koha packages already run `/usr/share/koha/bin/cronjobs/plugins_nightly.pl` from `koha-common.cron.daily`. For preproduction testing, you can run only this plugin with:
 
 `koha-foreach --chdir --enabled /usr/share/koha/bin/cronjobs/plugins_nightly.pl -m name=EDItX-plugin`
 
-For 3AMK preproduction testing, check these Koha settings before enabling nightly synchronization:
+For preproduction testing, check these Koha settings before enabling nightly synchronization:
 
 - Plugin import folder paths exist and are writable by `<instance>-koha`.
 - Each SFTP source either leaves `local_dir` empty or sets it to the same directory as `import_tmp_path`.
@@ -61,4 +62,4 @@ For 3AMK preproduction testing, check these Koha settings before enabling nightl
 - `allowed_locations` and `productform_alternative_triggers` match Koha LOC authorised values.
 - The vendor has an enabled `vendor_edi_accounts` row with `transport='FILE'`, `orders_enabled='1'`, `san` matching the EDItX `BuyerParty/PartyID/Identifier`, and qualifier `91`.
 - All EDItX `FundNumber` values exist in `aqbudgets.budget_code`.
-- Branch, location, item type, authorised value, and item field mappings match the delivered 3AMK codes.
+- Branch, location, item type, authorised value, and item field mappings match the delivered EDItX codes.

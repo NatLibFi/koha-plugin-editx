@@ -32,9 +32,14 @@ SFTP_REMOTE_ARCHIVE_DIR=/outgoing/editx/archive
 
 # Multiple standalone targets can be configured with target-specific variables:
 #
-# SFTP_TARGETS='haaga_helia another_library'
-# SFTP_haaga_helia_HOST=sftp.example.org
-# SFTP_haaga_helia_USER=editx-user
-# SFTP_haaga_helia_IDENTITY_FILE=/var/lib/koha/<instance>/.ssh/editx_sftp
-# SFTP_haaga_helia_REMOTE_DIR=/out/haaga-helia
-# SFTP_haaga_helia_LOCAL_DIR=/var/spool/koha/<instance>/editx/tmp
+# SFTP_TARGETS='alexandria_library pergamum_library'
+# SFTP_alexandria_library_HOST=sftp.example.org
+# SFTP_alexandria_library_USER=editx-user
+# SFTP_alexandria_library_IDENTITY_FILE=/var/lib/koha/<instance>/.ssh/editx_sftp
+# SFTP_alexandria_library_REMOTE_DIR=/out/alexandria
+# SFTP_alexandria_library_LOCAL_DIR=/var/spool/koha/<instance>/editx/tmp
+# SFTP_pergamum_library_HOST=sftp.example.org
+# SFTP_pergamum_library_USER=editx-user
+# SFTP_pergamum_library_IDENTITY_FILE=/var/lib/koha/<instance>/.ssh/editx_sftp
+# SFTP_pergamum_library_REMOTE_DIR=/out/pergamum
+# SFTP_pergamum_library_LOCAL_DIR=/var/spool/koha/<instance>/editx/tmp

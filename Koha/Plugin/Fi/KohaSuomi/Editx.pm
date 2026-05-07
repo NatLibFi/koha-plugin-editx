@@ -6,6 +6,7 @@ use base qw(Koha::Plugins::Base);
 ## We will also need to include any Koha libraries we want to access
 use File::Spec;
 use File::Temp qw(tempfile);
+use IO::Handle;
 use C4::Context;
 use Koha::DateUtils qw(dt_from_string);
 use Koha::Token;
@@ -119,22 +120,61 @@ sub configure {
     my $cgi = $self->{'cgi'};
     my @messages;
     my $saved;
+    my $manual_sync_result;
+    my $is_save = $cgi->request_method eq 'POST' && $cgi->param('save');
+    my $is_run_sync_now = $cgi->request_method eq 'POST' && $cgi->param('run_sync_now');
     my $nightly_sync_enabled =
-          $cgi->request_method eq 'POST'
+          $is_save
         ? ( $cgi->param('nightly_sync_enabled') ? 1 : 0 )
         : $self->_nightly_sync_enabled();
     my $sftp_sources_yaml =
-          $cgi->request_method eq 'POST'
+          $is_save
         ? ( $cgi->param('sftp_sources_yaml') // '' )
         : $self->_sftp_sources_yaml();
     my $procurement_settings =
-          $cgi->request_method eq 'POST'
+          $is_save
         ? $self->_procurement_settings_from_cgi($cgi)
         : $self->_procurement_settings();
 
     $self->_install_or_upgrade_tables();
 
-    if ( $cgi->request_method eq 'POST' && $cgi->param('save') ) {
+    if ($is_run_sync_now) {
+        if ( !$self->_csrf_token_valid($cgi) ) {
+            push @messages, $self->_configure_message( error => 'Manual EDItX synchronization was not started because the security token was invalid. Reload the page and try again.' );
+        } else {
+            my $run_output;
+            my $run_started_at = $self->_database_timestamp();
+            my $success = eval {
+                $run_output = $self->_run_nightly_sync_for_web();
+                1;
+            };
+            $manual_sync_result = eval { $self->_manual_sync_result($run_started_at) };
+            if ($@) {
+                push @messages, $self->_configure_message( warning => 'Manual run finished, but the created order summary could not be loaded: ' . $self->_compact_message($@) );
+            }
+            if ($success) {
+                push @messages, $self->_configure_message( success => 'Manual EDItX download and import finished.' );
+                if ( my $summary = $self->_compact_message($run_output) ) {
+                    push @messages, $self->_configure_message( info => "Manual run output: $summary" );
+                }
+            } else {
+                push @messages, $self->_configure_message( error => 'Manual EDItX download/import failed: ' . $self->_compact_message($@) );
+            }
+        }
+
+        $self->_output_configure_page(
+            mapping_csv            => $self->_productform_mapping_csv(),
+            sftp_sources_yaml      => $self->_sftp_sources_yaml(),
+            procurement_settings   => $self->_procurement_settings(),
+            messages               => \@messages,
+            nightly_sync_enabled   => $self->_nightly_sync_enabled(),
+            saved                  => 0,
+            manual_sync_result     => $manual_sync_result,
+        );
+        return;
+    }
+
+    if ($is_save) {
         my $mapping_csv = $cgi->param('mapping_csv') // '';
         if ( !$self->_csrf_token_valid($cgi) ) {
             push @messages, $self->_configure_message( error => 'Configuration was not saved because the security token was invalid. Reload the page and try again.' );
@@ -388,6 +428,7 @@ sub _output_configure_page {
         configure_href         => $self->plugin_method_url('configure'),
         css_href               => $self->static_asset_url('static_files/editx.css'),
         plugin_display_version => $self->plugin_display_version(),
+        manual_sync_result     => $params{manual_sync_result},
     );
 
     return $self->output_html( $template->output() );
@@ -441,7 +482,9 @@ sub _write_sftp_config_file {
 }
 
 sub _run_nightly_sync {
-    my ($self) = @_;
+    my ( $self, $options ) = @_;
+
+    $options ||= {};
 
     my $koha_instance = $ENV{KOHA_INSTANCE} || $self->_koha_instance();
     die "KOHA_INSTANCE is not set and could not be detected from KOHA_CONF." unless $koha_instance;
@@ -460,7 +503,7 @@ sub _run_nightly_sync {
     die "No EDItX import script: $import_script" unless -f $import_script;
 
     if ( !mkdir $lock_dir ) {
-        print "Another EDItX nightly synchronization is already active for $koha_instance.\n";
+        $self->_sync_print( $options, "Another EDItX nightly synchronization is already active for $koha_instance.\n" );
         return 1;
     }
 
@@ -468,10 +511,10 @@ sub _run_nightly_sync {
         $sftp_config_file = $self->_write_sftp_config_file($koha_instance);
         local $ENV{EDITX_SFTP_CONFIG} = $sftp_config_file;
 
-        print "Starting EDItX nightly synchronization for $koha_instance.\n";
-        $self->_run_command($fetch_script);
-        $self->_run_command( $^X, $import_script );
-        print "Finished EDItX nightly synchronization for $koha_instance.\n";
+        $self->_sync_print( $options, "Starting EDItX nightly synchronization for $koha_instance.\n" );
+        $self->_run_command( $options, $fetch_script );
+        $self->_run_command( $options, $^X, $import_script );
+        $self->_sync_print( $options, "Finished EDItX nightly synchronization for $koha_instance.\n" );
         1;
     };
     my $error = $@;
@@ -483,10 +526,48 @@ sub _run_nightly_sync {
     return 1;
 }
 
-sub _run_command {
-    my ( $self, @command ) = @_;
+sub _run_nightly_sync_for_web {
+    my ($self) = @_;
 
-    system @command;
+    my ( $fh, $output_file ) = tempfile( 'editx-manual-sync-XXXXXX', DIR => '/tmp', UNLINK => 0 );
+    $fh->autoflush(1);
+
+    my $success = eval {
+        $self->_run_nightly_sync( { output_fh => $fh } );
+        1;
+    };
+    my $error = $@;
+
+    close $fh or die "Cannot close temporary EDItX manual sync log $output_file: $!";
+
+    my $output = $self->_read_file_tail( $output_file, 6000 );
+    unlink $output_file if -f $output_file;
+
+    die $self->_sync_error_message( $error, $output ) unless $success;
+
+    return $output;
+}
+
+sub _run_command {
+    my ( $self, @args ) = @_;
+
+    my $options = ref $args[0] eq 'HASH' ? shift @args : {};
+    my @command = @args;
+
+    if ( my $output_fh = $options->{output_fh} ) {
+        my $pid = fork;
+        die 'Cannot fork EDItX command: ' . $! unless defined $pid;
+        if ( !$pid ) {
+            open STDOUT, '>&', $output_fh or die "Cannot redirect child STDOUT: $!";
+            open STDERR, '>&', $output_fh or die "Cannot redirect child STDERR: $!";
+            exec @command;
+            die 'Failed to execute ' . join( ' ', @command ) . ": $!";
+        }
+        my $waited = waitpid $pid, 0;
+        die 'Failed to wait for EDItX command: ' . $! if $waited == -1;
+    } else {
+        system @command;
+    }
 
     my $command_text = join ' ', @command;
     die "Failed to execute $command_text: $!" if $? == -1;
@@ -494,6 +575,73 @@ sub _run_command {
     die "$command_text exited with status " . ( $? >> 8 ) if $? != 0;
 
     return 1;
+}
+
+sub _sync_print {
+    my ( $self, $options, $message ) = @_;
+
+    if ( $options && $options->{output_fh} ) {
+        print { $options->{output_fh} } $message;
+        return 1;
+    }
+
+    print $message;
+    return 1;
+}
+
+sub _database_timestamp {
+    my ($self) = @_;
+
+    my ($timestamp) = C4::Context->dbh->selectrow_array('SELECT NOW()');
+    die 'Could not read database timestamp.' unless $timestamp;
+
+    return $timestamp;
+}
+
+sub _manual_sync_result {
+    my ( $self, $started_at ) = @_;
+
+    die 'Manual sync start timestamp is missing.' unless $started_at;
+
+    my $dbh = C4::Context->dbh;
+    my $baskets = $dbh->selectall_arrayref(
+        "
+        SELECT
+            b.basketno,
+            b.basketname,
+            b.booksellerid,
+            v.name AS vendor_name,
+            COUNT(o.ordernumber) AS order_count,
+            COALESCE(SUM(o.quantity), 0) AS item_count,
+            MIN(o.ordernumber) AS first_ordernumber,
+            MAX(o.ordernumber) AS last_ordernumber
+        FROM aqorders o
+        JOIN aqbasket b ON b.basketno = o.basketno
+        LEFT JOIN aqbooksellers v ON v.id = b.booksellerid
+        WHERE o.timestamp >= ?
+        GROUP BY b.basketno, b.basketname, b.booksellerid, v.name
+        ORDER BY b.basketno DESC
+        LIMIT 20
+        ",
+        { Slice => {} },
+        $started_at
+    );
+
+    my ( $order_count, $item_count ) = ( 0, 0 );
+    for my $basket (@$baskets) {
+        $order_count += $basket->{order_count} || 0;
+        $item_count += $basket->{item_count} || 0;
+        $basket->{basket_url} = '/cgi-bin/koha/acqui/basket.pl?basketno=' . url_escape( $basket->{basketno} );
+        $basket->{vendor_url} = '/cgi-bin/koha/acqui/booksellers.pl?booksellerid=' . url_escape( $basket->{booksellerid} )
+            if defined $basket->{booksellerid};
+    }
+
+    return {
+        started_at  => $started_at,
+        baskets     => $baskets,
+        order_count => $order_count,
+        item_count  => $item_count,
+    };
 }
 
 sub _koha_instance {
@@ -519,12 +667,12 @@ sub _sftp_sources_yaml {
 sub _empty_sftp_sources_yaml {
     return <<'YAML';
 sources:
-  - id: haaga_helia
+  - id: alexandria_library
     host: sftp.example.org
     port: 22
     user: editx-user
     identity_file: /var/lib/koha/<instance>/.ssh/editx_sftp
-    remote_dir: /out/haaga-helia
+    remote_dir: /out/alexandria
     local_dir:
     pattern: "*.xml"
     after_download: keep
@@ -1063,6 +1211,53 @@ sub _configure_message {
         alert_class => $type eq 'error' ? 'danger' : $type,
         text        => $text,
     };
+}
+
+sub _read_file_tail {
+    my ( $self, $file, $max_bytes ) = @_;
+
+    return '' unless $file && -f $file;
+
+    $max_bytes ||= 6000;
+    open my $fh, '<', $file or return '';
+    binmode $fh;
+    my $size = -s $file || 0;
+    if ( $size > $max_bytes ) {
+        seek $fh, -$max_bytes, 2;
+        <$fh>;
+    }
+    local $/;
+    my $text = <$fh> // '';
+    close $fh;
+
+    return $text;
+}
+
+sub _sync_error_message {
+    my ( $self, $error, $output ) = @_;
+
+    my $message = $self->_compact_message($error) || 'unknown error';
+    if ( my $summary = $self->_compact_message($output) ) {
+        $message .= " Last output: $summary";
+    }
+
+    return $message;
+}
+
+sub _compact_message {
+    my ( $self, $message ) = @_;
+
+    return '' unless defined $message;
+
+    $message =~ s/\A\s+|\s+\z//g;
+    $message =~ s/\s+/ /g;
+    return '' if $message eq '';
+
+    if ( length $message > 800 ) {
+        $message = substr( $message, 0, 797 ) . '...';
+    }
+
+    return $message;
 }
 
 sub _table_exists {

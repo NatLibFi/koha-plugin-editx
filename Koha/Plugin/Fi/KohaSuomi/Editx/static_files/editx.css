@@ -139,6 +139,42 @@
     white-space: pre;
 }
 
+.editx-manual-sync-form {
+    align-items: flex-start;
+    display: flex;
+    gap: 1rem;
+    justify-content: space-between;
+}
+
+.editx-manual-sync-form h2 {
+    font-size: 1.15rem;
+    margin: 0 0 0.25rem;
+}
+
+.editx-manual-sync-form p {
+    color: #3f4d56;
+    margin: 0;
+    max-width: 58rem;
+}
+
+.editx-manual-sync-form .btn {
+    flex: 0 0 auto;
+}
+
+.editx-manual-sync-result h2 {
+    font-size: 1.15rem;
+    margin: 0 0 0.6rem;
+}
+
+.editx-manual-sync-result p {
+    color: #3f4d56;
+    max-width: 68rem;
+}
+
+.editx-manual-sync-result table {
+    margin-bottom: 0;
+}
+
 .editx-upgrade-status {
     color: #3f4d56;
 }
@@ -157,5 +193,13 @@
         grid-template-columns: 1fr;
         margin-top: 1rem;
         min-width: 0;
+    }
+
+    .editx-manual-sync-form {
+        display: block;
+    }
+
+    .editx-manual-sync-form .btn {
+        margin-top: 0.85rem;
     }
 }
