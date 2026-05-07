@@ -4,9 +4,11 @@ use Modern::Perl;
 ## Required for all plugins
 use base qw(Koha::Plugins::Base);
 ## We will also need to include any Koha libraries we want to access
+use File::Temp qw(tempfile);
 use C4::Context;
 use Koha::DateUtils qw(dt_from_string);
 use Text::CSV_XS;
+use YAML::XS qw(Load);
 use utf8;
 ## Here we set our plugin version
 our $VERSION = "{VERSION}";
@@ -117,17 +119,44 @@ sub configure {
           $cgi->request_method eq 'POST'
         ? ( $cgi->param('nightly_sync_enabled') ? 1 : 0 )
         : $self->_nightly_sync_enabled();
+    my $sftp_sources_yaml =
+          $cgi->request_method eq 'POST'
+        ? ( $cgi->param('sftp_sources_yaml') // '' )
+        : $self->_sftp_sources_yaml();
 
     $self->_install_or_upgrade_tables();
 
     if ( $cgi->request_method eq 'POST' && $cgi->param('save') ) {
         my $mapping_csv = $cgi->param('mapping_csv') // '';
         my ( $rows, $parse_messages, $has_blocking_errors ) = $self->_parse_productform_mapping_csv($mapping_csv);
+        my ( $sftp_sources, $sftp_messages, $has_sftp_blocking_errors ) = $self->_parse_sftp_sources_yaml($sftp_sources_yaml);
         push @messages, @$parse_messages;
+        push @messages, @$sftp_messages;
+        $has_blocking_errors ||= $has_sftp_blocking_errors;
+
+        if ( !$has_blocking_errors && $nightly_sync_enabled ) {
+            if ( !@$sftp_sources ) {
+                push @messages, $self->_configure_message( error => 'Nightly sync is enabled but no SFTP sources are configured.' );
+                $has_blocking_errors = 1;
+            } else {
+                my $default_import_tmp_path = eval { $self->_default_import_tmp_path() };
+                if ($@) {
+                    push @messages, $self->_configure_message( error => "Could not read import_tmp_path from procurement-config.xml: $@" );
+                    $has_blocking_errors = 1;
+                } else {
+                    for my $source (@$sftp_sources) {
+                        next if $source->{local_dir} || $default_import_tmp_path;
+                        push @messages, $self->_configure_message( error => "SFTP source '$source->{id}' has no local_dir and import_tmp_path is not set in procurement-config.xml." );
+                        $has_blocking_errors = 1;
+                    }
+                }
+            }
+        }
 
         if ($has_blocking_errors) {
             $self->_output_configure_page(
                 mapping_csv            => $mapping_csv,
+                sftp_sources_yaml      => $sftp_sources_yaml,
                 messages               => \@messages,
                 nightly_sync_enabled   => $nightly_sync_enabled,
                 saved                  => 0,
@@ -140,6 +169,7 @@ sub configure {
         if (@$save_messages) {
             $self->_output_configure_page(
                 mapping_csv            => $mapping_csv,
+                sftp_sources_yaml      => $sftp_sources_yaml,
                 messages               => \@messages,
                 nightly_sync_enabled   => $nightly_sync_enabled,
                 saved                  => 0,
@@ -149,6 +179,7 @@ sub configure {
         $self->store_data(
             {
                 nightly_sync_enabled => $nightly_sync_enabled,
+                sftp_sources_yaml    => $sftp_sources_yaml,
                 last_configured_by   => ( C4::Context->userenv || {} )->{'number'},
             }
         );
@@ -157,6 +188,7 @@ sub configure {
 
     $self->_output_configure_page(
         mapping_csv            => $self->_productform_mapping_csv(),
+        sftp_sources_yaml      => $self->_sftp_sources_yaml(),
         messages               => \@messages,
         nightly_sync_enabled   => $nightly_sync_enabled,
         saved                  => $saved,
@@ -281,6 +313,7 @@ sub _output_configure_page {
     my $template = $self->get_template( { file => 'configure.tt' } );
     $template->param(
         mapping_csv            => $params{mapping_csv},
+        sftp_sources_yaml      => $params{sftp_sources_yaml},
         messages               => $params{messages},
         nightly_sync_enabled   => $params{nightly_sync_enabled},
         saved                  => $params{saved},
@@ -290,6 +323,53 @@ sub _output_configure_page {
     );
 
     return $self->output_html( $template->output() );
+}
+
+sub _write_sftp_config_file {
+    my ( $self, $koha_instance ) = @_;
+
+    my ( $sources, $messages, $has_errors ) = $self->_parse_sftp_sources_yaml( $self->_sftp_sources_yaml() );
+    die join( "\n", map { $_->{text} } @$messages ) . "\n" if $has_errors;
+    die "No EDItX SFTP sources configured.\n" unless @$sources;
+
+    my $default_local_dir = $self->_default_import_tmp_path();
+    my $safe_instance = $koha_instance;
+    $safe_instance =~ s/[^A-Za-z0-9_.-]/_/g;
+
+    my ( $fh, $config_file ) = tempfile( "editx-sftp-$safe_instance-XXXXXX", DIR => '/tmp', UNLINK => 0 );
+
+    print {$fh} "SFTP_TARGETS=" . $self->_shell_quote( join( ' ', map { $_->{id} } @$sources ) ) . "\n";
+
+    for my $source (@$sources) {
+        my $id = $source->{id};
+        my $local_dir = $source->{local_dir} || $default_local_dir;
+        die "No local_dir configured for SFTP source '$id' and import_tmp_path is not set.\n" unless $local_dir;
+
+        my %values = (
+            HOST                     => $source->{host},
+            PORT                     => $source->{port},
+            USER                     => $source->{user},
+            IDENTITY_FILE            => $source->{identity_file},
+            REMOTE_DIR               => $source->{remote_dir},
+            LOCAL_DIR                => $local_dir,
+            PATTERN                  => $source->{pattern},
+            AFTER_DOWNLOAD           => $source->{after_download},
+            REMOTE_ARCHIVE_DIR       => $source->{remote_archive_dir},
+            KNOWN_HOSTS_FILE         => $source->{known_hosts_file},
+            STRICT_HOST_KEY_CHECKING => $source->{strict_host_key_checking},
+            SSH_CONFIG               => $source->{ssh_config},
+        );
+
+        for my $suffix ( sort keys %values ) {
+            next unless defined $values{$suffix} && $values{$suffix} ne '';
+            print {$fh} "SFTP_${id}_${suffix}=" . $self->_shell_quote( $values{$suffix} ) . "\n";
+        }
+    }
+
+    close $fh or die "Cannot close temporary EDItX SFTP config $config_file: $!";
+    chmod 0600, $config_file or die "Cannot chmod temporary EDItX SFTP config $config_file: $!";
+
+    return $config_file;
 }
 
 sub _run_nightly_sync {
@@ -306,6 +386,7 @@ sub _run_nightly_sync {
     my $lock_instance = $koha_instance;
     $lock_instance =~ s/[^A-Za-z0-9_.-]/_/g;
     my $lock_dir = "/tmp/editx-nightly-$lock_instance.lock";
+    my $sftp_config_file;
 
     die "No executable EDItX SFTP fetch script: $fetch_script" unless -x $fetch_script;
     die "No EDItX import script: $import_script" unless -f $import_script;
@@ -316,6 +397,9 @@ sub _run_nightly_sync {
     }
 
     my $success = eval {
+        $sftp_config_file = $self->_write_sftp_config_file($koha_instance);
+        local $ENV{EDITX_SFTP_CONFIG} = $sftp_config_file;
+
         print "Starting EDItX nightly synchronization for $koha_instance.\n";
         $self->_run_command($fetch_script);
         $self->_run_command( $^X, $import_script );
@@ -324,6 +408,7 @@ sub _run_nightly_sync {
     };
     my $error = $@;
 
+    unlink $sftp_config_file if $sftp_config_file && -f $sftp_config_file;
     rmdir $lock_dir or warn "Could not remove EDItX nightly lock $lock_dir: $!";
     die $error unless $success;
 
@@ -355,6 +440,31 @@ sub _nightly_sync_enabled {
     my ($self) = @_;
 
     return $self->retrieve_data('nightly_sync_enabled') ? 1 : 0;
+}
+
+sub _sftp_sources_yaml {
+    my ($self) = @_;
+
+    return $self->retrieve_data('sftp_sources_yaml') || $self->_empty_sftp_sources_yaml();
+}
+
+sub _empty_sftp_sources_yaml {
+    return <<'YAML';
+sources:
+  - id: haaga_helia
+    host: sftp.example.org
+    port: 22
+    user: editx-user
+    identity_file: /var/lib/koha/<instance>/.ssh/editx_sftp
+    remote_dir: /out/haaga-helia
+    local_dir:
+    pattern: "*.xml"
+    after_download: keep
+    remote_archive_dir:
+    known_hosts_file:
+    strict_host_key_checking: "yes"
+    ssh_config:
+YAML
 }
 
 sub _parse_productform_mapping_csv {
@@ -429,6 +539,99 @@ sub _parse_productform_mapping_csv {
     }
 
     return ( \@rows, \@messages, $has_blocking_errors );
+}
+
+sub _parse_sftp_sources_yaml {
+    my ( $self, $sftp_sources_yaml ) = @_;
+
+    my ( @messages, %seen_ids );
+    my $has_blocking_errors;
+    my $config = eval { Load($sftp_sources_yaml) };
+
+    if ($@) {
+        push @messages, $self->_configure_message( error => "SFTP YAML parse failed: $@" );
+        return ( [], \@messages, 1 );
+    }
+
+    $config ||= {};
+    if ( ref $config ne 'HASH' ) {
+        push @messages, $self->_configure_message( error => 'SFTP YAML must be a mapping with a sources list.' );
+        return ( [], \@messages, 1 );
+    }
+
+    my $sources = $config->{sources} || [];
+    if ( ref $sources ne 'ARRAY' ) {
+        push @messages, $self->_configure_message( error => 'SFTP YAML sources must be a list.' );
+        return ( [], \@messages, 1 );
+    }
+
+    my @sources;
+    for my $index ( 0 .. $#$sources ) {
+        my $source = $sources->[$index];
+        my $source_number = $index + 1;
+
+        if ( ref $source ne 'HASH' ) {
+            push @messages, $self->_configure_message( error => "SFTP source $source_number must be a mapping." );
+            $has_blocking_errors = 1;
+            next;
+        }
+
+        my %normalized = map { $_ => $self->_trim_csv_value( $source->{$_} ) } qw(
+            id host port user identity_file remote_dir local_dir pattern after_download remote_archive_dir
+            known_hosts_file strict_host_key_checking ssh_config
+        );
+
+        $normalized{port} //= 22;
+        $normalized{pattern} //= '*.xml';
+        $normalized{after_download} //= 'keep';
+        $normalized{strict_host_key_checking} //= 'yes';
+
+        if ( $normalized{strict_host_key_checking} =~ /\A(?:1|true)\z/i ) {
+            $normalized{strict_host_key_checking} = 'yes';
+        } elsif ( $normalized{strict_host_key_checking} =~ /\A(?:0|false)\z/i ) {
+            $normalized{strict_host_key_checking} = 'no';
+        }
+
+        for my $required (qw(id host user remote_dir)) {
+            next if defined $normalized{$required} && $normalized{$required} ne '';
+            push @messages, $self->_configure_message( error => "SFTP source $source_number has no $required." );
+            $has_blocking_errors = 1;
+        }
+
+        if ( $normalized{id} && $normalized{id} !~ /\A[A-Za-z0-9_]+\z/ ) {
+            push @messages, $self->_configure_message( error => "SFTP source $source_number id '$normalized{id}' is invalid; use only letters, numbers, and underscores." );
+            $has_blocking_errors = 1;
+        }
+
+        if ( $normalized{id} && $seen_ids{ $normalized{id} }++ ) {
+            push @messages, $self->_configure_message( error => "SFTP source $source_number repeats id '$normalized{id}'." );
+            $has_blocking_errors = 1;
+        }
+
+        if ( defined $normalized{port} && $normalized{port} !~ /\A[0-9]+\z/ ) {
+            push @messages, $self->_configure_message( error => "SFTP source $source_number port '$normalized{port}' is not numeric." );
+            $has_blocking_errors = 1;
+        }
+
+        if ( $normalized{after_download} !~ /\A(?:keep|archive|delete)\z/ ) {
+            push @messages, $self->_configure_message( error => "SFTP source $source_number after_download must be keep, archive, or delete." );
+            $has_blocking_errors = 1;
+        }
+
+        if ( $normalized{after_download} eq 'archive' && !$normalized{remote_archive_dir} ) {
+            push @messages, $self->_configure_message( error => "SFTP source $source_number uses archive but has no remote_archive_dir." );
+            $has_blocking_errors = 1;
+        }
+
+        if ( $normalized{strict_host_key_checking} !~ /\A(?:yes|no|ask|accept-new)\z/ ) {
+            push @messages, $self->_configure_message( error => "SFTP source $source_number strict_host_key_checking must be yes, no, ask, or accept-new." );
+            $has_blocking_errors = 1;
+        }
+
+        push @sources, \%normalized;
+    }
+
+    return ( \@sources, \@messages, $has_blocking_errors );
 }
 
 sub _save_productform_mappings {
@@ -530,6 +733,23 @@ sub _is_productform_mapping_csv_header {
     return $header[0] eq 'onix_code'
         && $header[1] eq 'productform'
         && $header[2] eq 'productform_alternative';
+}
+
+sub _default_import_tmp_path {
+    my ($self) = @_;
+
+    require Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Config;
+    my $settings = Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Config->new->getSettings();
+
+    return $settings->{settings}->{import_tmp_path} // '';
+}
+
+sub _shell_quote {
+    my ( $self, $value ) = @_;
+
+    $value //= '';
+    $value =~ s/'/'"'"'/g;
+    return "'$value'";
 }
 
 sub _trim_csv_value {

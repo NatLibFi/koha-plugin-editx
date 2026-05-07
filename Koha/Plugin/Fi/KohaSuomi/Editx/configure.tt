@@ -37,6 +37,11 @@
                     [% END %]
                     <span class="hint">Run SFTP download and EDItX import from Koha's nightly plugin cron hook.</span>
                 </li>
+                <li>
+                    <label for="sftp_sources_yaml">SFTP sources YAML:</label>
+                    <textarea id="sftp_sources_yaml" name="sftp_sources_yaml" cols="80" rows="18" style="font-family: monospace;" wrap="off">[% sftp_sources_yaml | html %]</textarea>
+                    <span class="hint">YAML list of SFTP sources. Leave local_dir empty to use import_tmp_path from procurement-config.xml.</span>
+                </li>
             </ol>
         </fieldset>
 

@@ -33,7 +33,26 @@ Create requred SQL tables by commands (consider that $KOHA_INSTANCE should be YO
 
 The plugin importer reads incoming EDItX XML from `import_tmp_path` in `/etc/koha/sites/<instance>/procurement-config.xml`. The plugin implements Koha's `cronjob_nightly` hook, so the normal Koha nightly plugin cron can download SFTP files and import them.
 
-Copy `installation/editx-sftp.conf.example` to `/etc/koha/sites/<instance>/editx-sftp.conf`, set the SFTP host, user, SSH key, host key file, remote folder, and `SFTP_LOCAL_DIR`. Keep credentials and routing outside git.
+Configure SFTP sources from the plugin configuration page. The YAML field accepts one or more sources:
+
+```yaml
+sources:
+  - id: haaga_helia
+    host: sftp.example.org
+    port: 22
+    user: editx-user
+    identity_file: /var/lib/koha/<instance>/.ssh/editx_sftp
+    remote_dir: /out/haaga-helia
+    local_dir:
+    pattern: "*.xml"
+    after_download: keep
+    remote_archive_dir:
+    known_hosts_file:
+    strict_host_key_checking: "yes"
+    ssh_config:
+```
+
+Leave `local_dir` empty to use `import_tmp_path` from `procurement-config.xml`.
 
 Enable automatic synchronization from the plugin configuration page. When the checkbox is disabled, `cronjob_nightly` returns without doing any work.
 
@@ -44,7 +63,7 @@ Koha packages already run `/usr/share/koha/bin/cronjobs/plugins_nightly.pl` from
 For 3AMK preproduction testing, check these Koha settings before enabling the cron jobs:
 
 - `procurement-config.xml` paths exist and are writable by `<instance>-koha`.
-- `SFTP_LOCAL_DIR` equals `import_tmp_path`.
+- Each SFTP source either leaves `local_dir` empty or sets it to the same directory as `import_tmp_path`.
 - The vendor has an enabled `vendor_edi_accounts` row with `transport='FILE'`, `orders_enabled='1'`, `san` matching the EDItX `BuyerParty/PartyID/Identifier`, and qualifier `91`.
 - All EDItX `FundNumber` values exist in `aqbudgets.budget_code`.
 - Branch, location, item type, authorised value, and item field mappings match the delivered 3AMK codes.

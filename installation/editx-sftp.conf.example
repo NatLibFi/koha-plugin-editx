@@ -1,7 +1,8 @@
 # shellcheck shell=sh
 # shellcheck disable=SC2034
-# Copy to /etc/koha/sites/<instance>/editx-sftp.conf and keep it out of git.
-# This is used by the plugin cronjob_nightly hook when nightly sync is enabled.
+# Standalone config example for cronjobs/fetch_editx_sftp.sh.
+# The plugin cronjob_nightly hook normally generates this from the web configuration.
+# If copied to /etc/koha/sites/<instance>/editx-sftp.conf, keep it out of git.
 # The Koha instance user must be able to read this file.
 
 SFTP_HOST=sftp.example.org
@@ -27,3 +28,12 @@ SFTP_REMOTE_ARCHIVE_DIR=/outgoing/editx/archive
 
 # Optional local log file. Cron mail is used when unset.
 # SFTP_LOG_FILE=/var/log/koha/<instance>/editx/sftp-download.log
+
+# Multiple standalone targets can be configured with target-specific variables:
+#
+# SFTP_TARGETS='haaga_helia another_library'
+# SFTP_haaga_helia_HOST=sftp.example.org
+# SFTP_haaga_helia_USER=editx-user
+# SFTP_haaga_helia_IDENTITY_FILE=/var/lib/koha/<instance>/.ssh/editx_sftp
+# SFTP_haaga_helia_REMOTE_DIR=/out/haaga-helia
+# SFTP_haaga_helia_LOCAL_DIR=/var/spool/koha/<instance>/editx/tmp

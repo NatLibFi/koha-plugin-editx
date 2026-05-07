@@ -1,5 +1,5 @@
 #!/bin/sh
-# Download EDItX XML messages from an SFTP account into the plugin import tmp directory.
+# Download EDItX XML messages from one or more SFTP accounts into the plugin import tmp directory.
 
 set -eu
 
@@ -12,32 +12,206 @@ log() {
     printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
 }
 
-require_var() {
+validate_target_name() {
     case "$1" in
-        SFTP_HOST) value="$SFTP_HOST" ;;
-        SFTP_USER) value="$SFTP_USER" ;;
-        SFTP_REMOTE_DIR) value="$SFTP_REMOTE_DIR" ;;
-        SFTP_LOCAL_DIR) value="$SFTP_LOCAL_DIR" ;;
-        SFTP_REMOTE_ARCHIVE_DIR) value="$SFTP_REMOTE_ARCHIVE_DIR" ;;
-        *) die "Unknown required setting: $1" ;;
+        ''|*[!ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_]*)
+            die "SFTP target name '$1' is invalid. Use only letters, numbers, and underscores."
+            ;;
     esac
-    test -n "$value" || die "$1 is not set in $config_file."
+}
+
+target_value() {
+    target="$1"
+    suffix="$2"
+    default_value="$3"
+
+    if test "$target" = "__default__"; then
+        eval "value=\${SFTP_${suffix}:-}"
+    else
+        validate_target_name "$target"
+        eval "value=\${SFTP_${target}_${suffix}:-}"
+    fi
+
+    test -n "${value:-}" || value="$default_value"
+    printf '%s' "$value"
+}
+
+require_target_var() {
+    target="$1"
+    suffix="$2"
+    value="$3"
+
+    test -n "$value" && return 0
+
+    if test "$target" = "__default__"; then
+        die "SFTP_$suffix is not set in $config_file."
+    fi
+
+    die "SFTP_${target}_$suffix or SFTP_$suffix is not set in $config_file."
 }
 
 quote_sftp_path() {
     printf '"%s"' "$(printf '%s' "$1" | sed 's/"/\\"/g')"
 }
 
-cleanup() {
-    status=$?
-    trap - EXIT INT TERM
+cleanup_target_files() {
     test -n "${stage_dir:-}" && test -d "$stage_dir" && rm -rf "$stage_dir"
     test -n "${batch_file:-}" && test -f "$batch_file" && rm -f "$batch_file"
     test -n "${remote_list_file:-}" && test -f "$remote_list_file" && rm -f "$remote_list_file"
     test -n "${downloaded_list_file:-}" && test -f "$downloaded_list_file" && rm -f "$downloaded_list_file"
     test -n "${sftp_error_file:-}" && test -f "$sftp_error_file" && rm -f "$sftp_error_file"
+    stage_dir=""
+    batch_file=""
+    remote_list_file=""
+    downloaded_list_file=""
+    sftp_error_file=""
+}
+
+cleanup() {
+    status=$?
+    trap - EXIT INT TERM
+    cleanup_target_files
     test -n "${lock_dir:-}" && test -d "$lock_dir" && rmdir "$lock_dir" 2>/dev/null || true
     exit "$status"
+}
+
+build_sftp_args() {
+    set -- -q -P "$target_port" \
+        -oBatchMode=yes \
+        -oStrictHostKeyChecking="$target_strict_host_key_checking"
+
+    if test -n "$target_identity_file"; then
+        set -- "$@" -i "$target_identity_file"
+    fi
+    if test -n "$target_known_hosts_file"; then
+        set -- "$@" -oUserKnownHostsFile="$target_known_hosts_file"
+    fi
+    if test -n "$target_ssh_config"; then
+        set -- "$@" -F "$target_ssh_config"
+    fi
+
+    sftp "$@" -b "$batch_file" "$target_user@$target_host"
+}
+
+run_target() {
+    target="$1"
+    target_label="$target"
+    if test "$target" = "__default__"; then
+        target_label="default"
+    else
+        validate_target_name "$target"
+    fi
+
+    target_host="$(target_value "$target" HOST "${SFTP_HOST:-}")"
+    target_port="$(target_value "$target" PORT "${SFTP_PORT:-22}")"
+    target_user="$(target_value "$target" USER "${SFTP_USER:-}")"
+    target_identity_file="$(target_value "$target" IDENTITY_FILE "${SFTP_IDENTITY_FILE:-}")"
+    target_known_hosts_file="$(target_value "$target" KNOWN_HOSTS_FILE "${SFTP_KNOWN_HOSTS_FILE:-}")"
+    target_strict_host_key_checking="$(target_value "$target" STRICT_HOST_KEY_CHECKING "${SFTP_STRICT_HOST_KEY_CHECKING:-yes}")"
+    target_ssh_config="$(target_value "$target" SSH_CONFIG "${SFTP_SSH_CONFIG:-}")"
+    target_remote_dir="$(target_value "$target" REMOTE_DIR "${SFTP_REMOTE_DIR:-}")"
+    target_pattern="$(target_value "$target" PATTERN "${SFTP_PATTERN:-*.xml}")"
+    target_local_dir="$(target_value "$target" LOCAL_DIR "${SFTP_LOCAL_DIR:-}")"
+    target_after_download="$(target_value "$target" AFTER_DOWNLOAD "${SFTP_AFTER_DOWNLOAD:-keep}")"
+    target_remote_archive_dir="$(target_value "$target" REMOTE_ARCHIVE_DIR "${SFTP_REMOTE_ARCHIVE_DIR:-}")"
+
+    require_target_var "$target" HOST "$target_host"
+    require_target_var "$target" USER "$target_user"
+    require_target_var "$target" REMOTE_DIR "$target_remote_dir"
+    require_target_var "$target" LOCAL_DIR "$target_local_dir"
+
+    case "$target_after_download" in
+        archive)
+            require_target_var "$target" REMOTE_ARCHIVE_DIR "$target_remote_archive_dir"
+            ;;
+        delete|keep)
+            ;;
+        *)
+            die "$target_label: SFTP_AFTER_DOWNLOAD must be one of: keep, archive, delete."
+            ;;
+    esac
+
+    mkdir -p "$target_local_dir"
+    stage_dir="$(mktemp -d "$target_local_dir/.sftp-download.XXXXXX")"
+    batch_file="$(mktemp)"
+    remote_list_file="$(mktemp)"
+    downloaded_list_file="$(mktemp)"
+    sftp_error_file="$(mktemp)"
+    target_downloaded=0
+
+    {
+        printf 'cd %s\n' "$(quote_sftp_path "$target_remote_dir")"
+        printf '%s %s\n' '-ls -1' "$target_pattern"
+    } >"$batch_file"
+
+    if ! build_sftp_args >"$remote_list_file" 2>"$sftp_error_file"; then
+        cat "$sftp_error_file" >&2
+        cat "$remote_list_file" >&2
+        die "$target_label: Failed to list remote EDItX files."
+    fi
+
+    if ! test -s "$remote_list_file"; then
+        log "[$target_label] No remote EDItX files matched $target_pattern in $target_remote_dir."
+        cleanup_target_files
+        return 0
+    fi
+
+    {
+        printf 'lcd %s\n' "$(quote_sftp_path "$stage_dir")"
+        printf 'cd %s\n' "$(quote_sftp_path "$target_remote_dir")"
+        printf 'mget %s\n' "$target_pattern"
+    } >"$batch_file"
+
+    build_sftp_args || die "$target_label: Failed to download EDItX files from SFTP."
+
+    for file in "$stage_dir"/*.xml; do
+        test -f "$file" || continue
+        basename_file="$(basename "$file")"
+        target_file="$target_local_dir/$basename_file"
+        if test -e "$target_file"; then
+            log "[$target_label] Local file already exists, skipping: $target_file"
+            continue
+        fi
+        mv "$file" "$target_file"
+        printf '%s\n' "$basename_file" >>"$downloaded_list_file"
+        target_downloaded=$((target_downloaded + 1))
+        log "[$target_label] Downloaded $basename_file to $target_local_dir."
+    done
+
+    if test "$target_downloaded" -eq 0; then
+        log "[$target_label] No new EDItX XML files were downloaded."
+        cleanup_target_files
+        return 0
+    fi
+
+    case "$target_after_download" in
+        keep)
+            ;;
+        archive|delete)
+            {
+                printf 'cd %s\n' "$(quote_sftp_path "$target_remote_dir")"
+                if test "$target_after_download" = "archive"; then
+                    printf '%s %s\n' '-mkdir' "$(quote_sftp_path "$target_remote_archive_dir")"
+                fi
+                while IFS= read -r remote_file; do
+                    remote_base="$(basename "$remote_file")"
+                    grep -Fx -- "$remote_base" "$downloaded_list_file" >/dev/null || continue
+                    if test "$target_after_download" = "archive"; then
+                        printf 'rename %s %s\n' \
+                            "$(quote_sftp_path "$remote_base")" \
+                            "$(quote_sftp_path "$target_remote_archive_dir/$remote_base")"
+                    else
+                        printf 'rm %s\n' "$(quote_sftp_path "$remote_base")"
+                    fi
+                done <"$remote_list_file"
+            } >"$batch_file"
+            build_sftp_args || die "$target_label: Downloaded files, but failed to update remote SFTP files."
+            ;;
+    esac
+
+    log "[$target_label] Finished SFTP EDItX download: $target_downloaded file(s)."
+    cleanup_target_files
+    return 0
 }
 
 trap cleanup EXIT INT TERM
@@ -50,40 +224,12 @@ test -f "$config_file" || die "No SFTP config file: $config_file"
 # shellcheck disable=SC1090
 . "$config_file"
 
-SFTP_HOST="${SFTP_HOST:-}"
-SFTP_USER="${SFTP_USER:-}"
-SFTP_REMOTE_DIR="${SFTP_REMOTE_DIR:-}"
-SFTP_LOCAL_DIR="${SFTP_LOCAL_DIR:-}"
-SFTP_REMOTE_ARCHIVE_DIR="${SFTP_REMOTE_ARCHIVE_DIR:-}"
-
-require_var SFTP_HOST
-require_var SFTP_USER
-require_var SFTP_REMOTE_DIR
-require_var SFTP_LOCAL_DIR
-
-SFTP_PORT="${SFTP_PORT:-22}"
-SFTP_PATTERN="${SFTP_PATTERN:-*.xml}"
-SFTP_AFTER_DOWNLOAD="${SFTP_AFTER_DOWNLOAD:-keep}"
-SFTP_STRICT_HOST_KEY_CHECKING="${SFTP_STRICT_HOST_KEY_CHECKING:-yes}"
-
-case "$SFTP_AFTER_DOWNLOAD" in
-    archive)
-        require_var SFTP_REMOTE_ARCHIVE_DIR
-        ;;
-    delete|keep)
-        ;;
-    *)
-        die "SFTP_AFTER_DOWNLOAD must be one of: keep, archive, delete."
-        ;;
-esac
-
-command -v sftp >/dev/null 2>&1 || die "No sftp command found."
-mkdir -p "$SFTP_LOCAL_DIR"
-
 if test -n "${SFTP_LOG_FILE:-}"; then
     mkdir -p "$(dirname "$SFTP_LOG_FILE")"
     exec >>"$SFTP_LOG_FILE" 2>&1
 fi
+
+command -v sftp >/dev/null 2>&1 || die "No sftp command found."
 
 lock_dir="/tmp/editx-sftp-$KOHA_INSTANCE.lock"
 if ! mkdir "$lock_dir" 2>/dev/null; then
@@ -91,97 +237,17 @@ if ! mkdir "$lock_dir" 2>/dev/null; then
     exit 0
 fi
 
-stage_dir="$(mktemp -d "$SFTP_LOCAL_DIR/.sftp-download.XXXXXX")"
-batch_file="$(mktemp)"
-remote_list_file="$(mktemp)"
-downloaded_list_file="$(mktemp)"
-sftp_error_file="$(mktemp)"
+stage_dir=""
+batch_file=""
+remote_list_file=""
+downloaded_list_file=""
+sftp_error_file=""
+target_downloaded=0
+total_downloaded=0
 
-build_sftp_args() {
-    set -- -q -P "$SFTP_PORT" \
-        -oBatchMode=yes \
-        -oStrictHostKeyChecking="$SFTP_STRICT_HOST_KEY_CHECKING"
-
-    if test -n "${SFTP_IDENTITY_FILE:-}"; then
-        set -- "$@" -i "$SFTP_IDENTITY_FILE"
-    fi
-    if test -n "${SFTP_KNOWN_HOSTS_FILE:-}"; then
-        set -- "$@" -oUserKnownHostsFile="$SFTP_KNOWN_HOSTS_FILE"
-    fi
-    if test -n "${SFTP_SSH_CONFIG:-}"; then
-        set -- "$@" -F "$SFTP_SSH_CONFIG"
-    fi
-
-    sftp "$@" -b "$batch_file" "$SFTP_USER@$SFTP_HOST"
-}
-
-{
-    printf 'cd %s\n' "$(quote_sftp_path "$SFTP_REMOTE_DIR")"
-    printf '%s %s\n' '-ls -1' "$SFTP_PATTERN"
-} >"$batch_file"
-
-if ! build_sftp_args >"$remote_list_file" 2>"$sftp_error_file"; then
-    cat "$sftp_error_file" >&2
-    cat "$remote_list_file" >&2
-    die "Failed to list remote EDItX files."
-fi
-
-if ! test -s "$remote_list_file"; then
-    log "No remote EDItX files matched $SFTP_PATTERN in $SFTP_REMOTE_DIR."
-    exit 0
-fi
-
-{
-    printf 'lcd %s\n' "$(quote_sftp_path "$stage_dir")"
-    printf 'cd %s\n' "$(quote_sftp_path "$SFTP_REMOTE_DIR")"
-    printf 'mget %s\n' "$SFTP_PATTERN"
-} >"$batch_file"
-
-build_sftp_args || die "Failed to download EDItX files from SFTP."
-
-downloaded=0
-for file in "$stage_dir"/*.xml; do
-    test -f "$file" || continue
-    basename_file="$(basename "$file")"
-    target_file="$SFTP_LOCAL_DIR/$basename_file"
-    if test -e "$target_file"; then
-        log "Local file already exists, leaving downloaded copy in staging: $target_file"
-        continue
-    fi
-    mv "$file" "$target_file"
-    printf '%s\n' "$basename_file" >>"$downloaded_list_file"
-    downloaded=$((downloaded + 1))
-    log "Downloaded $basename_file to $SFTP_LOCAL_DIR."
+for target in ${SFTP_TARGETS:-__default__}; do
+    run_target "$target"
+    total_downloaded=$((total_downloaded + target_downloaded))
 done
 
-if test "$downloaded" -eq 0; then
-    log "No new EDItX XML files were downloaded."
-    exit 0
-fi
-
-case "$SFTP_AFTER_DOWNLOAD" in
-    keep)
-        ;;
-    archive|delete)
-        {
-            printf 'cd %s\n' "$(quote_sftp_path "$SFTP_REMOTE_DIR")"
-            if test "$SFTP_AFTER_DOWNLOAD" = "archive"; then
-                printf '%s %s\n' '-mkdir' "$(quote_sftp_path "$SFTP_REMOTE_ARCHIVE_DIR")"
-            fi
-            while IFS= read -r remote_file; do
-                remote_base="$(basename "$remote_file")"
-                grep -Fx -- "$remote_base" "$downloaded_list_file" >/dev/null || continue
-                if test "$SFTP_AFTER_DOWNLOAD" = "archive"; then
-                    printf 'rename %s %s\n' \
-                        "$(quote_sftp_path "$remote_base")" \
-                        "$(quote_sftp_path "$SFTP_REMOTE_ARCHIVE_DIR/$remote_base")"
-                else
-                    printf 'rm %s\n' "$(quote_sftp_path "$remote_base")"
-                fi
-            done <"$remote_list_file"
-        } >"$batch_file"
-        build_sftp_args || die "Downloaded files, but failed to update remote SFTP files."
-        ;;
-esac
-
-log "Finished SFTP EDItX download: $downloaded file(s)."
+log "Finished SFTP EDItX download for $KOHA_INSTANCE: $total_downloaded file(s)."
