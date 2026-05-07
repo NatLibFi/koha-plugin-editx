@@ -695,13 +695,15 @@ sub getBookseller {
     $bookseller = $stmnt->fetchrow_array();
 
     if(!$bookseller){
+        my $fail_message;
         if ($san) {
-            $self->getLogger()->warn("No vendor for SAN $san (qualifier $qualifier) in vendor_edi_accounts.");
+            $fail_message = "No vendor for SAN $san (qualifier $qualifier) in vendor_edi_accounts.";
         }
         else {
-            $self->getLogger()->warn("No vendor in shipment notice.");
+            $fail_message = "No vendor in shipment notice.";
         }
-        die();
+        $self->getLogger()->warn($fail_message);
+        die "$fail_message\n";
     }
     return $bookseller;
 }
