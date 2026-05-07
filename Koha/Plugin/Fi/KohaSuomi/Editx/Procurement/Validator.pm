@@ -23,13 +23,27 @@ use Getopt::Long;
 use Try::Tiny;
 use File::Basename;
 
+sub parse_editx_xml {
+  my $filename = shift;
+
+  my $doc = XML::LibXML->load_xml(location => $filename);
+  my $xc  = XML::LibXML::XPathContext->new($doc);
+  my $node = $xc->find('LibraryShipNotice');
+
+  if ($node eq "" or $node->to_literal eq "") {
+    die "Not a LibraryShipNotice XML file";
+  }
+
+  return ($doc, $xc);
+}
+
 sub validateEditx {
 
   my $filename = shift;
 
   my $fileforlog = basename($filename) . ": ";
   
-  my ($parser, $doc, $xc);
+  my ($doc, $xc);
 
   my $errors = 0;
 
@@ -49,24 +63,7 @@ sub validateEditx {
   $logger->logError("\n-- Validating file " . $fileforlog);
 
   try {
-    
-    system("xmllint --noout $filename");
-
-    $parser = XML::LibXML->new();
-    $doc    = XML::LibXML->load_xml(location => $filename);
-    $xc     = XML::LibXML::XPathContext->new($doc);
-
-    my $node;
-
-    $node = $xc->find('LibraryShipNotice');
-
-
-    if ($node eq "" or $node->to_literal eq "") {
-
-      $logger->logError($fileforlog . "Not a LibraryShipNotice XML file");
-      die;
-    }
-
+    ($doc, $xc) = parse_editx_xml($filename);
   } catch {
 
     $logger->logError($fileforlog . "XML parser cannot parse the file. " . "$_");
