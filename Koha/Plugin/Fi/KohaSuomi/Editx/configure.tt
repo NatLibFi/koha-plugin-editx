@@ -213,45 +213,6 @@
                     </fieldset>
 
                     <fieldset class="rows">
-                        <legend>Runtime logging</legend>
-                        <ol>
-                            <li>
-                                <label for="runtime_log_level">Runtime log level</label>
-                                <select id="runtime_log_level" name="runtime_log_level">
-                                    <option value="off" [% IF runtime_log_level == 'off' %]selected="selected"[% END %]>Off</option>
-                                    <option value="error" [% IF runtime_log_level == 'error' %]selected="selected"[% END %]>Error</option>
-                                    <option value="warn" [% IF runtime_log_level == 'warn' %]selected="selected"[% END %]>Warn</option>
-                                    <option value="info" [% IF runtime_log_level == 'info' %]selected="selected"[% END %]>Info</option>
-                                    <option value="notice" [% IF runtime_log_level == 'notice' %]selected="selected"[% END %]>Notice</option>
-                                    <option value="debug" [% IF runtime_log_level == 'debug' %]selected="selected"[% END %]>Debug</option>
-                                </select>
-                                <div class="hint">Controls the EDItX plugin runtime log for web actions, nightly SFTP downloads, import parsing, file moves, validation, and order creation.</div>
-                            </li>
-                            <li>
-                                <label>Runtime log file</label>
-                                <span class="editx-config-value">[% runtime_log_path | html %]</span>
-                            </li>
-                            <li>
-                                <div class="editx-runtime-log-toolbar">
-                                    <label for="runtime_log_tail">Recent runtime log</label>
-                                    <label class="editx-runtime-log-wrap-control" for="editx-runtime-log-wrap-toggle">
-                                        <input type="checkbox"
-                                               id="editx-runtime-log-wrap-toggle"
-                                               value="1" />
-                                        Wrap lines
-                                    </label>
-                                </div>
-                                <textarea id="runtime_log_tail"
-                                          class="editx-runtime-log-tail"
-                                          rows="12"
-                                          cols="120"
-                                          wrap="off"
-                                          readonly="readonly">[% IF runtime_log_tail %][% runtime_log_tail | html %][% ELSE %]No runtime log entries yet.[% END %]</textarea>
-                            </li>
-                        </ol>
-                    </fieldset>
-
-                    <fieldset class="rows">
                         <legend>Product form mappings</legend>
                         <ol>
                             <li>
@@ -260,7 +221,7 @@
                                           name="mapping_csv"
                                           class="editx-monospace"
                                           cols="100"
-                                          rows="24"
+                                          rows="8"
                                           wrap="off">[% mapping_csv | html %]</textarea>
                                 <div class="hint">Invalid item type values are stored as empty mapping cells, then reported here before save.</div>
                                 <details class="editx-example">
@@ -276,6 +237,60 @@ DG,LYHYT,LYHYTHH</code></pre>
                                 <span class="editx-reference-list">[% IF itemtypes_text %][% itemtypes_text | html %][% ELSE %]No item types found.[% END %]</span>
                             </li>
                         </ol>
+                    </fieldset>
+
+                    <fieldset class="rows editx-collapsible is-collapsed"
+                              data-editx-collapsible="1"
+                              data-editx-collapsible-default="collapsed"
+                              data-editx-collapsible-storage="editx.configure.runtimeLogging.v1">
+                        <legend>
+                            <button type="button"
+                                    class="editx-collapsible-toggle"
+                                    aria-expanded="false"
+                                    aria-controls="editx-config-section-runtime-logging">
+                                <span class="editx-collapsible-toggle-icon" aria-hidden="true">+</span>
+                                <span>Runtime logging</span>
+                            </button>
+                        </legend>
+                        <div id="editx-config-section-runtime-logging" class="editx-collapsible-body" hidden="hidden">
+                            <div class="editx-collapsible-body-inner">
+                                <ol>
+                                    <li>
+                                        <label for="runtime_log_level">Runtime log level</label>
+                                        <select id="runtime_log_level" name="runtime_log_level">
+                                            <option value="off" [% IF runtime_log_level == 'off' %]selected="selected"[% END %]>Off</option>
+                                            <option value="error" [% IF runtime_log_level == 'error' %]selected="selected"[% END %]>Error</option>
+                                            <option value="warn" [% IF runtime_log_level == 'warn' %]selected="selected"[% END %]>Warn</option>
+                                            <option value="info" [% IF runtime_log_level == 'info' %]selected="selected"[% END %]>Info</option>
+                                            <option value="notice" [% IF runtime_log_level == 'notice' %]selected="selected"[% END %]>Notice</option>
+                                            <option value="debug" [% IF runtime_log_level == 'debug' %]selected="selected"[% END %]>Debug</option>
+                                        </select>
+                                        <div class="hint">Controls the EDItX plugin runtime log for web actions, nightly SFTP downloads, import parsing, file moves, validation, and order creation.</div>
+                                    </li>
+                                    <li>
+                                        <label>Runtime log file</label>
+                                        <span class="editx-config-value">[% runtime_log_path | html %]</span>
+                                    </li>
+                                    <li>
+                                        <div class="editx-runtime-log-toolbar">
+                                            <label for="runtime_log_tail">Recent runtime log</label>
+                                            <label class="editx-runtime-log-wrap-control" for="editx-runtime-log-wrap-toggle">
+                                                <input type="checkbox"
+                                                       id="editx-runtime-log-wrap-toggle"
+                                                       value="1" />
+                                                Wrap lines
+                                            </label>
+                                        </div>
+                                        <textarea id="runtime_log_tail"
+                                                  class="editx-runtime-log-tail"
+                                                  rows="12"
+                                                  cols="120"
+                                                  wrap="off"
+                                                  readonly="readonly">[% IF runtime_log_tail %][% runtime_log_tail | html %][% ELSE %]No runtime log entries yet.[% END %]</textarea>
+                                    </li>
+                                </ol>
+                            </div>
+                        </div>
                     </fieldset>
 
                     <fieldset class="action">
@@ -307,10 +322,85 @@ DG,LYHYT,LYHYTHH</code></pre>
 
             const logTail = document.getElementById("runtime_log_tail");
             const wrapToggle = document.getElementById("editx-runtime-log-wrap-toggle");
+            const collapsibleSections = document.querySelectorAll("[data-editx-collapsible]");
 
-            if (!logTail || !wrapToggle) {
-                return;
+            function localStorageGet(key) {
+                try {
+                    return window.localStorage ? window.localStorage.getItem(key) : null;
+                } catch (error) {
+                    return null;
+                }
             }
+
+            function localStorageSet(key, value) {
+                try {
+                    if (window.localStorage) {
+                        window.localStorage.setItem(key, value);
+                    }
+                } catch (error) {
+                    // Ignore storage failures; the section toggle still works for this page load.
+                }
+            }
+
+            function setCollapsibleState(section, collapsed, persist) {
+                const toggle = section.querySelector(".editx-collapsible-toggle");
+                const body = section.querySelector(".editx-collapsible-body");
+                const icon = section.querySelector(".editx-collapsible-toggle-icon");
+                const storageKey = section.getAttribute("data-editx-collapsible-storage");
+
+                if (body && !collapsed) {
+                    body.hidden = false;
+                    body.removeAttribute("aria-hidden");
+                    if ("inert" in body) {
+                        body.inert = false;
+                    }
+                    body.offsetHeight;
+                }
+
+                section.classList.toggle("is-collapsed", collapsed);
+                if (body) {
+                    if (collapsed) {
+                        body.setAttribute("aria-hidden", "true");
+                        if ("inert" in body) {
+                            body.inert = true;
+                        }
+                        window.setTimeout(function () {
+                            if (section.classList.contains("is-collapsed")) {
+                                body.hidden = true;
+                            }
+                        }, 220);
+                    } else {
+                        body.hidden = false;
+                    }
+                }
+                if (toggle) {
+                    toggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+                    toggle.setAttribute("title", collapsed ? "Expand section" : "Collapse section");
+                }
+                if (icon) {
+                    icon.textContent = collapsed ? "+" : "-";
+                }
+                if (persist && storageKey) {
+                    localStorageSet(storageKey, collapsed ? "collapsed" : "expanded");
+                }
+            }
+
+            collapsibleSections.forEach(function (section) {
+                const storageKey = section.getAttribute("data-editx-collapsible-storage");
+                const stored = storageKey ? localStorageGet(storageKey) : null;
+                const defaultState = section.getAttribute("data-editx-collapsible-default") || "";
+                const defaultCollapsed = defaultState === "collapsed" || section.classList.contains("is-collapsed");
+                const collapsed = stored === null ? defaultCollapsed : stored !== "expanded";
+                const toggle = section.querySelector(".editx-collapsible-toggle");
+
+                setCollapsibleState(section, collapsed, false);
+
+                if (toggle) {
+                    toggle.addEventListener("click", function () {
+                        setCollapsibleState(section, !section.classList.contains("is-collapsed"), true);
+                    });
+                }
+            });
 
             function syncRuntimeLogWrap() {
                 const wrapped = wrapToggle.checked;
@@ -318,8 +408,10 @@ DG,LYHYT,LYHYTHH</code></pre>
                 logTail.setAttribute("wrap", wrapped ? "soft" : "off");
             }
 
-            wrapToggle.addEventListener("change", syncRuntimeLogWrap);
-            syncRuntimeLogWrap();
+            if (logTail && wrapToggle) {
+                wrapToggle.addEventListener("change", syncRuntimeLogWrap);
+                syncRuntimeLogWrap();
+            }
         }());
     </script>
 [% END %]

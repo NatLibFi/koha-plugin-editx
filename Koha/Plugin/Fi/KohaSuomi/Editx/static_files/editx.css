@@ -189,6 +189,65 @@
     margin-bottom: 0;
 }
 
+.editx-collapsible > legend {
+    display: flex;
+}
+
+.editx-collapsible-toggle {
+    align-items: center;
+    background: transparent;
+    border: 0;
+    color: inherit;
+    display: inline-flex;
+    font: inherit;
+    font-weight: 600;
+    gap: 0.45rem;
+    margin: 0;
+    padding: 0;
+    text-align: left;
+}
+
+.editx-collapsible-toggle:focus {
+    outline: 2px solid #2f6fab;
+    outline-offset: 2px;
+}
+
+.editx-collapsible-toggle-icon {
+    align-items: center;
+    border: 1px solid #9aa5ad;
+    border-radius: 50%;
+    display: inline-flex;
+    font-size: 0.85rem;
+    height: 1.2rem;
+    justify-content: center;
+    line-height: 1;
+    width: 1.2rem;
+}
+
+.editx-collapsible-body {
+    display: grid;
+    grid-template-rows: 1fr;
+    opacity: 1;
+    overflow: hidden;
+    transition: grid-template-rows 0.18s ease, opacity 0.14s ease;
+}
+
+.editx-collapsible.is-collapsed .editx-collapsible-body {
+    grid-template-rows: 0fr;
+    opacity: 0;
+}
+
+.editx-collapsible-body-inner {
+    min-height: 0;
+    overflow: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .editx-collapsible-body {
+        transition: none;
+    }
+}
+
 .editx-runtime-log-toolbar {
     align-items: center;
     display: flex;

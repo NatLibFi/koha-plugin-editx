@@ -23,6 +23,7 @@ my $plugin_pm = read_file('Koha/Plugin/Fi/KohaSuomi/Editx.pm');
 my $configure = read_file('Koha/Plugin/Fi/KohaSuomi/Editx/configure.tt');
 my $tool = read_file('Koha/Plugin/Fi/KohaSuomi/Editx/tool.tt');
 my $breadcrumbs = read_file('Koha/Plugin/Fi/KohaSuomi/Editx/includes/editx_breadcrumbs.inc');
+my $css = read_file('Koha/Plugin/Fi/KohaSuomi/Editx/static_files/editx.css');
 
 like( $plugin_pm, qr{sub\s+tool\s*\{}, 'Plugin exposes a Koha tool page' );
 like( $plugin_pm, qr{\$method\s*\|\|=\s*'tool'}, 'Plugin method URL defaults to the tool page' );
@@ -37,6 +38,11 @@ unlike( $configure, qr{run_sync_now}, 'Configure page has no manual sync action 
 unlike( $configure, qr{Download and import now}, 'Configure page has no manual download/import button' );
 unlike( $configure, qr{Manual run result}, 'Configure page has no manual run result block' );
 like( $configure, qr{href="\[%\s*tool_href\s*\|\s*html\s*%\]">Cancel</a>}, 'Configure cancel returns to the tool page' );
+like( $configure, qr{id="mapping_csv"[\s\S]+?rows="8"}, 'Configure page keeps the mapping CSV editor compact' );
+like( $configure, qr{data-editx-collapsible-storage="editx\.configure\.runtimeLogging\.v1"}, 'Runtime logging section has persisted collapse state' );
+like( $configure, qr{data-editx-collapsible-default="collapsed"}, 'Runtime logging section is collapsed by default' );
+like( $configure, qr{window\.localStorage}, 'Configure page persists the runtime logging collapse state in localStorage' );
+like( $css, qr{\.editx-collapsible\.is-collapsed\s+\.editx-collapsible-body}, 'CSS hides collapsed runtime logging content' );
 
 like( $tool, qr{active_text='Operations'\s+active_method='tool'}, 'Tool page marks the Operations breadcrumb active' );
 like( $tool, qr{\[%\s+USE\s+raw\s+%\]}, 'Tool page loads Koha raw plugin before using template filters' );
