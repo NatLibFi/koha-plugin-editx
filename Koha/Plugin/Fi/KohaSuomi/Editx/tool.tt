@@ -1,0 +1,129 @@
+[% USE raw %]
+[% INCLUDE 'doc-head-open.inc' %]
+<title>Koha: EDItX plugin v[% plugin_display_version | html %]</title>
+<link rel="stylesheet" href="[% css_href | html %]" />
+[% INCLUDE 'doc-head-close.inc' %]
+</head>
+<body id="plugins_editx_tool" class="plugins">
+[% WRAPPER 'header.inc' %]
+    [% INCLUDE 'prefs-admin-search.inc' %]
+[% END %]
+
+[% INCLUDE 'editx_breadcrumbs.inc' active_text='Operations' active_method='tool' %]
+
+<div class="main container-fluid">
+    <div class="row">
+        <div class="col-12 col-xl-10">
+            <main>
+                [% INCLUDE 'messages.inc' %]
+
+                <div class="page-section editx-page-header">
+                    <div>
+                        <h1>EDItX plugin v[% plugin_display_version | html %]</h1>
+                        <p class="help-block">Run saved EDItX SFTP download and import operations, then open the created acquisition records.</p>
+                    </div>
+                    <div class="editx-status-strip">
+                        <div class="editx-status-item">
+                            <span class="editx-status-label">Nightly automation</span>
+                            <strong>[% IF nightly_sync_enabled %]Enabled[% ELSE %]Disabled[% END %]</strong>
+                            <span class="editx-status-note"><a href="[% configure_href | html %]">Configure</a></span>
+                        </div>
+                        <div class="editx-status-item [% IF sftp_config_has_errors %]editx-status-warning[% END %]">
+                            <span class="editx-status-label">SFTP sources</span>
+                            <strong>[% sftp_sources_count | html %]</strong>
+                            <span class="editx-status-note">Saved source[% UNLESS sftp_sources_count == 1 %]s[% END %]</span>
+                        </div>
+                        <div class="editx-status-item">
+                            <span class="editx-status-label">Import intake</span>
+                            <strong>[% IF procurement_settings.import_tmp_path %]Configured[% ELSE %]Missing[% END %]</strong>
+                            <span class="editx-status-note">[% procurement_settings.import_tmp_path | html %]</span>
+                        </div>
+                    </div>
+                </div>
+
+                [% FOREACH message IN messages %]
+                    <div class="alert alert-[% message.alert_class | html %]">[% message.text | html %]</div>
+                [% END %]
+
+                [% FOREACH message IN sftp_config_messages %]
+                    <div class="alert alert-[% message.alert_class | html %]">
+                        [% message.text | html %]
+                        <a href="[% configure_href | html %]">Open configuration</a>
+                    </div>
+                [% END %]
+
+                [% IF manual_run_attempted %]
+                    <div class="page-section editx-manual-sync-result">
+                        <h2>Manual run result</h2>
+                        [% IF manual_sync_result && manual_sync_result.order_count %]
+                            <p>
+                                Created or updated
+                                <strong>[% manual_sync_result.order_count | html %]</strong>
+                                acquisition order line(s) for
+                                <strong>[% manual_sync_result.item_count | html %]</strong>
+                                item(s). Open the created basket(s) in Acquisitions:
+                            </p>
+                            <table class="table table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Basket</th>
+                                        <th>Vendor</th>
+                                        <th>Orders</th>
+                                        <th>Items</th>
+                                        <th>Order range</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    [% FOREACH basket IN manual_sync_result.baskets %]
+                                        <tr>
+                                            <td>
+                                                <a href="[% basket.basket_url | html %]">[% basket.basketname | html %] ([% basket.basketno | html %])</a>
+                                            </td>
+                                            <td>
+                                                [% IF basket.vendor_url %]
+                                                    <a href="[% basket.vendor_url | html %]">[% basket.vendor_name | html %]</a>
+                                                [% ELSE %]
+                                                    [% basket.vendor_name | html %]
+                                                [% END %]
+                                            </td>
+                                            <td>[% basket.order_count | html %]</td>
+                                            <td>[% basket.item_count | html %]</td>
+                                            <td>[% basket.first_ordernumber | html %]-[% basket.last_ordernumber | html %]</td>
+                                        </tr>
+                                    [% END %]
+                                </tbody>
+                            </table>
+                        [% ELSE %]
+                            <p>No new acquisition order lines were found after the manual run started.</p>
+                            <p><a class="btn btn-default" href="/cgi-bin/koha/acqui/acqui-home.pl">Open Acquisitions</a></p>
+                        [% END %]
+                    </div>
+                [% END %]
+
+                <form method="post" class="page-section editx-manual-sync-form">
+                    <input type="hidden" name="class" value="[% CLASS | html %]" />
+                    <input type="hidden" name="method" value="[% METHOD | html %]" />
+                    <input type="hidden" name="op" value="cud-run-sync-now" />
+                    <input type="hidden" name="run_sync_now" value="1" />
+                    [% INCLUDE 'csrf-token.inc' %]
+                    <div>
+                        <h2>Download and import</h2>
+                        <p>Downloads EDItX XML files from saved SFTP sources and immediately starts the importer.</p>
+                    </div>
+                    <button type="submit"
+                            class="btn btn-primary"
+                            [% UNLESS manual_run_available %]disabled="disabled"[% END %]
+                            onclick="return confirm('Run EDItX SFTP download and import now using the saved plugin configuration?');">Download and import now</button>
+                </form>
+
+                [% UNLESS manual_run_available %]
+                    <div class="alert alert-warning">
+                        Manual download and import needs valid SFTP sources. <a href="[% configure_href | html %]">Open configuration</a>
+                    </div>
+                [% END %]
+            </main>
+        </div>
+    </div>
+</div>
+
+[% INCLUDE 'intranet-bottom.inc' %]

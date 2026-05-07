@@ -50,54 +50,6 @@
                     <div class="alert alert-[% message.alert_class | html %]">[% message.text | html %]</div>
                 [% END %]
 
-                [% IF manual_sync_result %]
-                    <div class="page-section editx-manual-sync-result">
-                        <h2>Manual run result</h2>
-                        [% IF manual_sync_result.order_count %]
-                            <p>
-                                Created or updated
-                                <strong>[% manual_sync_result.order_count | html %]</strong>
-                                acquisition order line(s) for
-                                <strong>[% manual_sync_result.item_count | html %]</strong>
-                                item(s). Check the created basket(s) in Acquisitions:
-                            </p>
-                            <table class="table table-striped">
-                                <thead>
-                                    <tr>
-                                        <th>Basket</th>
-                                        <th>Vendor</th>
-                                        <th>Orders</th>
-                                        <th>Items</th>
-                                        <th>Order range</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    [% FOREACH basket IN manual_sync_result.baskets %]
-                                        <tr>
-                                            <td>
-                                                <a href="[% basket.basket_url | html %]">[% basket.basketname | html %] ([% basket.basketno | html %])</a>
-                                            </td>
-                                            <td>
-                                                [% IF basket.vendor_url %]
-                                                    <a href="[% basket.vendor_url | html %]">[% basket.vendor_name | html %]</a>
-                                                [% ELSE %]
-                                                    [% basket.vendor_name | html %]
-                                                [% END %]
-                                            </td>
-                                            <td>[% basket.order_count | html %]</td>
-                                            <td>[% basket.item_count | html %]</td>
-                                            <td>[% basket.first_ordernumber | html %]-[% basket.last_ordernumber | html %]</td>
-                                        </tr>
-                                    [% END %]
-                                </tbody>
-                            </table>
-                        [% ELSE %]
-                            <p>No new acquisition order lines were found after the manual run started. Check the manual run output above and the EDItX archive/fail folders.</p>
-                            <p><a class="btn btn-default" href="/cgi-bin/koha/acqui/acqui-home.pl">Open Acquisitions</a></p>
-                        [% END %]
-                    </div>
-                [% END %]
-
                 <form method="post" class="page-section editx-config-form">
                     <input type="hidden" name="class" value="[% CLASS | html %]" />
                     <input type="hidden" name="method" value="[% METHOD | html %]" />
@@ -328,22 +280,8 @@ DG,LYHYT,LYHYTHH</code></pre>
 
                     <fieldset class="action">
                         <input type="submit" class="btn btn-primary" value="Save configuration" />
-                        <a class="btn btn-default" href="/cgi-bin/koha/plugins/plugins-home.pl">Cancel</a>
+                        <a class="btn btn-default" href="[% tool_href | html %]">Cancel</a>
                     </fieldset>
-                </form>
-
-                <form method="post" class="page-section editx-manual-sync-form">
-                    <input type="hidden" name="class" value="[% CLASS | html %]" />
-                    <input type="hidden" name="method" value="[% METHOD | html %]" />
-                    <input type="hidden" name="run_sync_now" value="1" />
-                    [% INCLUDE 'csrf-token.inc' %]
-                    <div>
-                        <h2>Manual test run</h2>
-                        <p>Downloads EDItX XML files from saved SFTP sources and immediately starts the importer. Save configuration changes before running this action.</p>
-                    </div>
-                    <button type="submit"
-                            class="btn btn-default"
-                            onclick="return confirm('Run EDItX SFTP download and import now using the saved plugin configuration?');">Download and import now</button>
                 </form>
 
                 <div class="page-section editx-upgrade-status">

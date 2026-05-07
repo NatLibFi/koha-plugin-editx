@@ -146,14 +146,35 @@ sub uninstall() {
     return $success;
 }
 
+sub tool {
+    my ( $self, $args ) = @_;
+    my $cgi = $self->{'cgi'};
+    my @messages;
+    my $manual_sync_result;
+    my $manual_run_attempted;
+
+    $self->_install_or_upgrade_tables();
+
+    if ( $cgi->request_method eq 'POST' && $cgi->param('run_sync_now') ) {
+        $manual_run_attempted = 1;
+        my $manual_messages;
+        ( $manual_messages, $manual_sync_result ) = $self->_run_manual_sync_action($cgi);
+        push @messages, @$manual_messages;
+    }
+
+    $self->_output_tool_page(
+        messages             => \@messages,
+        manual_sync_result   => $manual_sync_result,
+        manual_run_attempted => $manual_run_attempted,
+    );
+}
+
 sub configure {
     my ( $self, $args ) = @_;
     my $cgi = $self->{'cgi'};
     my @messages;
     my $saved;
-    my $manual_sync_result;
     my $is_save = $cgi->request_method eq 'POST' && $cgi->param('save');
-    my $is_run_sync_now = $cgi->request_method eq 'POST' && $cgi->param('run_sync_now');
     my $runtime_log_level =
           $is_save
         ? Koha::Plugin::Fi::KohaSuomi::Editx::RuntimeLog->normalize_level( scalar $cgi->param('runtime_log_level') )
@@ -172,55 +193,6 @@ sub configure {
         : $self->_procurement_settings();
 
     $self->_install_or_upgrade_tables();
-
-    if ($is_run_sync_now) {
-        if ( !$self->_csrf_token_valid($cgi) ) {
-            push @messages, $self->_configure_message( error => 'Manual EDItX synchronization was not started because the security token was invalid. Reload the page and try again.' );
-            $self->_log_runtime( warn => 'Manual EDItX synchronization rejected by invalid CSRF token', { operation => 'manual_sync', interface => 'staff' } );
-        } else {
-            my $run_output;
-            my $run_started_at = $self->_database_timestamp();
-            $self->_log_runtime( info => 'Manual EDItX download and import started', { operation => 'manual_sync', interface => 'staff' } );
-            my $success = eval {
-                $run_output = $self->_run_nightly_sync_for_web();
-                1;
-            };
-            $manual_sync_result = eval { $self->_manual_sync_result($run_started_at) };
-            if ($@) {
-                push @messages, $self->_configure_message( warning => 'Manual run finished, but the created order summary could not be loaded: ' . $self->_compact_message($@) );
-                $self->_log_runtime( warn => 'Manual EDItX order summary could not be loaded', { operation => 'manual_sync', error => $self->_compact_message($@) } );
-            }
-            if ($success) {
-                $self->_log_runtime(
-                    info => 'Manual EDItX download and import finished',
-                    {
-                        operation   => 'manual_sync',
-                        order_count => $manual_sync_result ? $manual_sync_result->{order_count} : undef,
-                        item_count  => $manual_sync_result ? $manual_sync_result->{item_count} : undef,
-                    }
-                );
-                push @messages, $self->_configure_message( success => 'Manual EDItX download and import finished.' );
-                if ( my $summary = $self->_compact_message($run_output) ) {
-                    push @messages, $self->_configure_message( info => "Manual run output: $summary" );
-                }
-            } else {
-                $self->_log_runtime( error => 'Manual EDItX download/import failed', { operation => 'manual_sync', error => $self->_compact_message($@) } );
-                push @messages, $self->_configure_message( error => 'Manual EDItX download/import failed: ' . $self->_compact_message($@) );
-            }
-        }
-
-        $self->_output_configure_page(
-            mapping_csv            => $self->_productform_mapping_csv(),
-            sftp_sources_yaml      => $self->_sftp_sources_yaml(),
-            procurement_settings   => $self->_procurement_settings(),
-            messages               => \@messages,
-            nightly_sync_enabled   => $self->_nightly_sync_enabled(),
-            saved                  => 0,
-            manual_sync_result     => $manual_sync_result,
-            runtime_log_level      => $self->_runtime_log_level(),
-        );
-        return;
-    }
 
     if ($is_save) {
         my $mapping_csv = $cgi->param('mapping_csv') // '';
@@ -345,7 +317,7 @@ sub api_namespace {
 sub plugin_method_url {
     my ( $self, $method ) = @_;
 
-    $method ||= 'configure';
+    $method ||= 'tool';
 
     return '/cgi-bin/koha/plugins/run.pl?class='
         . url_escape( ref($self) || __PACKAGE__ )
@@ -473,6 +445,110 @@ sub _ensure_sequences_row {
     return $dbh->do("INSERT INTO $sequences_table (invoicenumber, item_barcode_nextval) VALUES (0, 0)");
 }
 
+sub _run_manual_sync_action {
+    my ( $self, $cgi ) = @_;
+
+    my @messages;
+    my $manual_sync_result;
+
+    if ( !$self->_csrf_token_valid($cgi) ) {
+        push @messages, $self->_configure_message( error => 'Manual EDItX synchronization was not started because the security token was invalid. Reload the page and try again.' );
+        $self->_log_runtime( warn => 'Manual EDItX synchronization rejected by invalid CSRF token', { operation => 'manual_sync', interface => 'staff' } );
+        return ( \@messages, undef );
+    }
+
+    my $run_output;
+    my $run_started_at = $self->_database_timestamp();
+    $self->_log_runtime( info => 'Manual EDItX download and import started', { operation => 'manual_sync', interface => 'staff' } );
+    my $success = eval {
+        $run_output = $self->_run_nightly_sync_for_web();
+        1;
+    };
+    my $run_error = $@;
+
+    my $summary_loaded = eval {
+        $manual_sync_result = $self->_manual_sync_result($run_started_at);
+        1;
+    };
+    if ( !$summary_loaded ) {
+        push @messages, $self->_configure_message( warning => 'Manual run finished, but the created order summary could not be loaded: ' . $self->_compact_message($@) );
+        $self->_log_runtime( warn => 'Manual EDItX order summary could not be loaded', { operation => 'manual_sync', error => $self->_compact_message($@) } );
+    }
+
+    if ($success) {
+        $self->_log_runtime(
+            info => 'Manual EDItX download and import finished',
+            {
+                operation   => 'manual_sync',
+                order_count => $manual_sync_result ? $manual_sync_result->{order_count} : undef,
+                item_count  => $manual_sync_result ? $manual_sync_result->{item_count} : undef,
+            }
+        );
+        push @messages, $self->_configure_message( success => 'Manual EDItX download and import finished.' );
+        if ( my $summary = $self->_compact_message($run_output) ) {
+            push @messages, $self->_configure_message( info => "Manual run output: $summary" );
+        }
+    } else {
+        $self->_log_runtime( error => 'Manual EDItX download/import failed', { operation => 'manual_sync', error => $self->_compact_message($run_error) } );
+        push @messages, $self->_configure_message( error => 'Manual EDItX download/import failed: ' . $self->_compact_message($run_error) );
+    }
+
+    return ( \@messages, $manual_sync_result );
+}
+
+sub _tool_sftp_status {
+    my ( $self, $procurement_settings ) = @_;
+
+    my $saved_sftp_sources_yaml = $self->retrieve_data('sftp_sources_yaml') // '';
+    if ( $saved_sftp_sources_yaml !~ /\S/ ) {
+        return {
+            count      => 0,
+            has_errors => 1,
+            messages   => [ $self->_configure_message( warning => 'No SFTP sources are saved in the EDItX plugin configuration.' ) ],
+        };
+    }
+
+    my ( $sources, $messages, $has_errors ) = $self->_parse_sftp_sources_yaml($saved_sftp_sources_yaml);
+    my $default_local_dir = $procurement_settings->{import_tmp_path} // '';
+
+    for my $source (@$sources) {
+        next if $source->{local_dir} || $default_local_dir;
+        push @$messages, $self->_configure_message( warning => "SFTP source '$source->{id}' has no local_dir and import_tmp_path is not set." );
+        $has_errors = 1;
+    }
+
+    return {
+        count      => scalar @$sources,
+        has_errors => $has_errors ? 1 : 0,
+        messages   => $messages,
+    };
+}
+
+sub _output_tool_page {
+    my ( $self, %params ) = @_;
+
+    my $procurement_settings = $self->_procurement_settings();
+    my $sftp_status = $self->_tool_sftp_status($procurement_settings);
+    my $template = $self->get_template( { file => 'tool.tt' } );
+    $template->param(
+        messages               => $params{messages},
+        manual_sync_result     => $params{manual_sync_result},
+        manual_run_attempted   => $params{manual_run_attempted},
+        nightly_sync_enabled   => $self->_nightly_sync_enabled(),
+        procurement_settings   => $procurement_settings,
+        sftp_sources_count     => $sftp_status->{count},
+        sftp_config_has_errors => $sftp_status->{has_errors},
+        sftp_config_messages   => $sftp_status->{messages},
+        manual_run_available   => !$sftp_status->{has_errors} && $sftp_status->{count} ? 1 : 0,
+        configure_href         => $self->plugin_method_url('configure'),
+        tool_href              => $self->plugin_method_url('tool'),
+        css_href               => $self->static_asset_url('static_files/editx.css'),
+        plugin_display_version => $self->plugin_display_version(),
+    );
+
+    return $self->output_html( $template->output() );
+}
+
 sub _output_configure_page {
     my ( $self, %params ) = @_;
 
@@ -490,9 +566,9 @@ sub _output_configure_page {
         last_configured_by     => $self->retrieve_data('last_configured_by'),
         last_upgraded          => $self->retrieve_data('last_upgraded'),
         configure_href         => $self->plugin_method_url('configure'),
+        tool_href              => $self->plugin_method_url('tool'),
         css_href               => $self->static_asset_url('static_files/editx.css'),
         plugin_display_version => $self->plugin_display_version(),
-        manual_sync_result     => $params{manual_sync_result},
         runtime_log_level      => $params{runtime_log_level} || $self->_runtime_log_level(),
         runtime_log_levels     => Koha::Plugin::Fi::KohaSuomi::Editx::RuntimeLog->levels,
         runtime_log_path       => Koha::Plugin::Fi::KohaSuomi::Editx::RuntimeLog->path,
