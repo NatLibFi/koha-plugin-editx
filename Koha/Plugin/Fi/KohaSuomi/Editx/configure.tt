@@ -1,4 +1,5 @@
 [% USE KohaDates %]
+[% USE raw %]
 [% INCLUDE 'doc-head-open.inc' %]
 <title>Koha: Configure EDItX plugin v[% plugin_display_version | html %]</title>
 <link rel="stylesheet" href="[% css_href | html %]" />
