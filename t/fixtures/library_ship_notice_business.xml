@@ -61,7 +61,7 @@
     <CopyDetail>
       <CopyQuantity>1</CopyQuantity>
       <DeliverToLocation>MAINSTACK2026</DeliverToLocation>
-      <DestinationLocation>MAIN</DestinationLocation>
+      <DestinationLocation>MAINSTACK2026</DestinationLocation>
       <FundDetail>
         <FundNumber>FUND-2026</FundNumber>
         <MonetaryAmount>12.34</MonetaryAmount>

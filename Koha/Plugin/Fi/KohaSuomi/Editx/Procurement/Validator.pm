@@ -94,6 +94,55 @@ sub validate_message_types {
   return $errors;
 }
 
+sub validate_copy_locations {
+  my ($xc, $logger, $fileforlog) = @_;
+  my $errors = 0;
+  my @copy_details = $xc->findnodes('LibraryShipNotice/ItemDetail/CopyDetail');
+
+  if (!@copy_details) {
+    $logger->logError($fileforlog . "DeliverToLocation not present ");
+    $logger->logError($fileforlog . "DestinationLocation not present ");
+    return 2;
+  }
+
+  foreach my $copy_detail (@copy_details) {
+    my ($deliver_to_location, $deliver_error) = _copy_location_value($copy_detail, 'DeliverToLocation');
+    if ($deliver_error) {
+      $logger->logError($fileforlog . "DeliverToLocation not present ");
+      $errors++;
+    }
+
+    my ($destination_location, $destination_error) = _copy_location_value($copy_detail, 'DestinationLocation');
+    if ($destination_error) {
+      $logger->logError($fileforlog . "DestinationLocation not present ");
+      $errors++;
+    }
+
+    if (!$deliver_error && !$destination_error && $deliver_to_location ne $destination_location) {
+      $logger->logError(
+        $fileforlog
+          . "DeliverToLocation and DestinationLocation do not match: "
+          . $deliver_to_location . " != " . $destination_location
+      );
+      $errors++;
+    }
+  }
+
+  return $errors;
+}
+
+sub _copy_location_value {
+  my ($copy_detail, $element_name) = @_;
+  my @nodes = $copy_detail->findnodes($element_name);
+
+  return ('', 1) if !@nodes;
+
+  my $value = $nodes[0]->string_value;
+
+  return ($value, 1) if !defined $value || $value eq '';
+  return ($value, 0);
+}
+
 sub validateEditx {
 
   my $filename = shift;
@@ -497,36 +546,9 @@ sub validateEditx {
   }
 
 # LibraryShipNotice/ItemDetail/CopyDetail/DeliverToLocation
-
-  @nodes = $xc->findnodes('LibraryShipNotice/ItemDetail/CopyDetail/DeliverToLocation');
-  if (!@nodes) {
-    $logger->logError($fileforlog . "DeliverToLocation not present ");
-    $errors++;
-  } else {
-    foreach my $node (@nodes) {
-
-      if ($node eq "" or $node->to_literal eq "") {
-        $logger->logError($fileforlog . "DeliverToLocation not present ");
-        $errors++;
-      }
-    }
-  }
-
 # LibraryShipNotice/ItemDetail/CopyDetail/DestinationLocation
 
-  @nodes = $xc->findnodes('LibraryShipNotice/ItemDetail/CopyDetail/DestinationLocation');
-  if (!@nodes) {
-    $logger->logError($fileforlog . "DestinationLocation not present ");
-    $errors++;
-  } else {
-    foreach my $node (@nodes) {
-
-      if ($node eq "" or $node->to_literal eq "") {
-        $logger->logError($fileforlog . "DestinationLocation not present ");
-        $errors++;
-      }
-    }
-  }
+  $errors += validate_copy_locations($xc, $logger, $fileforlog);
 
 # LibraryShipNotice/ItemDetail/CopyDetail/ProcessingInstructionCode
 

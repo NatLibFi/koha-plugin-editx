@@ -71,8 +71,8 @@ is( $copy->getFundMonetaryAmount, '12.34',         'Fund monetary amount is pars
 is( $copy->getDeliverToLocation,  'MAINSTACK2026', 'DeliverToLocation is parsed for branch/location/year routing' );
 is(
     $copy->getXmlData->findnodes('DestinationLocation')->string_value,
-    'MAIN',
-    'DestinationLocation is present in the parsed copy detail'
+    'MAINSTACK2026',
+    'DestinationLocation matches DeliverToLocation in the parsed copy detail'
 );
 is(
     $copy->getMessages->get_node(1)->findnodes('MessageType')->string_value,
