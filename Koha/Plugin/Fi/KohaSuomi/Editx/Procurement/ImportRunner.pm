@@ -60,7 +60,7 @@ sub process_orders {
             $logger->info("Started processing order from file $file_name");
 
             $self->validate_editx($file_name);
-            $order_processor->process($order);
+            $self->_process_order_in_transaction( $file_name, $order, $order_processor, $logger );
             $file_manager->archiveFile($file_name);
             $processed++;
 
@@ -79,6 +79,40 @@ sub process_orders {
         processed => $processed,
         failed    => $failed,
     };
+}
+
+sub _process_order_in_transaction {
+    my ( $self, $file_name, $order, $order_processor, $logger ) = @_;
+
+    my $transaction = $self->transaction_manager->begin;
+
+    try {
+        $order_processor->process($order);
+        $transaction->commit;
+    } catch {
+        my $error = $_;
+        $self->_rollback_transaction( $transaction, $logger, $file_name );
+        die $error;
+    };
+
+    return 1;
+}
+
+sub _rollback_transaction {
+    my ( $self, $transaction, $logger, $file_name ) = @_;
+
+    return if !$transaction;
+
+    try {
+        $transaction->rollback;
+    } catch {
+        my $rollback_error = $_;
+        my $fail_message = "Rollback failed for EDItX file $file_name: $rollback_error";
+        $logger->warn($fail_message);
+        $logger->logError($fail_message);
+    };
+
+    return;
 }
 
 sub settings {
@@ -154,6 +188,17 @@ sub order_processor {
     $self->{order_processor} = Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::OrderProcessor->new;
 
     return $self->{order_processor};
+}
+
+sub transaction_manager {
+    my ($self) = @_;
+
+    return $self->{transaction_manager} if $self->{transaction_manager};
+
+    require Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::TransactionManager;
+    $self->{transaction_manager} = Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::TransactionManager->new;
+
+    return $self->{transaction_manager};
 }
 
 sub validate_editx {
