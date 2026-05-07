@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<LibraryShipNotice>
+  <Header>
+    <ShipNoticeNumber>ASN-TEST-0001</ShipNoticeNumber>
+    <BuyerParty>
+      <PartyID>
+        <PartyIDType>VendorAssignedID</PartyIDType>
+        <Identifier>LIBSAN001</Identifier>
+      </PartyID>
+      <ContactPerson>
+        <PersonName>Test Acquisitions</PersonName>
+      </ContactPerson>
+    </BuyerParty>
+    <SellerParty>
+      <PartyName>
+        <NameLine>Alexandria Test Books</NameLine>
+      </PartyName>
+      <PartyID>
+        <PartyIDType>BuyerAssignedID</PartyIDType>
+        <Identifier>VENDOR-KOHA-001</Identifier>
+      </PartyID>
+    </SellerParty>
+  </Header>
+  <ItemDetail>
+    <ProductID>
+      <ProductIDType>Seller</ProductIDType>
+      <Identifier>9789510000001</Identifier>
+    </ProductID>
+    <ProductID>
+      <ProductIDType>EAN13</ProductIDType>
+      <Identifier>9789510000002</Identifier>
+    </ProductID>
+    <ItemDescription>
+      <Title>EDItX Business Fixture</Title>
+      <Author>Example Author</Author>
+      <PublisherName>Example Publisher</PublisherName>
+      <ProductForm>BA</ProductForm>
+      <YearOfPublication>2026</YearOfPublication>
+    </ItemDescription>
+    <ReferenceCoded>
+      <ReferenceNumber>ORDER-REF-42</ReferenceNumber>
+    </ReferenceCoded>
+    <PricingDetail>
+      <Price>
+        <PriceQualifierCode>FixedRPExcludingTax</PriceQualifierCode>
+        <MonetaryAmount>12.34</MonetaryAmount>
+        <CurrencyCode>EUR</CurrencyCode>
+        <Tax>
+          <Percent>14</Percent>
+        </Tax>
+      </Price>
+      <Price>
+        <PriceQualifierCode>SRPExcludingTax</PriceQualifierCode>
+        <MonetaryAmount>12.34</MonetaryAmount>
+        <CurrencyCode>EUR</CurrencyCode>
+        <Tax>
+          <Percent>14</Percent>
+        </Tax>
+      </Price>
+    </PricingDetail>
+    <CopyDetail>
+      <CopyQuantity>1</CopyQuantity>
+      <DeliverToLocation>MAINSTACK2026</DeliverToLocation>
+      <DestinationLocation>MAIN</DestinationLocation>
+      <FundDetail>
+        <FundNumber>FUND-2026</FundNumber>
+        <MonetaryAmount>12.34</MonetaryAmount>
+      </FundDetail>
+      <Message>
+        <MessageType>04</MessageType>
+        <MessageLine>
+          <collection xmlns="http://www.loc.gov/MARC21/slim">
+            <record>
+              <leader>00000nam a2200000 a 4500</leader>
+              <controlfield tag="001">fixture-1</controlfield>
+              <controlfield tag="003">FI-TEST</controlfield>
+              <datafield tag="020" ind1=" " ind2=" ">
+                <subfield code="a">9789510000001</subfield>
+              </datafield>
+              <datafield tag="245" ind1="1" ind2="0">
+                <subfield code="a">EDItX Business Fixture</subfield>
+              </datafield>
+              <datafield tag="260" ind1=" " ind2=" ">
+                <subfield code="b">Example Publisher</subfield>
+                <subfield code="c">2026</subfield>
+              </datafield>
+            </record>
+          </collection>
+        </MessageLine>
+      </Message>
+    </CopyDetail>
+  </ItemDetail>
+</LibraryShipNotice>
