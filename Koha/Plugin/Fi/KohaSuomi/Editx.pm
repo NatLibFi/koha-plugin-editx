@@ -1008,10 +1008,16 @@ sub _parse_sftp_sources_yaml {
             next;
         }
 
-        my %normalized = map { $_ => $self->_trim_csv_value( $source->{$_} ) } qw(
+        my %normalized;
+        for my $key (qw(
             id host port user identity_file remote_dir local_dir pattern after_download remote_archive_dir
             known_hosts_file strict_host_key_checking ssh_config
-        );
+        )) {
+            my $raw_value = $source->{$key};
+            my $value = $self->_trim_csv_value($raw_value);
+            $value = '0' if $key eq 'strict_host_key_checking' && defined $raw_value && !defined $value && !$raw_value;
+            $normalized{$key} = $value;
+        }
 
         $normalized{port} //= 22;
         $normalized{pattern} //= '*.xml';
