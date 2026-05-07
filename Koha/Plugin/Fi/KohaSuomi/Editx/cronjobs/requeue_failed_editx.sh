@@ -13,7 +13,7 @@
 #
 # 00 7-21 * * * TRIGGER cronjobs/requeueFailedEDItX.sh
 
-die() { printf "$@\n" ; exit 1 ; }
+die() { printf '%s\n' "$*" ; exit 1 ; }
 
 # Get, set and check variables
 
@@ -22,17 +22,14 @@ test -n "$xmllint" || die "No xmllint, apt install libxml2-utils."
 
 test -e "$KOHA_CONF" || die "No KOHA_CONF."
 
-config_file="$(dirname $KOHA_CONF)/procurement-config.xml"
-test -e "$config_file" || die "No procurement config $config_file."
+config_loader="$(dirname "$0")/exportEditXConfig.pl"
+test -e "$config_loader" || die "No EDItX config exporter $config_loader."
+config_exports="$("$config_loader")" || die "Could not read EDItX plugin configuration."
+eval "$config_exports"
 
-export tmp_path=$($xmllint --xpath '*/settings/import_tmp_path/text()' $config_file 2> /dev/null)
-export failed_path=$($xmllint --xpath '*/settings/import_failed_path/text()' $config_file 2> /dev/null)
-export failed_archived_path=$($xmllint --xpath '*/settings/import_failed_archived_path/text()' $config_file 2> /dev/null)
-export log_path=$($xmllint --xpath 'yazgfs/config/logdir/text()' $KOHA_CONF 2> /dev/null)
-
-test -n "$tmp_path" || die "No path to incoming EDItX messages in $config_file."
-test -n "$failed_path" || die "No path to failed EDItX messages in $config_file."
-test -n "$failed_archived_path" || die "No path to failed_archived EDItX messages in $config_file."
+test -n "$tmp_path" || die "No path to incoming EDItX messages in plugin configuration."
+test -n "$failed_path" || die "No path to failed EDItX messages in plugin configuration."
+test -n "$failed_archived_path" || die "No path to failed_archived EDItX messages in plugin configuration."
 test -n "$log_path" || die "No path to logs in $KOHA_CONF."
 
 # Get postponed and failed EDItX notices and requeue or discard them as needed
@@ -42,7 +39,7 @@ export failed_files="$(ls -1 $failed_path/*.xml 2> /dev/null)"
 
 test -z "$pending_files" && test -z "$failed_files" && exit 0 # Exit if nothing to do 
 
-for file in $pending_filed; do
+for file in $pending_files; do
 
   if test $(stat -c %Y "$file") -lt $(($(date +%s) - 604800)) ; then
     printf "$(date) $file is expired, moved to $failed_archived_path.\n"

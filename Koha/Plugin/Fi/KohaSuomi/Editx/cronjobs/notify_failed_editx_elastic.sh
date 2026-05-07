@@ -1,15 +1,8 @@
 #!/bin/sh
-# Send e-mail notifications of failed EDItX processing to people defined in procurement-config
+# Send e-mail notifications of failed EDItX processing to people defined in plugin configuration.
 # Written by Kodo Korkalo / Koha-Suomi Oy, GNU GPL3 or later applies.
 
-# You will need to add <notifications> part to the end of your procurement-config.xml:
-
-# <notifications>
-#   <mailto>someone@somewere.com,someone@else.com</mailto>
-#   <mailfrom>someone@somewere.com</mailfrom> <!-- this is optional, [user]@[host] will be used if left unset -->
-# </notifications>
-
-die() { printf "$@\n" ; exit 1 ; }
+die() { printf '%s\n' "$*" ; exit 1 ; }
 
 # Get, set and check variables
 
@@ -21,26 +14,21 @@ test -n "$mailer" || die "No mail, apt install heirloom-mailx."
 
 test -e "$KOHA_CONF" || die "No KOHA_CONF."
 
-config_file="$(dirname $KOHA_CONF)/procurement-config.xml"
-test -e "$config_file" || die "No procurement config $config_file."
-
-mailto=$($xmllint --xpath '*/notifications/mailto/text()' $config_file 2> /dev/null)
-mailfrom=$($xmllint --xpath '*/notifications/mailfrom/text()' $config_file 2> /dev/null)
-
-export archive_path=$($xmllint --xpath '*/settings/import_archive_path/text()' $config_file 2> /dev/null)
-
-export log_path=$($xmllint --xpath 'yazgfs/config/logdir/text()' $KOHA_CONF 2> /dev/null)
+config_loader="$(dirname "$0")/exportEditXConfig.pl"
+test -e "$config_loader" || die "No EDItX config exporter $config_loader."
+config_exports="$("$config_loader")" || die "Could not read EDItX plugin configuration."
+eval "$config_exports"
 
 test -n "$mailfrom" && mailfrom="-r $mailfrom"
-test -n "$mailto" || die "No one to send notifications to in $config_file."
+test -n "$mailto" || die "No one to send notifications to in EDItX plugin configuration."
 
-test -n "$archive_path" || die "No path to archived EDItX messages in $config_file."
+test -n "$archive_path" || die "No path to archived EDItX messages in plugin configuration."
 
 test -n "$log_path" || die "No path to logs in $KOHA_CONF."
 
 # Get postponed and failed EDItX notices and send emails
 
-export archived_files="$(ls -1 $failed_path/*.xml 2> /dev/null)"
+export archived_files="$(ls -1 $archive_path/*.xml 2> /dev/null)"
 timestamp=$(date +"%Y-%m-%d %T")
 
 # test -z "$archived_files" && test -z "$failed_files" && exit 0 # Exit if nothing to report
@@ -64,5 +52,3 @@ if [ -n "$result" ]; then
 fi
 
 #All done, exit gracefully
-
-

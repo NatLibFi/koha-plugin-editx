@@ -1,4 +1,5 @@
 <?xml version="1.0"?>
+<!-- Legacy fallback example. New installs should configure these values from the EDItX plugin configuration page. -->
 <data>
   <settings>
         <use_finna_materialtype>no</use_finna_materialtype> <!-- Do we put finna materialtype into 942c? default "no" -->

@@ -17,7 +17,8 @@ SFTP_STRICT_HOST_KEY_CHECKING=yes
 SFTP_REMOTE_DIR=/outgoing/editx
 SFTP_PATTERN='*.xml'
 
-# Must match <import_tmp_path> from procurement-config.xml.
+# Standalone mode only. The plugin web configuration normally provides this path.
+# Use the same directory as import_tmp_path from the plugin configuration page.
 SFTP_LOCAL_DIR=/var/spool/koha/<instance>/editx/tmp
 
 # keep: leave remote files as-is

@@ -1,80 +1,263 @@
 [% USE KohaDates %]
 [% INCLUDE 'doc-head-open.inc' %]
-<title>EDItX plugin configuration</title>
+<title>Koha: Configure EDItX plugin v[% plugin_display_version | html %]</title>
+<link rel="stylesheet" href="[% css_href | html %]" />
 [% INCLUDE 'doc-head-close.inc' %]
 </head>
-<body>
-[% INCLUDE 'header.inc' %]
-[% INCLUDE 'cat-search.inc' %]
+<body id="plugins_editx_configure" class="plugins">
+[% WRAPPER 'header.inc' %]
+    [% INCLUDE 'prefs-admin-search.inc' %]
+[% END %]
 
-<div id="breadcrumbs"><a href="/cgi-bin/koha/mainpage.pl">Home</a> &rsaquo; <a href="/cgi-bin/koha/plugins/plugins-home.pl">Plugins</a> &rsaquo; EDItX plugin &rsaquo; Configuration</div>
+[% INCLUDE 'editx_breadcrumbs.inc' active_text='Configure' active_method='configure' %]
 
-<div id="doc3" style="margin: 10px;">
-    <h1>EDItX plugin configuration</h1>
+<div class="main container-fluid">
+    <div class="row">
+        <div class="col-12 col-xl-10">
+            <main>
+                [% INCLUDE 'messages.inc' %]
 
-    [% IF saved %]
-        <div class="alert alert-success">Configuration saved.</div>
-    [% END %]
+                <div class="page-section editx-page-header">
+                    <div>
+                        <h1>Configure EDItX plugin v[% plugin_display_version | html %]</h1>
+                        <p class="help-block">Configure the nightly SFTP download, import folders, EDItX processing rules, notifications, and ONIX ProductForm mappings.</p>
+                    </div>
+                    <div class="editx-status-strip">
+                        <div class="editx-status-item">
+                            <span class="editx-status-label">Nightly sync</span>
+                            <strong>[% IF nightly_sync_enabled %]Enabled[% ELSE %]Disabled[% END %]</strong>
+                            <span class="editx-status-note">Koha plugin nightly hook</span>
+                        </div>
+                        <div class="editx-status-item">
+                            <span class="editx-status-label">Import intake</span>
+                            <strong>[% IF procurement_settings.import_tmp_path %]Configured[% ELSE %]Missing[% END %]</strong>
+                            <span class="editx-status-note">[% procurement_settings.import_tmp_path | html %]</span>
+                        </div>
+                        <div class="editx-status-item">
+                            <span class="editx-status-label">Item types</span>
+                            <strong>[% IF itemtypes_text %]Available[% ELSE %]Missing[% END %]</strong>
+                            <span class="editx-status-note">ProductForm mapping target</span>
+                        </div>
+                    </div>
+                </div>
 
-    [% FOREACH message IN messages %]
-        <div class="alert alert-[% message.alert_class | html %]">[% message.text | html %]</div>
-    [% END %]
+                [% IF saved %]
+                    <div class="alert alert-success">EDItX plugin configuration saved.</div>
+                [% END %]
 
-    <form method="post">
-        <input type="hidden" name="class" value="[% CLASS | html %]" />
-        <input type="hidden" name="method" value="[% METHOD | html %]" />
-        <input type="hidden" name="save" value="1" />
+                [% FOREACH message IN messages %]
+                    <div class="alert alert-[% message.alert_class | html %]">[% message.text | html %]</div>
+                [% END %]
 
-        <fieldset class="rows">
-            <legend>Automatic synchronization</legend>
-            <ol>
-                <li>
-                    <label for="nightly_sync_enabled">Nightly EDItX synchronization:</label>
-                    [% IF nightly_sync_enabled %]
-                        <input type="checkbox" id="nightly_sync_enabled" name="nightly_sync_enabled" value="1" checked="checked" />
-                    [% ELSE %]
-                        <input type="checkbox" id="nightly_sync_enabled" name="nightly_sync_enabled" value="1" />
+                <form method="post" class="page-section editx-config-form">
+                    <input type="hidden" name="class" value="[% CLASS | html %]" />
+                    <input type="hidden" name="method" value="[% METHOD | html %]" />
+                    <input type="hidden" name="save" value="1" />
+                    [% INCLUDE 'csrf-token.inc' %]
+
+                    <fieldset class="rows">
+                        <legend>Automatic synchronization</legend>
+                        <ol>
+                            <li>
+                                <label for="nightly_sync_enabled">Nightly EDItX synchronization</label>
+                                <input id="nightly_sync_enabled"
+                                       name="nightly_sync_enabled"
+                                       type="checkbox"
+                                       value="1"
+                                       [% IF nightly_sync_enabled %]checked="checked"[% END %] />
+                                <div class="hint">Runs SFTP download first and then imports downloaded EDItX files from Koha's nightly plugin cron hook.</div>
+                            </li>
+                            <li>
+                                <label for="sftp_sources_yaml">SFTP sources YAML</label>
+                                <textarea id="sftp_sources_yaml"
+                                          name="sftp_sources_yaml"
+                                          class="editx-monospace"
+                                          cols="100"
+                                          rows="18"
+                                          wrap="off">[% sftp_sources_yaml | html %]</textarea>
+                                <div class="hint">One source is enough for 3AMK now; add more list entries when another remote folder or server is needed. Leave local_dir empty to use import_tmp_path below.</div>
+                                <details class="editx-example">
+                                    <summary>SFTP YAML examples</summary>
+                                    <div class="editx-example-grid">
+                                        <div>
+                                            <h2>Single source</h2>
+                                            <pre class="editx-code-example"><code>sources:
+  - id: haaga_helia
+    host: sftp.example.org
+    port: 22
+    user: editx-user
+    identity_file: /var/lib/koha/&lt;instance&gt;/.ssh/editx_sftp
+    remote_dir: /out/haaga-helia
+    local_dir:
+    pattern: "*.xml"
+    after_download: keep
+    remote_archive_dir:
+    known_hosts_file:
+    strict_host_key_checking: "yes"
+    ssh_config:</code></pre>
+                                        </div>
+                                        <div>
+                                            <h2>Multiple sources</h2>
+                                            <pre class="editx-code-example"><code>sources:
+  - id: haaga_helia
+    host: sftp.example.org
+    user: editx-user
+    identity_file: /var/lib/koha/&lt;instance&gt;/.ssh/editx_sftp
+    remote_dir: /out/haaga-helia
+    pattern: "*.xml"
+    after_download: keep
+  - id: another_library
+    host: sftp.example.org
+    user: editx-user
+    identity_file: /var/lib/koha/&lt;instance&gt;/.ssh/editx_sftp
+    remote_dir: /out/another-library
+    local_dir:
+    pattern: "LibraryShipNotice_*.xml"</code></pre>
+                                        </div>
+                                    </div>
+                                </details>
+                            </li>
+                        </ol>
+                    </fieldset>
+
+                    <fieldset class="rows">
+                        <legend>Import folders</legend>
+                        <div class="editx-folder-flow">
+                            <span>tmp</span>
+                            <span>load</span>
+                            <span>archive</span>
+                            <span>fail</span>
+                        </div>
+                        <ol>
+                            <li>
+                                <label for="import_tmp_path">Temporary download folder</label>
+                                <input id="import_tmp_path" name="import_tmp_path" type="text" size="80" value="[% procurement_settings.import_tmp_path | html %]" />
+                                <div class="hint">SFTP puts new XML files here unless a source has its own local_dir.</div>
+                            </li>
+                            <li>
+                                <label for="import_load_path">Import load folder</label>
+                                <input id="import_load_path" name="import_load_path" type="text" size="80" value="[% procurement_settings.import_load_path | html %]" />
+                                <div class="hint">Importer reads files from here after moving them out of the temporary folder.</div>
+                            </li>
+                            <li>
+                                <label for="import_archive_path">Successful archive folder</label>
+                                <input id="import_archive_path" name="import_archive_path" type="text" size="80" value="[% procurement_settings.import_archive_path | html %]" />
+                            </li>
+                            <li>
+                                <label for="import_failed_path">Failed import folder</label>
+                                <input id="import_failed_path" name="import_failed_path" type="text" size="80" value="[% procurement_settings.import_failed_path | html %]" />
+                            </li>
+                            <li>
+                                <label for="import_failed_archived_path">Archived failed folder</label>
+                                <input id="import_failed_archived_path" name="import_failed_archived_path" type="text" size="80" value="[% procurement_settings.import_failed_archived_path | html %]" />
+                                <div class="hint">Used by failure notification and requeue helper scripts.</div>
+                            </li>
+                        </ol>
+                    </fieldset>
+
+                    <fieldset class="rows">
+                        <legend>Processing rules</legend>
+                        <ol>
+                            <li>
+                                <label for="authoriser">Order authoriser borrowernumber</label>
+                                <input id="authoriser" name="authoriser" type="number" min="1" value="[% procurement_settings.authoriser | html %]" />
+                                <div class="hint">Used as the Koha user creating acquisition baskets and orders.</div>
+                            </li>
+                            <li>
+                                <label for="allowed_locations">Allowed locations</label>
+                                <input id="allowed_locations" name="allowed_locations" type="text" size="60" value="[% procurement_settings.allowed_locations | html %]" />
+                                <div class="hint">Comma-separated shelving location codes accepted when parsing branch, location, and year from EDItX fund number.</div>
+                                <div class="editx-reference-list"><strong>Existing Koha LOC values:</strong> [% IF locations_text %][% locations_text | html %][% ELSE %]No LOC authorised values found.[% END %]</div>
+                                <div class="editx-reference-list"><strong>Existing branches:</strong> [% IF branches_text %][% branches_text | html %][% ELSE %]No branches found.[% END %]</div>
+                            </li>
+                            <li>
+                                <label for="productform_alternative_triggers">Alternative ProductForm locations</label>
+                                <input id="productform_alternative_triggers" name="productform_alternative_triggers" type="text" size="60" value="[% procurement_settings.productform_alternative_triggers | html %]" />
+                                <div class="hint">Comma-separated allowed location codes that should use productform_alternative from the mapping table.</div>
+                            </li>
+                            <li>
+                                <label for="automatch_biblios">Automatch biblios</label>
+                                <input id="automatch_biblios"
+                                       name="automatch_biblios"
+                                       type="checkbox"
+                                       value="1"
+                                       [% IF procurement_settings.automatch_biblios == 'yes' %]checked="checked"[% END %] />
+                                <div class="hint">When enabled, EDItX import tries to match an existing biblio before creating a new one.</div>
+                            </li>
+                            <li>
+                                <label for="use_finna_materialtype">Use Finna material type</label>
+                                <input id="use_finna_materialtype"
+                                       name="use_finna_materialtype"
+                                       type="checkbox"
+                                       value="1"
+                                       [% IF procurement_settings.use_finna_materialtype == 'yes' %]checked="checked"[% END %] />
+                                <div class="hint">When enabled, 942$c is derived from Finna material type instead of ONIX ProductForm mapping.</div>
+                            </li>
+                        </ol>
+                    </fieldset>
+
+                    <fieldset class="rows">
+                        <legend>Failure notifications</legend>
+                        <ol>
+                            <li>
+                                <label for="notification_mailto">Recipients</label>
+                                <input id="notification_mailto" name="notification_mailto" type="text" size="80" value="[% procurement_settings.notification_mailto | html %]" />
+                                <div class="hint">Comma-separated email addresses for helper scripts that report failed EDItX processing.</div>
+                            </li>
+                            <li>
+                                <label for="notification_mailfrom">Sender</label>
+                                <input id="notification_mailfrom" name="notification_mailfrom" type="text" size="80" value="[% procurement_settings.notification_mailfrom | html %]" />
+                            </li>
+                        </ol>
+                    </fieldset>
+
+                    <fieldset class="rows">
+                        <legend>Product form mappings</legend>
+                        <ol>
+                            <li>
+                                <label for="mapping_csv">CSV mappings</label>
+                                <textarea id="mapping_csv"
+                                          name="mapping_csv"
+                                          class="editx-monospace"
+                                          cols="100"
+                                          rows="24"
+                                          wrap="off">[% mapping_csv | html %]</textarea>
+                                <div class="hint">Invalid item type values are stored as empty mapping cells, then reported here before save.</div>
+                                <details class="editx-example">
+                                    <summary>CSV mapping example</summary>
+                                    <pre class="editx-code-example"><code>onix_code,productform,productform_alternative
+AA,YLEIS,
+BB,ESINE,
+DG,LYHYT,LYHYTHH</code></pre>
+                                </details>
+                            </li>
+                            <li>
+                                <span class="label">Existing Koha item types</span>
+                                <span class="editx-reference-list">[% IF itemtypes_text %][% itemtypes_text | html %][% ELSE %]No item types found.[% END %]</span>
+                            </li>
+                        </ol>
+                    </fieldset>
+
+                    <fieldset class="action">
+                        <input type="submit" class="btn btn-primary" value="Save configuration" />
+                        <a class="btn btn-default" href="/cgi-bin/koha/plugins/plugins-home.pl">Cancel</a>
+                    </fieldset>
+                </form>
+
+                <div class="page-section editx-upgrade-status">
+                    <h2>Plugin status</h2>
+                    [% IF last_configured_by %]
+                        <p>Plugin settings were last updated by borrowernumber [% last_configured_by | html %].</p>
                     [% END %]
-                    <span class="hint">Run SFTP download and EDItX import from Koha's nightly plugin cron hook.</span>
-                </li>
-                <li>
-                    <label for="sftp_sources_yaml">SFTP sources YAML:</label>
-                    <textarea id="sftp_sources_yaml" name="sftp_sources_yaml" cols="80" rows="18" style="font-family: monospace;" wrap="off">[% sftp_sources_yaml | html %]</textarea>
-                    <span class="hint">YAML list of SFTP sources. Leave local_dir empty to use import_tmp_path from procurement-config.xml.</span>
-                </li>
-            </ol>
-        </fieldset>
-
-        <fieldset class="rows">
-            <legend>Product form mappings</legend>
-            <ol>
-                <li>
-                    <label for="mapping_csv">CSV mappings:</label>
-                    <textarea id="mapping_csv" name="mapping_csv" cols="80" rows="24" style="font-family: monospace;" wrap="off">[% mapping_csv | html %]</textarea>
-                </li>
-                <li>
-                    <span class="label">Existing Koha item types:</span>
-                    <span>[% itemtypes_text | html %]</span>
-                </li>
-            </ol>
-        </fieldset>
-
-        <fieldset class="action">
-            <input type="submit" class="btn btn-primary" value="Save configuration" />
-        </fieldset>
-    </form>
-
-    <hr />
-
-    <h2>Upgrade status</h2>
-    [% IF last_configured_by %]
-        <p>Plugin settings were last updated by borrowernumber [% last_configured_by | html %].</p>
-    [% END %]
-    [% IF last_upgraded %]
-        <p>Plugin was last upgraded on this system on [% last_upgraded | $KohaDates with_hours => 1 %].</p>
-    [% ELSE %]
-        <p>Plugin has never been upgraded.</p>
-    [% END %]
+                    [% IF last_upgraded %]
+                        <p>Plugin was last upgraded on this system on [% last_upgraded | $KohaDates with_hours => 1 %].</p>
+                    [% ELSE %]
+                        <p>Plugin has never been upgraded.</p>
+                    [% END %]
+                </div>
+            </main>
+        </div>
+    </div>
 </div>
 
 [% INCLUDE 'intranet-bottom.inc' %]

@@ -4,9 +4,13 @@ use Modern::Perl;
 ## Required for all plugins
 use base qw(Koha::Plugins::Base);
 ## We will also need to include any Koha libraries we want to access
+use File::Spec;
 use File::Temp qw(tempfile);
 use C4::Context;
 use Koha::DateUtils qw(dt_from_string);
+use Koha::Token;
+use Mojo::JSON qw(decode_json);
+use Mojo::Util qw(url_escape);
 use Text::CSV_XS;
 use YAML::XS qw(Load);
 use utf8;
@@ -123,32 +127,46 @@ sub configure {
           $cgi->request_method eq 'POST'
         ? ( $cgi->param('sftp_sources_yaml') // '' )
         : $self->_sftp_sources_yaml();
+    my $procurement_settings =
+          $cgi->request_method eq 'POST'
+        ? $self->_procurement_settings_from_cgi($cgi)
+        : $self->_procurement_settings();
 
     $self->_install_or_upgrade_tables();
 
     if ( $cgi->request_method eq 'POST' && $cgi->param('save') ) {
         my $mapping_csv = $cgi->param('mapping_csv') // '';
+        if ( !$self->_csrf_token_valid($cgi) ) {
+            push @messages, $self->_configure_message( error => 'Configuration was not saved because the security token was invalid. Reload the page and try again.' );
+            $self->_output_configure_page(
+                mapping_csv            => $mapping_csv,
+                sftp_sources_yaml      => $sftp_sources_yaml,
+                procurement_settings   => $procurement_settings,
+                messages               => \@messages,
+                nightly_sync_enabled   => $nightly_sync_enabled,
+                saved                  => 0,
+            );
+            return;
+        }
+
         my ( $rows, $parse_messages, $has_blocking_errors ) = $self->_parse_productform_mapping_csv($mapping_csv);
         my ( $sftp_sources, $sftp_messages, $has_sftp_blocking_errors ) = $self->_parse_sftp_sources_yaml($sftp_sources_yaml);
+        my ( $procurement_messages, $has_procurement_blocking_errors ) = $self->_validate_procurement_settings( $procurement_settings, $nightly_sync_enabled );
         push @messages, @$parse_messages;
         push @messages, @$sftp_messages;
+        push @messages, @$procurement_messages;
         $has_blocking_errors ||= $has_sftp_blocking_errors;
+        $has_blocking_errors ||= $has_procurement_blocking_errors;
 
         if ( !$has_blocking_errors && $nightly_sync_enabled ) {
             if ( !@$sftp_sources ) {
                 push @messages, $self->_configure_message( error => 'Nightly sync is enabled but no SFTP sources are configured.' );
                 $has_blocking_errors = 1;
             } else {
-                my $default_import_tmp_path = eval { $self->_default_import_tmp_path() };
-                if ($@) {
-                    push @messages, $self->_configure_message( error => "Could not read import_tmp_path from procurement-config.xml: $@" );
+                for my $source (@$sftp_sources) {
+                    next if $source->{local_dir} || $procurement_settings->{import_tmp_path};
+                    push @messages, $self->_configure_message( error => "SFTP source '$source->{id}' has no local_dir and import_tmp_path is not set." );
                     $has_blocking_errors = 1;
-                } else {
-                    for my $source (@$sftp_sources) {
-                        next if $source->{local_dir} || $default_import_tmp_path;
-                        push @messages, $self->_configure_message( error => "SFTP source '$source->{id}' has no local_dir and import_tmp_path is not set in procurement-config.xml." );
-                        $has_blocking_errors = 1;
-                    }
                 }
             }
         }
@@ -157,6 +175,7 @@ sub configure {
             $self->_output_configure_page(
                 mapping_csv            => $mapping_csv,
                 sftp_sources_yaml      => $sftp_sources_yaml,
+                procurement_settings   => $procurement_settings,
                 messages               => \@messages,
                 nightly_sync_enabled   => $nightly_sync_enabled,
                 saved                  => 0,
@@ -170,6 +189,7 @@ sub configure {
             $self->_output_configure_page(
                 mapping_csv            => $mapping_csv,
                 sftp_sources_yaml      => $sftp_sources_yaml,
+                procurement_settings   => $procurement_settings,
                 messages               => \@messages,
                 nightly_sync_enabled   => $nightly_sync_enabled,
                 saved                  => 0,
@@ -180,6 +200,7 @@ sub configure {
             {
                 nightly_sync_enabled => $nightly_sync_enabled,
                 sftp_sources_yaml    => $sftp_sources_yaml,
+                %{ $self->_procurement_settings_store_data($procurement_settings) },
                 last_configured_by   => ( C4::Context->userenv || {} )->{'number'},
             }
         );
@@ -189,6 +210,7 @@ sub configure {
     $self->_output_configure_page(
         mapping_csv            => $self->_productform_mapping_csv(),
         sftp_sources_yaml      => $self->_sftp_sources_yaml(),
+        procurement_settings   => $procurement_settings,
         messages               => \@messages,
         nightly_sync_enabled   => $nightly_sync_enabled,
         saved                  => $saved,
@@ -204,6 +226,46 @@ sub cronjob_nightly {
     }
 
     return $self->_run_nightly_sync();
+}
+
+sub static_routes {
+    my ($self) = @_;
+
+    return decode_json( $self->mbf_read('staticapi.json') );
+}
+
+sub api_namespace {
+    return 'editx';
+}
+
+sub plugin_method_url {
+    my ( $self, $method ) = @_;
+
+    $method ||= 'configure';
+
+    return '/cgi-bin/koha/plugins/run.pl?class='
+        . url_escape( ref($self) || __PACKAGE__ )
+        . '&method='
+        . url_escape($method);
+}
+
+sub static_asset_url {
+    my ( $self, $path ) = @_;
+
+    $path =~ s{\A/+}{};
+
+    return '/api/v1/contrib/'
+        . $self->api_namespace
+        . '/static/'
+        . $path
+        . '?v='
+        . $self->_static_asset_version($path);
+}
+
+sub template_include_paths {
+    my ($self) = @_;
+
+    return [ $self->mbf_path('includes') ];
 }
 
 sub _migrate_legacy_sequences_table {
@@ -314,12 +376,18 @@ sub _output_configure_page {
     $template->param(
         mapping_csv            => $params{mapping_csv},
         sftp_sources_yaml      => $params{sftp_sources_yaml},
+        procurement_settings   => $params{procurement_settings},
         messages               => $params{messages},
         nightly_sync_enabled   => $params{nightly_sync_enabled},
         saved                  => $params{saved},
         itemtypes_text         => join( ', ', @{ $self->_itemtypes() } ),
+        locations_text         => join( ', ', @{ $self->_authorised_values('LOC') } ),
+        branches_text          => join( ', ', @{ $self->_branches() } ),
         last_configured_by     => $self->retrieve_data('last_configured_by'),
         last_upgraded          => $self->retrieve_data('last_upgraded'),
+        configure_href         => $self->plugin_method_url('configure'),
+        css_href               => $self->static_asset_url('static_files/editx.css'),
+        plugin_display_version => $self->plugin_display_version(),
     );
 
     return $self->output_html( $template->output() );
@@ -735,6 +803,128 @@ sub _is_productform_mapping_csv_header {
         && $header[2] eq 'productform_alternative';
 }
 
+sub _procurement_settings_from_cgi {
+    my ( $self, $cgi ) = @_;
+
+    my %settings = map {
+        my $value = $self->_trim_csv_value( scalar $cgi->param($_) );
+        $_ => $value // ''
+    } qw(
+        import_tmp_path import_load_path import_archive_path import_failed_path import_failed_archived_path
+        authoriser allowed_locations productform_alternative_triggers notification_mailto notification_mailfrom
+    );
+
+    $settings{automatch_biblios}       = $cgi->param('automatch_biblios')       ? 'yes' : 'no';
+    $settings{use_finna_materialtype} = $cgi->param('use_finna_materialtype') ? 'yes' : 'no';
+
+    return \%settings;
+}
+
+sub _procurement_settings {
+    my ($self) = @_;
+
+    require Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Config;
+    my $config = Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Config->new->getSettings();
+    my $settings = $config->{settings} || {};
+    my $notifications = $config->{notifications} || {};
+
+    return {
+        import_tmp_path                  => $self->_config_scalar( $settings->{import_tmp_path} ),
+        import_load_path                 => $self->_config_scalar( $settings->{import_load_path} ),
+        import_archive_path              => $self->_config_scalar( $settings->{import_archive_path} ),
+        import_failed_path               => $self->_config_scalar( $settings->{import_failed_path} ),
+        import_failed_archived_path      => $self->_config_scalar( $settings->{import_failed_archived_path} ),
+        authoriser                       => $self->_config_scalar( $settings->{authoriser} ),
+        allowed_locations                => $self->_config_scalar( $settings->{allowed_locations} ),
+        productform_alternative_triggers => $self->_config_scalar( $settings->{productform_alternative_triggers} ),
+        automatch_biblios                => $self->_yes_no_setting( $settings->{automatch_biblios}, 'yes' ),
+        use_finna_materialtype           => $self->_yes_no_setting( $settings->{use_finna_materialtype}, 'no' ),
+        notification_mailto              => $self->_config_scalar( $notifications->{mailto} ),
+        notification_mailfrom            => $self->_config_scalar( $notifications->{mailfrom} ),
+    };
+}
+
+sub _procurement_settings_store_data {
+    my ( $self, $settings ) = @_;
+
+    my %data;
+    for my $key (qw(
+        import_tmp_path import_load_path import_archive_path import_failed_path import_failed_archived_path
+        authoriser allowed_locations productform_alternative_triggers automatch_biblios use_finna_materialtype
+        notification_mailto notification_mailfrom
+    )) {
+        $data{"procurement_$key"} = $settings->{$key} // '';
+    }
+
+    return \%data;
+}
+
+sub _validate_procurement_settings {
+    my ( $self, $settings, $strict ) = @_;
+
+    my @messages;
+    my $has_blocking_errors;
+    my $blocking_type = $strict ? 'error' : 'warning';
+
+    for my $field (qw(import_tmp_path import_load_path import_archive_path import_failed_path authoriser allowed_locations)) {
+        next if defined $settings->{$field} && $settings->{$field} ne '';
+        push @messages, $self->_configure_message( $blocking_type => "$field is required before EDItX import can run." );
+        $has_blocking_errors ||= $strict;
+    }
+
+    for my $field (qw(import_tmp_path import_load_path import_archive_path import_failed_path import_failed_archived_path)) {
+        my $path = $settings->{$field};
+        next unless defined $path && $path ne '';
+        next if -d $path && -w $path;
+
+        push @messages, $self->_configure_message( $blocking_type => "$field does not point to a writable directory: $path" );
+        $has_blocking_errors ||= $strict;
+    }
+
+    if ( defined $settings->{authoriser} && $settings->{authoriser} ne '' ) {
+        if ( $settings->{authoriser} !~ /\A[0-9]+\z/ || !$self->_patron_exists( $settings->{authoriser} ) ) {
+            push @messages, $self->_configure_message( $blocking_type => "authoriser must be an existing Koha borrowernumber." );
+            $has_blocking_errors ||= $strict;
+        }
+    }
+
+    my @allowed_locations = $self->_csv_values( $settings->{allowed_locations} );
+    my %allowed_locations = map { $_ => 1 } @allowed_locations;
+    my %known_locations = map { $_ => 1 } @{ $self->_authorised_values('LOC') };
+
+    if (%known_locations) {
+        for my $location (@allowed_locations) {
+            next if $known_locations{$location};
+            push @messages, $self->_configure_message( $blocking_type => "allowed_locations contains unknown Koha location '$location'." );
+            $has_blocking_errors ||= $strict;
+        }
+    }
+
+    for my $trigger ( $self->_csv_values( $settings->{productform_alternative_triggers} ) ) {
+        if ( !%allowed_locations || !$allowed_locations{$trigger} ) {
+            push @messages, $self->_configure_message( $blocking_type => "productform_alternative_triggers contains '$trigger', but it is not in allowed_locations." );
+            $has_blocking_errors ||= $strict;
+        }
+        if ( %known_locations && !$known_locations{$trigger} ) {
+            push @messages, $self->_configure_message( $blocking_type => "productform_alternative_triggers contains unknown Koha location '$trigger'." );
+            $has_blocking_errors ||= $strict;
+        }
+    }
+
+    for my $email ( $self->_csv_values( $settings->{notification_mailto} ) ) {
+        next if $email =~ /\A[^@\s]+@[^@\s]+\z/;
+        push @messages, $self->_configure_message( $blocking_type => "Notification recipient '$email' is not a valid simple email address." );
+        $has_blocking_errors ||= $strict;
+    }
+
+    if ( $settings->{notification_mailfrom} && $settings->{notification_mailfrom} !~ /\A[^@\s]+@[^@\s]+\z/ ) {
+        push @messages, $self->_configure_message( $blocking_type => "Notification sender '$settings->{notification_mailfrom}' is not a valid simple email address." );
+        $has_blocking_errors ||= $strict;
+    }
+
+    return ( \@messages, $has_blocking_errors );
+}
+
 sub _default_import_tmp_path {
     my ($self) = @_;
 
@@ -750,6 +940,109 @@ sub _shell_quote {
     $value //= '';
     $value =~ s/'/'"'"'/g;
     return "'$value'";
+}
+
+sub _config_scalar {
+    my ( $self, $value ) = @_;
+
+    return '' if !defined $value || ref $value;
+    return $value;
+}
+
+sub _yes_no_setting {
+    my ( $self, $value, $default ) = @_;
+
+    $value = $self->_config_scalar($value);
+    return $value eq 'yes' || $value eq 'no' ? $value : $default;
+}
+
+sub _csv_values {
+    my ( $self, $csv_text ) = @_;
+
+    return grep { $_ ne '' } map {
+        my $value = $_;
+        $value =~ s/\A\s+|\s+\z//g;
+        $value;
+    } split ',', ( $csv_text // '' );
+}
+
+sub _patron_exists {
+    my ( $self, $borrowernumber ) = @_;
+
+    return unless defined $borrowernumber && $borrowernumber =~ /\A[0-9]+\z/;
+
+    my ($exists) = C4::Context->dbh->selectrow_array( 'SELECT COUNT(*) FROM borrowers WHERE borrowernumber = ?', undef, $borrowernumber );
+    return $exists ? 1 : 0;
+}
+
+sub _authorised_values {
+    my ( $self, $category ) = @_;
+
+    my $sth = C4::Context->dbh->prepare('SELECT authorised_value FROM authorised_values WHERE category = ? ORDER BY authorised_value');
+    $sth->execute($category);
+
+    my @values;
+    while ( my ($value) = $sth->fetchrow_array ) {
+        push @values, $value;
+    }
+
+    return \@values;
+}
+
+sub _branches {
+    my ($self) = @_;
+
+    my $sth = C4::Context->dbh->prepare('SELECT branchcode FROM branches ORDER BY branchcode');
+    $sth->execute();
+
+    my @branches;
+    while ( my ($branchcode) = $sth->fetchrow_array ) {
+        push @branches, $branchcode;
+    }
+
+    return \@branches;
+}
+
+sub _csrf_token_valid {
+    my ( $self, $cgi ) = @_;
+
+    return unless $cgi;
+
+    return Koha::Token->new->check_csrf(
+        {
+            session_id => scalar $cgi->cookie('CGISESSID'),
+            token      => scalar $cgi->param('csrf_token'),
+        }
+    );
+}
+
+sub _static_asset_version {
+    my ( $self, $path ) = @_;
+
+    my $version = $self->plugin_version();
+    $version =~ s/[^A-Za-z0-9_.-]+/_/g;
+
+    my @parts = ($version);
+    if ( my $bundle_path = $self->bundle_path ) {
+        my $full_path = File::Spec->catfile( $bundle_path, split m{/}, $path );
+        if ( my @stat = stat $full_path ) {
+            push @parts, $stat[9], $stat[7];
+        }
+    }
+
+    return join '-', @parts;
+}
+
+sub plugin_version {
+    my ($self) = @_;
+
+    return $metadata->{version} || $VERSION;
+}
+
+sub plugin_display_version {
+    my ($self) = @_;
+
+    return $self->plugin_version();
 }
 
 sub _trim_csv_value {
