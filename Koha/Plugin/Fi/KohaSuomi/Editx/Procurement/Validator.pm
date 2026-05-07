@@ -45,7 +45,7 @@ sub validateEditx {
 
   my $logger = new Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Logger($logPath);
 
-  $logger->log("\nValidating file: " . $filename);
+  $logger->info("\nValidating file: " . $filename);
   $logger->logError("\n-- Validating file " . $fileforlog);
 
   try {
@@ -105,7 +105,7 @@ sub validateEditx {
   }
   else {
     my $val   = $node->to_literal();
-    $logger->log("Buyerparty PartyName Nameline: " . $val);
+    $logger->debug("Buyerparty PartyName Nameline: " . $val);
     
   }
 
@@ -120,7 +120,7 @@ sub validateEditx {
   } else {
 
     my $val   = $node->to_literal();
-    $logger->log("SellerParty PartyName Nameline: " . $val);
+    $logger->debug("SellerParty PartyName Nameline: " . $val);
     my $valid = $val eq 'Kirjavälitys Oy' || $val eq 'Booky.fi Oy' || $val eq 'BTJ Finland Oy';
 
     if (not $valid) {
@@ -141,7 +141,7 @@ sub validateEditx {
   } else {
 
     my $val = $node->to_literal();
-    $logger->log("PartyID Vendor Identifier: " . $val);
+    $logger->debug("PartyID Vendor Identifier: " . $val);
     #why this way round?
     $vendoridentifier = $val;
 
@@ -159,7 +159,7 @@ sub validateEditx {
   } else {
 
     my $val = $node->to_literal();
-    $logger->log("PartyID Buyer Identifier: " . $val);
+    $logger->debug("PartyID Buyer Identifier: " . $val);
     #why this way round?
     $buyeridentifier = $val;
 
@@ -558,9 +558,9 @@ sub validateEditx {
           $logger->logError($fileforlog . "Wrong type of MessageType found: " . $val);
           $errors++;
         } elsif ($val eq "01") {
-          $logger->log("MessageType 01 found, passing xml test");
+          $logger->debug("MessageType 01 found, passing xml test");
         } elsif ($val eq "04") {
-          $logger->log("MessageType 04 present, testing xml");
+          $logger->debug("MessageType 04 present, testing xml");
 
           #Do tests to marcxml
           my $messageLine = $node->parentNode->find('MessageLine');
@@ -578,7 +578,7 @@ sub validateEditx {
               my $marcxml = MARC::Record::new_from_xml($xml, 'UTF-8');
 
               my $test = $marcxml->subfield('245', 'a');
-              $logger->log("MessageLine marcxml 245a: " . $test);
+              $logger->debug("MessageLine marcxml 245a: " . $test);
 
             } catch {
 
@@ -596,11 +596,11 @@ sub validateEditx {
   $logger->logError($fileforlog . "LibraryShipNotice required values errors: " . $errors);
   if ($errors > 0) {
     $logger->logError($fileforlog . "Validation failed");
-    $logger->log("LibraryShipNotice errors detected -> must die.");
+    $logger->warn("LibraryShipNotice errors detected -> must die.");
     die;
 
   } else {
-    $logger->log("Validation success.");
+    $logger->info("Validation success.");
   }
 }
 

@@ -3,12 +3,55 @@
 
 set -eu
 
+runtime_log_level_value() {
+    case "$1" in
+        error) printf '%s' 0 ;;
+        warn) printf '%s' 1 ;;
+        info) printf '%s' 2 ;;
+        notice) printf '%s' 3 ;;
+        debug) printf '%s' 4 ;;
+        *) printf '%s' -1 ;;
+    esac
+}
+
+runtime_should_log() {
+    level="$1"
+    configured="${EDITX_RUNTIME_LOG_LEVEL:-info}"
+
+    test -n "${EDITX_RUNTIME_LOG:-}" || return 1
+    case "$configured" in
+        off|error|warn|info|notice|debug) ;;
+        *) configured=info ;;
+    esac
+    test "$configured" != "off" || return 1
+    test "$(runtime_log_level_value "$level")" -le "$(runtime_log_level_value "$configured")"
+}
+
+runtime_log() {
+    level="$1"
+    shift
+    message="$*"
+
+    runtime_should_log "$level" || return 0
+
+    runtime_dir="$(dirname "$EDITX_RUNTIME_LOG")"
+    mkdir -p "$runtime_dir"
+    message="$(printf '%s' "$message" | tr '\r\n' '  ')"
+    printf '[%s %s] %s %s {"component":"sftp"}\n' \
+        "$(date '+%Y-%m-%d %H:%M:%S')" \
+        "$(date '+%Z')" \
+        "$(printf '%s' "$level" | tr '[:lower:]' '[:upper:]')" \
+        "$message" >>"$EDITX_RUNTIME_LOG"
+}
+
 die() {
+    runtime_log error "$*"
     printf '%s\n' "$*" >&2
     exit 1
 }
 
 log() {
+    runtime_log info "$*"
     printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
 }
 
@@ -115,6 +158,8 @@ run_target() {
     target_after_download="$(target_value "$target" AFTER_DOWNLOAD "${SFTP_AFTER_DOWNLOAD:-keep}")"
     target_remote_archive_dir="$(target_value "$target" REMOTE_ARCHIVE_DIR "${SFTP_REMOTE_ARCHIVE_DIR:-}")"
 
+    runtime_log debug "[$target_label] Loaded SFTP target config: host=$target_host remote_dir=$target_remote_dir pattern=$target_pattern local_dir=$target_local_dir after_download=$target_after_download"
+
     require_target_var "$target" HOST "$target_host"
     require_target_var "$target" USER "$target_user"
     require_target_var "$target" REMOTE_DIR "$target_remote_dir"
@@ -139,6 +184,7 @@ run_target() {
     sftp_error_file="$(mktemp)"
     target_downloaded=0
 
+    runtime_log info "[$target_label] Checking remote EDItX files in $target_remote_dir."
     {
         printf 'cd %s\n' "$(quote_sftp_path "$target_remote_dir")"
         printf '%s %s\n' '-ls -1' "$target_pattern"
@@ -220,6 +266,7 @@ test -n "${KOHA_INSTANCE:-}" || die "KOHA_INSTANCE is not set."
 
 config_file="${EDITX_SFTP_CONFIG:-${1:-/etc/koha/sites/$KOHA_INSTANCE/editx-sftp.conf}}"
 test -f "$config_file" || die "No SFTP config file: $config_file"
+runtime_log info "Starting SFTP EDItX download for $KOHA_INSTANCE using $config_file."
 
 # shellcheck disable=SC1090
 . "$config_file"

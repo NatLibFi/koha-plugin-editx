@@ -10,6 +10,7 @@ use IO::Handle;
 use C4::Context;
 use Koha::DateUtils qw(dt_from_string);
 use Koha::Token;
+use Koha::Plugin::Fi::KohaSuomi::Editx::RuntimeLog;
 use Mojo::JSON qw(decode_json);
 use Mojo::Util qw(url_escape);
 use Text::CSV_XS;
@@ -48,7 +49,15 @@ sub new {
 sub install() {
     my ( $self, $args ) = @_;
 
-    return $self->_install_or_upgrade_tables();
+    $self->_log_runtime( info => 'EDItX plugin install started', { operation => 'install' } );
+    my $success = $self->_install_or_upgrade_tables();
+    $self->_log_runtime(
+        $success ? 'info' : 'error',
+        $success ? 'EDItX plugin install finished' : 'EDItX plugin install failed',
+        { operation => 'install' }
+    );
+
+    return $success;
 }
 
 sub _install_or_upgrade_tables {
@@ -65,7 +74,11 @@ sub _install_or_upgrade_tables {
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     " );
 
-    warn "Failed to create sequences table: " . $dbh->errstr unless $success;
+    if ( !$success ) {
+        my $message = "Failed to create sequences table: " . $dbh->errstr;
+        $self->_log_runtime( error => $message, { operation => 'install_or_upgrade' } );
+        warn $message;
+    }
 
     $success &&= $dbh->do( "
         CREATE TABLE IF NOT EXISTS $map_productform_table (
@@ -78,7 +91,11 @@ sub _install_or_upgrade_tables {
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     " );
 
-    warn "Failed to create map_productform table: " . $dbh->errstr unless $success;
+    if ( !$success ) {
+        my $message = "Failed to create map_productform table: " . $dbh->errstr;
+        $self->_log_runtime( error => $message, { operation => 'install_or_upgrade' } );
+        warn $message;
+    }
 
     $success &&= $self->_drop_map_productform_foreign_keys();
     $success &&= $self->_allow_nullable_map_productform_columns();
@@ -97,7 +114,15 @@ sub upgrade {
     my $dt = dt_from_string();
     $self->store_data( { last_upgraded => $dt->ymd('-') . ' ' . $dt->hms(':') } );
 
-    return $self->_install_or_upgrade_tables();
+    $self->_log_runtime( info => 'EDItX plugin upgrade started', { operation => 'upgrade' } );
+    my $success = $self->_install_or_upgrade_tables();
+    $self->_log_runtime(
+        $success ? 'info' : 'error',
+        $success ? 'EDItX plugin upgrade finished' : 'EDItX plugin upgrade failed',
+        { operation => 'upgrade' }
+    );
+
+    return $success;
 }
 ## This method will be run just before the plugin files are deleted
 ## when a plugin is uninstalled. It is good practice to clean up
@@ -112,6 +137,12 @@ sub uninstall() {
     $success &&= C4::Context->dbh->do("DROP TABLE IF EXISTS $sequences_table");
     $success &&= C4::Context->dbh->do("DROP TABLE IF EXISTS $map_productform_table");
 
+    $self->_log_runtime(
+        $success ? 'info' : 'error',
+        $success ? 'EDItX plugin uninstall removed plugin tables' : 'EDItX plugin uninstall failed while removing plugin tables',
+        { operation => 'uninstall' }
+    );
+
     return $success;
 }
 
@@ -123,6 +154,10 @@ sub configure {
     my $manual_sync_result;
     my $is_save = $cgi->request_method eq 'POST' && $cgi->param('save');
     my $is_run_sync_now = $cgi->request_method eq 'POST' && $cgi->param('run_sync_now');
+    my $runtime_log_level =
+          $is_save
+        ? Koha::Plugin::Fi::KohaSuomi::Editx::RuntimeLog->normalize_level( scalar $cgi->param('runtime_log_level') )
+        : $self->_runtime_log_level();
     my $nightly_sync_enabled =
           $is_save
         ? ( $cgi->param('nightly_sync_enabled') ? 1 : 0 )
@@ -141,9 +176,11 @@ sub configure {
     if ($is_run_sync_now) {
         if ( !$self->_csrf_token_valid($cgi) ) {
             push @messages, $self->_configure_message( error => 'Manual EDItX synchronization was not started because the security token was invalid. Reload the page and try again.' );
+            $self->_log_runtime( warn => 'Manual EDItX synchronization rejected by invalid CSRF token', { operation => 'manual_sync', interface => 'staff' } );
         } else {
             my $run_output;
             my $run_started_at = $self->_database_timestamp();
+            $self->_log_runtime( info => 'Manual EDItX download and import started', { operation => 'manual_sync', interface => 'staff' } );
             my $success = eval {
                 $run_output = $self->_run_nightly_sync_for_web();
                 1;
@@ -151,13 +188,23 @@ sub configure {
             $manual_sync_result = eval { $self->_manual_sync_result($run_started_at) };
             if ($@) {
                 push @messages, $self->_configure_message( warning => 'Manual run finished, but the created order summary could not be loaded: ' . $self->_compact_message($@) );
+                $self->_log_runtime( warn => 'Manual EDItX order summary could not be loaded', { operation => 'manual_sync', error => $self->_compact_message($@) } );
             }
             if ($success) {
+                $self->_log_runtime(
+                    info => 'Manual EDItX download and import finished',
+                    {
+                        operation   => 'manual_sync',
+                        order_count => $manual_sync_result ? $manual_sync_result->{order_count} : undef,
+                        item_count  => $manual_sync_result ? $manual_sync_result->{item_count} : undef,
+                    }
+                );
                 push @messages, $self->_configure_message( success => 'Manual EDItX download and import finished.' );
                 if ( my $summary = $self->_compact_message($run_output) ) {
                     push @messages, $self->_configure_message( info => "Manual run output: $summary" );
                 }
             } else {
+                $self->_log_runtime( error => 'Manual EDItX download/import failed', { operation => 'manual_sync', error => $self->_compact_message($@) } );
                 push @messages, $self->_configure_message( error => 'Manual EDItX download/import failed: ' . $self->_compact_message($@) );
             }
         }
@@ -170,6 +217,7 @@ sub configure {
             nightly_sync_enabled   => $self->_nightly_sync_enabled(),
             saved                  => 0,
             manual_sync_result     => $manual_sync_result,
+            runtime_log_level      => $self->_runtime_log_level(),
         );
         return;
     }
@@ -185,6 +233,7 @@ sub configure {
                 messages               => \@messages,
                 nightly_sync_enabled   => $nightly_sync_enabled,
                 saved                  => 0,
+                runtime_log_level      => $runtime_log_level,
             );
             return;
         }
@@ -219,6 +268,7 @@ sub configure {
                 messages               => \@messages,
                 nightly_sync_enabled   => $nightly_sync_enabled,
                 saved                  => 0,
+                runtime_log_level      => $runtime_log_level,
             );
             return;
         }
@@ -233,6 +283,7 @@ sub configure {
                 messages               => \@messages,
                 nightly_sync_enabled   => $nightly_sync_enabled,
                 saved                  => 0,
+                runtime_log_level      => $runtime_log_level,
             );
             return;
         }
@@ -240,9 +291,19 @@ sub configure {
             {
                 nightly_sync_enabled => $nightly_sync_enabled,
                 sftp_sources_yaml    => $sftp_sources_yaml,
+                runtime_log_level    => $runtime_log_level,
                 %{ $self->_procurement_settings_store_data($procurement_settings) },
                 last_configured_by   => ( C4::Context->userenv || {} )->{'number'},
             }
+        );
+        $self->_log_runtime(
+            info => 'EDItX plugin configuration saved',
+            {
+                operation            => 'configure',
+                nightly_sync_enabled => $nightly_sync_enabled,
+                runtime_log_level    => $runtime_log_level,
+            },
+            { runtime_log_level => $runtime_log_level }
         );
         $saved = 1;
     }
@@ -254,6 +315,7 @@ sub configure {
         messages               => \@messages,
         nightly_sync_enabled   => $nightly_sync_enabled,
         saved                  => $saved,
+        runtime_log_level      => $runtime_log_level,
     );
 }
 
@@ -261,10 +323,12 @@ sub cronjob_nightly {
     my ($self) = @_;
 
     unless ( $self->_nightly_sync_enabled() ) {
+        $self->_log_runtime( info => 'EDItX nightly synchronization skipped because it is disabled', { operation => 'nightly', interface => 'cron' } );
         print "EDItX nightly synchronization is disabled in plugin configuration.\n";
         return 1;
     }
 
+    $self->_log_runtime( info => 'EDItX nightly synchronization hook started', { operation => 'nightly', interface => 'cron' } );
     return $self->_run_nightly_sync();
 }
 
@@ -429,6 +493,10 @@ sub _output_configure_page {
         css_href               => $self->static_asset_url('static_files/editx.css'),
         plugin_display_version => $self->plugin_display_version(),
         manual_sync_result     => $params{manual_sync_result},
+        runtime_log_level      => $params{runtime_log_level} || $self->_runtime_log_level(),
+        runtime_log_levels     => Koha::Plugin::Fi::KohaSuomi::Editx::RuntimeLog->levels,
+        runtime_log_path       => Koha::Plugin::Fi::KohaSuomi::Editx::RuntimeLog->path,
+        runtime_log_tail       => Koha::Plugin::Fi::KohaSuomi::Editx::RuntimeLog->tail,
     );
 
     return $self->output_html( $template->output() );
@@ -440,6 +508,7 @@ sub _write_sftp_config_file {
     my ( $sources, $messages, $has_errors ) = $self->_parse_sftp_sources_yaml( $self->_sftp_sources_yaml() );
     die join( "\n", map { $_->{text} } @$messages ) . "\n" if $has_errors;
     die "No EDItX SFTP sources configured.\n" unless @$sources;
+    $self->_log_runtime( debug => 'Writing temporary EDItX SFTP configuration', { source_count => scalar @$sources } );
 
     my $default_local_dir = $self->_default_import_tmp_path();
     my $safe_instance = $koha_instance;
@@ -477,6 +546,7 @@ sub _write_sftp_config_file {
 
     close $fh or die "Cannot close temporary EDItX SFTP config $config_file: $!";
     chmod 0600, $config_file or die "Cannot chmod temporary EDItX SFTP config $config_file: $!";
+    $self->_log_runtime( debug => 'Temporary EDItX SFTP configuration written', { source_count => scalar @$sources } );
 
     return $config_file;
 }
@@ -503,6 +573,7 @@ sub _run_nightly_sync {
     die "No EDItX import script: $import_script" unless -f $import_script;
 
     if ( !mkdir $lock_dir ) {
+        $self->_log_runtime( warn => 'EDItX synchronization skipped because another run is active', { operation => 'sync', koha_instance => $koha_instance } );
         $self->_sync_print( $options, "Another EDItX nightly synchronization is already active for $koha_instance.\n" );
         return 1;
     }
@@ -510,17 +581,27 @@ sub _run_nightly_sync {
     my $success = eval {
         $sftp_config_file = $self->_write_sftp_config_file($koha_instance);
         local $ENV{EDITX_SFTP_CONFIG} = $sftp_config_file;
+        local $ENV{EDITX_RUNTIME_LOG} = Koha::Plugin::Fi::KohaSuomi::Editx::RuntimeLog->path;
+        local $ENV{EDITX_RUNTIME_LOG_LEVEL} = $self->_runtime_log_level();
 
+        $self->_log_runtime( info => 'Starting EDItX synchronization chain', { operation => 'sync', koha_instance => $koha_instance } );
         $self->_sync_print( $options, "Starting EDItX nightly synchronization for $koha_instance.\n" );
         $self->_run_command( $options, $fetch_script );
         $self->_run_command( $options, $^X, $import_script );
         $self->_sync_print( $options, "Finished EDItX nightly synchronization for $koha_instance.\n" );
+        $self->_log_runtime( info => 'Finished EDItX synchronization chain', { operation => 'sync', koha_instance => $koha_instance } );
         1;
     };
     my $error = $@;
 
     unlink $sftp_config_file if $sftp_config_file && -f $sftp_config_file;
-    rmdir $lock_dir or warn "Could not remove EDItX nightly lock $lock_dir: $!";
+    if ( !rmdir $lock_dir ) {
+        my $message = "Could not remove EDItX nightly lock $lock_dir: $!";
+        $self->_log_runtime( warn => $message, { operation => 'sync', koha_instance => $koha_instance } );
+        warn $message;
+    }
+    $self->_log_runtime( error => 'EDItX synchronization chain failed', { operation => 'sync', koha_instance => $koha_instance, error => $self->_compact_message($error) } )
+        unless $success;
     die $error unless $success;
 
     return 1;
@@ -553,6 +634,9 @@ sub _run_command {
 
     my $options = ref $args[0] eq 'HASH' ? shift @args : {};
     my @command = @args;
+    my $command_text = join ' ', @command;
+
+    $self->_log_runtime( debug => "Starting EDItX command: $command_text", { operation => 'sync_command' } );
 
     if ( my $output_fh = $options->{output_fh} ) {
         my $pid = fork;
@@ -569,10 +653,22 @@ sub _run_command {
         system @command;
     }
 
-    my $command_text = join ' ', @command;
-    die "Failed to execute $command_text: $!" if $? == -1;
-    die "$command_text died with signal " . ( $? & 127 ) if $? & 127;
-    die "$command_text exited with status " . ( $? >> 8 ) if $? != 0;
+    if ( $? == -1 ) {
+        $self->_log_runtime( error => "Failed to execute EDItX command: $command_text", { operation => 'sync_command', error => "$!" } );
+        die "Failed to execute $command_text: $!";
+    }
+    if ( $? & 127 ) {
+        my $signal = $? & 127;
+        $self->_log_runtime( error => "EDItX command died with signal $signal: $command_text", { operation => 'sync_command', signal => $signal } );
+        die "$command_text died with signal $signal";
+    }
+    if ( $? != 0 ) {
+        my $status = $? >> 8;
+        $self->_log_runtime( error => "EDItX command exited with status $status: $command_text", { operation => 'sync_command', status => $status } );
+        die "$command_text exited with status $status";
+    }
+
+    $self->_log_runtime( debug => "Finished EDItX command: $command_text", { operation => 'sync_command' } );
 
     return 1;
 }
@@ -1211,6 +1307,40 @@ sub _configure_message {
         alert_class => $type eq 'error' ? 'danger' : $type,
         text        => $text,
     };
+}
+
+sub _runtime_log_level {
+    my ($self) = @_;
+
+    return Koha::Plugin::Fi::KohaSuomi::Editx::RuntimeLog->normalize_level(
+        $self->retrieve_data('runtime_log_level')
+    );
+}
+
+sub _runtime_log_settings {
+    my ( $self, $override ) = @_;
+
+    return {
+        runtime_log_level => Koha::Plugin::Fi::KohaSuomi::Editx::RuntimeLog->normalize_level(
+            $override && exists $override->{runtime_log_level}
+            ? $override->{runtime_log_level}
+            : $self->retrieve_data('runtime_log_level')
+        ),
+    };
+}
+
+sub _log_runtime {
+    my ( $self, $level, $message, $context, $settings ) = @_;
+
+    return Koha::Plugin::Fi::KohaSuomi::Editx::RuntimeLog->log(
+        {
+            settings  => $self->_runtime_log_settings($settings),
+            level     => $level,
+            message   => $message,
+            component => 'plugin',
+            context   => $context,
+        }
+    );
 }
 
 sub _read_file_tail {

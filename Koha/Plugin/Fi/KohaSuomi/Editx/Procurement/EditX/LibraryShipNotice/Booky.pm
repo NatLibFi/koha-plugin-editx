@@ -24,7 +24,7 @@ sub determineObjectClass {
 
      if( $sellerName eq 'Booky.fi Oy' ){
          $result = 1;
-         print "Booky \n";
+         $self->getLogger()->debug("Matched EDItX seller Booky.fi Oy.");
      }
 
     return $result;

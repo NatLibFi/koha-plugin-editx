@@ -1,51 +1,44 @@
 #!/usr/bin/perl
 
-# This file is part of Koha.
-#
-# Koha is free software; you can redistribute it and/or modify it
-# under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 3 of the License, or
-# (at your option) any later version.
-#
-# Koha is distributed in the hope that it will be useful, but
-# WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with Koha; if not, see <http://www.gnu.org/licenses>.
-
 use Modern::Perl;
 
-use Test::More;
-use File::Spec;
+use FindBin qw($Bin);
 use File::Find;
+use File::Spec;
+use Test::More;
 
-=head1 DESCRIPTION
+my $plugin_root = File::Spec->catdir( $Bin, '..' );
+my @core_candidates = (
+    File::Spec->catdir( $plugin_root, '..', '..', 'Koha' ),
+    File::Spec->catdir( $ENV{HOME} || q{}, 'git', 'koha', 'Koha' ),
+    File::Spec->catdir( $ENV{HOME} || q{}, 'git', 'KohaCommunity' ),
+    File::Spec->catdir( $ENV{HOME} || q{}, 'git', 'Koha' ),
+);
+my ($core_root) = grep { -d $_ } @core_candidates;
 
-=cut
-
-my $lib = '/var/lib/koha/kohadev/plugins'; # Could be changed to $Bin/..
-
-unshift( @INC, $lib );
-unshift( @INC, '/kohadevbox/koha/' );
-unshift( @INC, '/kohadevbox/koha/misc/translator/' );
-unshift( @INC, '/kohadevbox/koha/t/lib/' );
+unshift @INC, $plugin_root;
+if ($core_root) {
+    unshift @INC, $core_root;
+    unshift @INC, File::Spec->catdir( $core_root, 'misc', 'translator' );
+    unshift @INC, File::Spec->catdir( $core_root, 't', 'lib' );
+}
 
 find(
     {
         bydepth  => 1,
         no_chdir => 1,
         wanted   => sub {
-            my $m = $_;
-            return unless $m =~ s/[.]pm$//;
-            $m =~ s{^.*/Koha/}{Koha/};
-            $m =~ s{/}{::}g;
-            use_ok($m) || BAIL_OUT("***** PROBLEMS LOADING FILE '$m'");
+            my $module = $_;
+            return unless $module =~ s/[.]pm$//;
+            return unless $module =~ m{/Koha/};
+
+            $module =~ s{^.*/Koha/}{Koha/};
+            $module =~ s{/}{::}g;
+
+            use_ok($module) || BAIL_OUT("Problems loading $module");
         },
     },
-    $lib
+    File::Spec->catdir( $plugin_root, 'Koha' )
 );
 
 done_testing();
-

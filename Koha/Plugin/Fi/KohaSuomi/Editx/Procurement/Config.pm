@@ -5,6 +5,7 @@ use XML::Simple;
 use File::Basename;
 use Data::Dumper;
 use C4::Context;
+use Koha::Plugin::Fi::KohaSuomi::Editx::RuntimeLog;
 
 use constant PLUGIN_CLASS => 'Koha::Plugin::Fi::KohaSuomi::Editx';
 
@@ -57,8 +58,7 @@ sub getConfigXmlPath{
 
 sub getLogDir {
     my $self = shift;
-    my $config = C4::Context->config('logdir') . "/editx";
-    return $config;
+    return Koha::Plugin::Fi::KohaSuomi::Editx::RuntimeLog->runtime_log_dir;
 }
 
 sub getSettings{

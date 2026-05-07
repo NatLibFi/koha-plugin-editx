@@ -121,8 +121,8 @@ sub process {
     my $authoriser = $self->getAuthoriser();
     my $basketName = $order->getBasketName();
   
-    $self->getLogger()->log("getAuthoriser: " . $authoriser);
-    $self->getLogger()->log("getBasketName: " . $basketName);
+    $self->getLogger()->debug("getAuthoriser: " . $authoriser);
+    $self->getLogger()->debug("getBasketName: " . $basketName);
     
     my (@copydetailstoadd, @itemstoadd, @orderstoadd, @bibliostoadd);
 
@@ -132,7 +132,7 @@ sub process {
         foreach(@$copyDetails){
             $copyDetail = $_;
             ($biblio, $biblioitem) = $self->getBiblioDatas($copyDetail, $item, $order);
-            $self->getLogger()->log("getBiblioDatas biblio: ". $biblio); 
+            $self->getLogger()->debug("getBiblioDatas biblio: ". $biblio);
             $copyQty = $copyDetail->getCopyQuantity();
             if($copyQty > 0){
                 $bookseller = $self->getBookseller($order);
@@ -214,12 +214,12 @@ sub getBiblioDatas {
         $copyDetail->fixMarc005();
         ($biblioitem) = $self->createBiblioItem($copyDetail, $itemDetail, $order, $biblio);
         my $bibitemdetails = Data::Dumper::Dumper $biblioitem; 
-        $self->getLogger()->log("createBiblioItem biblioitem: " . $bibitemdetails);
+        $self->getLogger()->debug("createBiblioItem biblioitem: " . $bibitemdetails);
         
         $bibliometa = $self->createBiblioMetadata($copyDetail, $itemDetail, $order, $biblio);
         
         my $bibmeta = Data::Dumper::Dumper $bibliometa;
-        $self->getLogger()->log("createBiblioMetadata bibliometa: " . $bibmeta);
+        $self->getLogger()->debug("createBiblioMetadata bibliometa: " . $bibmeta);
 
         my $biblio_object = Koha::Biblios->find($biblio);
         if(! $biblio){
@@ -228,10 +228,10 @@ sub getBiblioDatas {
         my $marcBiblio;
         eval { $marcBiblio = $biblio_object->metadata->record({ embed_items => 1 }); };
         if ($@) {
-            $self->getLogger()->log("Getting metadata record for Biblio $biblio died: " . $@);
+            $self->getLogger()->warn("Getting metadata record for Biblio $biblio died: " . $@);
         }
         if (! $marcBiblio) {
-            $self->getLogger()->log("Getting metadata record for Biblio $biblio returned empty result.");
+            $self->getLogger()->warn("Getting metadata record for Biblio $biblio returned empty result.");
         }
         if(! C4::Biblio::ModBiblio($marcBiblio, $biblio, '')){
            die('C4::Biblio::Modbiblio failed.');
@@ -437,7 +437,7 @@ sub createBiblio {
             
             $result = $biblio->biblionumber;
             Koha::Exceptions::ObjectNotCreated->throw unless $result;
-            $self->getLogger()->log("createBiblio stored biblionumber: ". $result);         
+            $self->getLogger()->debug("createBiblio stored biblionumber: ". $result);
         }
         else{
             die('createBiblio: Required params not set.');
@@ -508,7 +508,7 @@ sub createBiblioItem {
             
             my $biblioitemnumber = $biblioItem->biblioitemnumber;
             
-            $self->getLogger()->log("createBiblioItem stored biblioitemnumber: ". $biblioItem->biblioitemnumber);
+            $self->getLogger()->debug("createBiblioItem stored biblioitemnumber: ". $biblioItem->biblioitemnumber);
 
             if($biblioitemnumber){
                 $id = $biblioitemnumber;
@@ -555,7 +555,7 @@ sub createBiblioMetadata {
             
             my $biblioMetadataid = $biblioMetadata->biblionumber;
             
-            $self->getLogger()->log("createBiblioMetadata stored biblio metadata for biblio " . $biblioMetadata->biblionumber);
+            $self->getLogger()->debug("createBiblioMetadata stored biblio metadata for biblio " . $biblioMetadata->biblionumber);
             
             my $dbh = C4::Context->dbh;
 
@@ -613,7 +613,7 @@ sub createItem {
         ($args{prefix}) = $yaml->{$data->{'destinationlocation'}} || $yaml->{'Default'};
         ($args{prefixes}) = \@prefixes;
         
-        $self->getLogger()->log("createItem destinationlocation: ". $data->{'destinationlocation'});
+        $self->getLogger()->debug("createItem destinationlocation: ". $data->{'destinationlocation'});
 
         $data->{"barcode"} = $self->generateBarcode(\%args, $autoBarcodeType);
 
@@ -642,7 +642,7 @@ sub createItem {
             )->store or die($DBI::errstr);  
             
             if($item->itemnumber){
-                $self->getLogger()->log("createItem created item: ". $item->itemnumber);
+                $self->getLogger()->info("createItem created item: ". $item->itemnumber);
                 $result = $item->itemnumber;
             }
             else{
@@ -696,12 +696,10 @@ sub getBookseller {
 
     if(!$bookseller){
         if ($san) {
-            $self->getLogger()->log("No vendor for SAN $san (qualifier $qualifier) in vendor_edi_accounts.");
-            $self->getLogger()->log("No vendor for SAN $san (qualifier $qualifier) in vendor_edi_accounts.");
+            $self->getLogger()->warn("No vendor for SAN $san (qualifier $qualifier) in vendor_edi_accounts.");
         }
         else {
-            $self->getLogger()->log("No vendor in shipment notice.");
-            $self->getLogger()->log("No vendor in shipment notice.");
+            $self->getLogger()->warn("No vendor in shipment notice.");
         }
         die();
     }

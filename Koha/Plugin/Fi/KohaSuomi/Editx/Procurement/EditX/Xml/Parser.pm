@@ -52,15 +52,15 @@ sub parseFiles{
     if(@fileNames){
         foreach (@fileNames){
             $fileName = $_;
-            $self->getLogger()->log("Started parsing file: $fileName");
+            $self->getLogger()->info("Started parsing file: $fileName");
             if($self->filterFile($fileName)){
-                $self->getLogger()->log("The file $fileName was filtered and will not be parsed.");
+                $self->getLogger()->notice("The file $fileName was filtered and will not be parsed.");
                 next;
             }
             $fullFilePath = $dirPath . $fileName;
             $object = $self->parseFile($fullFilePath);
             if($object){
-                $self->getLogger()->log("The file $fileName was parsed successfully.");
+                $self->getLogger()->info("The file $fileName was parsed successfully.");
                 $object->setFileName($fileName);
                 if(%parsedFiles){
                     $parsedFiles{$fullFilePath} = $object;
@@ -81,7 +81,7 @@ sub parseFile{
     my $object = 0;
 
     if(! -f $filePath){
-        $self->getLogger()->log("The file $filePath does not exist.");
+        $self->getLogger()->warn("The file $filePath does not exist.");
         return 0;
     }
 
@@ -101,8 +101,8 @@ sub parseFile{
         $object = $self->objectFactory->createFromXml($xml, $parser);
     }
     else{
-        $self->getLogger()->log("The file " . $filePath . " is not a valid xmlfile.");
-        $self->getLogger()->log("Errors: $@");
+        $self->getLogger()->warn("The file " . $filePath . " is not a valid xmlfile.");
+        $self->getLogger()->debug("XML parse errors for $filePath: $@");
     }
 
     return $object;

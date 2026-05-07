@@ -261,6 +261,45 @@
                     </fieldset>
 
                     <fieldset class="rows">
+                        <legend>Runtime logging</legend>
+                        <ol>
+                            <li>
+                                <label for="runtime_log_level">Runtime log level</label>
+                                <select id="runtime_log_level" name="runtime_log_level">
+                                    <option value="off" [% IF runtime_log_level == 'off' %]selected="selected"[% END %]>Off</option>
+                                    <option value="error" [% IF runtime_log_level == 'error' %]selected="selected"[% END %]>Error</option>
+                                    <option value="warn" [% IF runtime_log_level == 'warn' %]selected="selected"[% END %]>Warn</option>
+                                    <option value="info" [% IF runtime_log_level == 'info' %]selected="selected"[% END %]>Info</option>
+                                    <option value="notice" [% IF runtime_log_level == 'notice' %]selected="selected"[% END %]>Notice</option>
+                                    <option value="debug" [% IF runtime_log_level == 'debug' %]selected="selected"[% END %]>Debug</option>
+                                </select>
+                                <div class="hint">Controls the EDItX plugin runtime log for web actions, nightly SFTP downloads, import parsing, file moves, validation, and order creation.</div>
+                            </li>
+                            <li>
+                                <label>Runtime log file</label>
+                                <span class="editx-config-value">[% runtime_log_path | html %]</span>
+                            </li>
+                            <li>
+                                <div class="editx-runtime-log-toolbar">
+                                    <label for="runtime_log_tail">Recent runtime log</label>
+                                    <label class="editx-runtime-log-wrap-control" for="editx-runtime-log-wrap-toggle">
+                                        <input type="checkbox"
+                                               id="editx-runtime-log-wrap-toggle"
+                                               value="1" />
+                                        Wrap lines
+                                    </label>
+                                </div>
+                                <textarea id="runtime_log_tail"
+                                          class="editx-runtime-log-tail"
+                                          rows="12"
+                                          cols="120"
+                                          wrap="off"
+                                          readonly="readonly">[% IF runtime_log_tail %][% runtime_log_tail | html %][% ELSE %]No runtime log entries yet.[% END %]</textarea>
+                            </li>
+                        </ol>
+                    </fieldset>
+
+                    <fieldset class="rows">
                         <legend>Product form mappings</legend>
                         <ol>
                             <li>
@@ -323,4 +362,27 @@ DG,LYHYT,LYHYTHH</code></pre>
     </div>
 </div>
 
+[% MACRO jsinclude BLOCK %]
+    <script>
+        (function () {
+            "use strict";
+
+            const logTail = document.getElementById("runtime_log_tail");
+            const wrapToggle = document.getElementById("editx-runtime-log-wrap-toggle");
+
+            if (!logTail || !wrapToggle) {
+                return;
+            }
+
+            function syncRuntimeLogWrap() {
+                const wrapped = wrapToggle.checked;
+                logTail.classList.toggle("editx-runtime-log-tail-wrapped", wrapped);
+                logTail.setAttribute("wrap", wrapped ? "soft" : "off");
+            }
+
+            wrapToggle.addEventListener("change", syncRuntimeLogWrap);
+            syncRuntimeLogWrap();
+        }());
+    </script>
+[% END %]
 [% INCLUDE 'intranet-bottom.inc' %]

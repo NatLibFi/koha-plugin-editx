@@ -23,7 +23,7 @@ sub determineObjectClass {
      $sellerName = $self->getSellerName($xmlObject, $header);
 
      if( $sellerName eq 'Kirjavälitys Oy' ){
-        print "Kirjavälitys \n";
+        $self->getLogger()->debug("Matched EDItX seller Kirjavälitys Oy.");
         $result = 1;
      }
 
