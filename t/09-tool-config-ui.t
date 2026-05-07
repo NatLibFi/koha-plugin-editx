@@ -24,6 +24,7 @@ my $configure = read_file('Koha/Plugin/Fi/KohaSuomi/Editx/configure.tt');
 my $tool = read_file('Koha/Plugin/Fi/KohaSuomi/Editx/tool.tt');
 my $breadcrumbs = read_file('Koha/Plugin/Fi/KohaSuomi/Editx/includes/editx_breadcrumbs.inc');
 my $css = read_file('Koha/Plugin/Fi/KohaSuomi/Editx/static_files/editx.css');
+my $install_sql = read_file('installation/create_tables.sql');
 
 like( $plugin_pm, qr{sub\s+tool\s*\{}, 'Plugin exposes a Koha tool page' );
 like( $plugin_pm, qr{\$method\s*\|\|=\s*'tool'}, 'Plugin method URL defaults to the tool page' );
@@ -31,6 +32,9 @@ like( $plugin_pm, qr{tool_href\s*=>\s*\$self->plugin_method_url\('tool'\)}, 'Con
 like( $plugin_pm, qr{manual_run_available}, 'Tool template receives manual action availability context' );
 like( $plugin_pm, qr{get_qualified_table_name\('procurement_file'\)}, 'Plugin install uses a qualified procurement_file table' );
 like( $plugin_pm, qr{_migrate_legacy_procurement_file_table}, 'Plugin install migrates legacy procurement_file data' );
+like( $install_sql, qr{CREATE TABLE IF NOT EXISTS `koha_plugin_fi_kohasuomi_editx_map_productform`}, 'Install SQL still creates the ProductForm mapping table' );
+unlike( $install_sql, qr{INSERT INTO\s+koha_plugin_fi_kohasuomi_editx_map_productform}i, 'Install SQL does not seed ProductForm mappings' );
+unlike( $install_sql, qr{28VRK|28VRKLN|14VRK|EILAINATA}, 'Install SQL does not contain KohaSuomi-local itemtype seeds' );
 
 like( $breadcrumbs, qr{href="\[%\s*tool_href\s*\|\s*html\s*%\]">EDItX plugin</a>}, 'Breadcrumb plugin root points to the tool page' );
 like( $breadcrumbs, qr{active_method\s*!=\s*'configure'}, 'Breadcrumb configure shortcut is hidden on the configure page' );
