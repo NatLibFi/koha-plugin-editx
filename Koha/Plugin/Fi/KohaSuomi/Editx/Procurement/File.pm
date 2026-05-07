@@ -154,12 +154,7 @@ sub archiveFile {
 
     $self->saveFileHash($filePath, $fileName);
     $self->getMsgUpdater()->update($fileName, 'OK');
-    if(move($filePath, $archivePath)){
-        $self->getLogger()->log("File: $filePath moved to $archivePath for archive.");
-    }
-    else{
-        $self->getLogger()->logError("File: $filePath could not be moved!");
-    }
+    $self->_move_file_or_die( $filePath, $archivePath, "File: $filePath moved to $archivePath for archive." );
 }
 
 sub getFilenaMeFromPath {
@@ -176,12 +171,21 @@ sub moveToFailFolder{
     my $failPath = $self->getFailPath() . $fileName;
 
     $self->getMsgUpdater()->update($fileName, 'FAILED');
-    if(move($filePath, $failPath)){
-        $self->getLogger()->log("File: $filePath moved to $failPath.");
+    $self->_move_file_or_die( $filePath, $failPath, "File: $filePath moved to $failPath." );
+}
+
+sub _move_file_or_die {
+    my ( $self, $filePath, $targetPath, $successMessage ) = @_;
+
+    if ( move( $filePath, $targetPath ) ) {
+        $self->getLogger()->log($successMessage);
+        return 1;
     }
-    else{
-        $self->getLogger()->logError("File: $filePath could not be moved!");
-    }
+
+    my $error = $! || 'unknown error';
+    my $failMessage = "File: $filePath could not be moved to $targetPath: $error";
+    $self->getLogger()->logError($failMessage);
+    die $failMessage;
 }
 
 sub fillLoadFolder {

@@ -66,12 +66,13 @@ sub process_orders {
 
             $logger->info("Ended processing order from file $file_name");
         } catch {
-            $file_manager->moveToFailFolder($file_name);
+            my $error = $_;
+            $self->_move_failed_file( $file_manager, $file_name, $logger );
             $failed++;
             my $fail_message = "Order processing failed for file  $file_name.";
             $logger->warn($fail_message);
             $logger->logError($fail_message);
-            $logger->logError("Error was: $_");
+            $logger->logError("Error was: $error");
         };
     }
 
@@ -110,6 +111,22 @@ sub _rollback_transaction {
         my $fail_message = "Rollback failed for EDItX file $file_name: $rollback_error";
         $logger->warn($fail_message);
         $logger->logError($fail_message);
+    };
+
+    return;
+}
+
+sub _move_failed_file {
+    my ( $self, $file_manager, $file_name, $logger ) = @_;
+
+    try {
+        $file_manager->moveToFailFolder($file_name);
+    } catch {
+        my $error = $_;
+        my $fail_message = "Could not move failed EDItX file $file_name to the fail folder.";
+        $logger->warn($fail_message);
+        $logger->logError($fail_message);
+        $logger->logError("Error was: $error");
     };
 
     return;

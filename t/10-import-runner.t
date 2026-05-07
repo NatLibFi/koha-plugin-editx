@@ -43,8 +43,9 @@ use_ok('Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::ImportRunner');
     package Editx::TestFileManager;
 
     sub new {
-        my ( $class, $events ) = @_;
-        return bless { events => $events, archived => [], failed => [] }, $class;
+        my ( $class, $events, $params ) = @_;
+        $params ||= {};
+        return bless { events => $events, archived => [], failed => [], %$params }, $class;
     }
 
     sub fillLoadFolder {
@@ -55,15 +56,17 @@ use_ok('Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::ImportRunner');
 
     sub archiveFile {
         my ( $self, $file_name ) = @_;
-        push @{ $self->{archived} }, $file_name;
         push @{ $self->{events} }, "archive:$file_name";
+        die "archive failed for $file_name" if $self->{fail_archive};
+        push @{ $self->{archived} }, $file_name;
         return 1;
     }
 
     sub moveToFailFolder {
         my ( $self, $file_name ) = @_;
-        push @{ $self->{failed} }, $file_name;
         push @{ $self->{events} }, "fail:$file_name";
+        die "fail move failed for $file_name" if $self->{fail_move};
+        push @{ $self->{failed} }, $file_name;
         return 1;
     }
 }
@@ -265,6 +268,112 @@ subtest 'process_orders moves a failing file to the fail folder' => sub {
         join( "\n", @{ $logger->messages } ),
         qr{Order processing failed for file  /tmp/editx/load/bad\.xml},
         'Runner logs the existing failure message'
+    );
+};
+
+subtest 'process_orders treats archive failures as failed imports' => sub {
+    my @events;
+    my $logger = Editx::TestLogger->new;
+    my $file_manager = Editx::TestFileManager->new( \@events, { fail_archive => 1 } );
+    my $order_processor = Editx::TestOrderProcessor->new( \@events );
+    my $transaction_manager = Editx::TestTransactionManager->new( \@events );
+    my @validated;
+
+    my $runner = Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::ImportRunner->new(
+        {
+            logger              => $logger,
+            file_manager        => $file_manager,
+            order_processor     => $order_processor,
+            transaction_manager => $transaction_manager,
+            validator           => sub {
+                my ($file_name) = @_;
+                push @validated, $file_name;
+                push @events, "validate:$file_name";
+                return 1;
+            },
+        }
+    );
+
+    my $result = $runner->process_orders( { '/tmp/editx/load/archive.xml' => 'good-order' } );
+
+    is_deeply(
+        $result,
+        { processed => 0, failed => 1 },
+        'Runner counts an archive failure as a failed import'
+    );
+    is( $transaction_manager->{transactions}->[0]->{committed}, 1, 'Runner commits order processing before archive' );
+    is( $transaction_manager->{transactions}->[0]->{rolled_back}, 0, 'Runner cannot roll back after archive failure' );
+    is_deeply( $file_manager->{archived}, [], 'Runner does not mark the file as archived when archive dies' );
+    is_deeply( $file_manager->{failed}, [ '/tmp/editx/load/archive.xml' ], 'Runner moves an archive failure to fail folder' );
+    is_deeply(
+        \@events,
+        [
+            'validate:/tmp/editx/load/archive.xml',
+            'txn_begin',
+            'process:good-order',
+            'txn_commit',
+            'archive:/tmp/editx/load/archive.xml',
+            'fail:/tmp/editx/load/archive.xml',
+        ],
+        'Runner moves archive failures to fail after commit'
+    );
+    like(
+        join( "\n", @{ $logger->messages } ),
+        qr{archive failed for /tmp/editx/load/archive\.xml},
+        'Runner logs the archive failure'
+    );
+};
+
+subtest 'process_orders logs fail-folder move failures without hiding the original error' => sub {
+    my @events;
+    my $logger = Editx::TestLogger->new;
+    my $file_manager = Editx::TestFileManager->new( \@events, { fail_move => 1 } );
+    my $order_processor = Editx::TestOrderProcessor->new( \@events );
+    my $transaction_manager = Editx::TestTransactionManager->new( \@events );
+
+    my $runner = Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::ImportRunner->new(
+        {
+            logger              => $logger,
+            file_manager        => $file_manager,
+            order_processor     => $order_processor,
+            transaction_manager => $transaction_manager,
+            validator           => sub {
+                my ($file_name) = @_;
+                push @events, "validate:$file_name";
+                return 1;
+            },
+        }
+    );
+
+    my $result = $runner->process_orders( { '/tmp/editx/load/stuck.xml' => 'bad-order' } );
+    my $messages = join( "\n", @{ $logger->messages } );
+
+    is_deeply(
+        $result,
+        { processed => 0, failed => 1 },
+        'Runner still counts the import as failed when the fail move fails'
+    );
+    is_deeply( $file_manager->{failed}, [], 'Runner does not mark the file as failed when fail move dies' );
+    is_deeply(
+        \@events,
+        [
+            'validate:/tmp/editx/load/stuck.xml',
+            'txn_begin',
+            'process:bad-order',
+            'txn_rollback',
+            'fail:/tmp/editx/load/stuck.xml',
+        ],
+        'Runner attempts the fail move after rollback'
+    );
+    like(
+        $messages,
+        qr{Could not move failed EDItX file /tmp/editx/load/stuck\.xml to the fail folder\.},
+        'Runner logs the fail-folder move failure'
+    );
+    like(
+        $messages,
+        qr{processing failed for bad-order},
+        'Runner keeps logging the original processing error'
     );
 };
 
