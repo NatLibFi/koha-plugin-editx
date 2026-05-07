@@ -18,7 +18,7 @@ sub add {
     my $messagefile = $_[0];
     my $raw_message = $_[1];
     my $dbh = C4::Context->dbh;
-    $dbh->do("DELETE FROM edifact_messages WHERE filename='$messagefile'");
+    $dbh->do("DELETE FROM edifact_messages WHERE filename=?", undef, $messagefile);
     my $sth = $dbh->prepare("INSERT INTO edifact_messages (message_type, transfer_date, raw_msg, filename) VALUES ('EDItX', NOW(), ?, ?)");
     $sth->execute($raw_message, $messagefile);
 }
@@ -37,10 +37,11 @@ sub findBookseller {
     my $messagefile = $_[0];
 
     my $qualifier=91;
-    my $san = XML::LibXML->new()->parse_file($messagefile)->findnodes('/LibraryShipNotice/Header/BuyerParty/PartyID[PartyIDType/text() = "VendorAssignedID"]/Identifier')->string_value();
+    my $xml = XML::LibXML->new()->parse_file($messagefile);
+    my $san = $xml->findnodes('/LibraryShipNotice/Header/BuyerParty/PartyID[PartyIDType/text() = "VendorAssignedID"]/Identifier')->string_value();
     if (!$san) {
        $qualifier=92;
-       $san = XML::LibXML->new()->parse_file($messagefile)->findnodes('/LibraryShipNotice/Header/SellerParty/PartyID[PartyIDType/text() = "BuyerAssignedID"]/Identifier')->string_value();
+       $san = $xml->findnodes('/LibraryShipNotice/Header/SellerParty/PartyID[PartyIDType/text() = "BuyerAssignedID"]/Identifier')->string_value();
     }
 
     my $dbh = C4::Context->dbh;
@@ -48,7 +49,7 @@ sub findBookseller {
     $sth->execute($san, $qualifier);
     my $vendor_id = $sth->fetchrow_array();
     my $basename = basename($messagefile);
-    $dbh->do("UPDATE edifact_messages SET vendor_id='$vendor_id' WHERE filename='$basename'") if $vendor_id;
+    $dbh->do("UPDATE edifact_messages SET vendor_id=? WHERE filename=?", undef, $vendor_id, $basename) if $vendor_id;
 }
 
 1;
