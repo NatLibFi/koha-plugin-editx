@@ -58,7 +58,7 @@ sources:
 Leave `local_dir` empty to use `import_tmp_path` from the plugin configuration page.
 
 Enable automatic synchronization from the plugin configuration page. When the checkbox is disabled, `cronjob_nightly` returns without doing any work.
-The configuration page also has a manual "Download and import now" test action. It uses the last saved plugin configuration and is intended for short preproduction checks; the nightly plugin cron remains the normal production path.
+The operations page also has a manual download and import test action. It first shows a confirmation summary of the saved SFTP sources and import folders, then uses the last saved plugin configuration after confirmation. This action is intended for short preproduction checks; the nightly plugin cron remains the normal production path.
 
 The same configuration page includes the EDItX runtime log level and a recent log viewer. The log covers plugin configuration, manual and nightly synchronization, SFTP downloads, EDItX parsing, validation, file moves, and order creation. The log file is written under Koha `logdir` when available, with a temporary-directory fallback.
 

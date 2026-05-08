@@ -30,6 +30,8 @@ like( $plugin_pm, qr{sub\s+tool\s*\{}, 'Plugin exposes a Koha tool page' );
 like( $plugin_pm, qr{\$method\s*\|\|=\s*'tool'}, 'Plugin method URL defaults to the tool page' );
 like( $plugin_pm, qr{tool_href\s*=>\s*\$self->plugin_method_url\('tool'\)}, 'Configure template receives tool_href' );
 like( $plugin_pm, qr{manual_run_available}, 'Tool template receives manual action availability context' );
+like( $plugin_pm, qr{manual_run_confirmation}, 'Tool template receives manual run confirmation context' );
+like( $plugin_pm, qr{sub\s+_manual_sync_confirmation\s*\{}, 'Plugin builds manual run confirmation data' );
 like( $plugin_pm, qr{recommended_import_paths}, 'Configure template receives recommended import path examples' );
 like( $plugin_pm, qr{get_qualified_table_name\('procurement_file'\)}, 'Plugin install uses a qualified procurement_file table' );
 like( $plugin_pm, qr{_migrate_legacy_procurement_file_table}, 'Plugin install migrates legacy procurement_file data' );
@@ -58,8 +60,12 @@ unlike( $css, qr{editx-folder-flow}, 'CSS does not keep unused folder flow badge
 
 like( $tool, qr{active_text='Operations'\s+active_method='tool'}, 'Tool page marks the Operations breadcrumb active' );
 like( $tool, qr{\[%\s+USE\s+raw\s+%\]}, 'Tool page loads Koha raw plugin before using template filters' );
+like( $tool, qr{name="review_sync_now"\s+value="1"}, 'Tool page exposes the manual sync review POST action' );
 like( $tool, qr{name="run_sync_now"\s+value="1"}, 'Tool page exposes the manual sync POST action' );
-like( $tool, qr{Download and import now}, 'Tool page has the manual download/import button' );
+like( $tool, qr{Review download and import}, 'Tool page starts manual sync with a review button' );
+like( $tool, qr{Confirm manual download and import}, 'Tool page renders manual sync confirmation details' );
+like( $tool, qr{Confirm and run import}, 'Tool page has a final manual sync confirmation button' );
+unlike( $tool, qr{onclick="return confirm}, 'Tool page does not rely on a browser confirm prompt for manual sync' );
 like( $tool, qr{Manual run result}, 'Tool page renders manual run results' );
 like( $tool, qr{nightly_sync_enabled}, 'Tool page shows read-only nightly automation status' );
 like( $tool, qr{href="\[%\s*configure_href\s*\|\s*html\s*%\]">Configure</a>}, 'Tool page links to configuration' );
@@ -67,5 +73,6 @@ like( $tool, qr{sftp_config_messages[\s\S]+editx-manual-sync-form}, 'Tool page r
 like( $tool, qr{editx-action-note}, 'Tool page explains disabled manual runs inside the manual action form' );
 unlike( $tool, qr{Manual download and import needs valid SFTP sources}, 'Tool page does not duplicate SFTP warnings below the manual action form' );
 like( $css, qr{\.editx-manual-sync-form\s+\.editx-action-note}, 'CSS styles the manual action disabled note' );
+like( $css, qr{\.editx-confirm-actions}, 'CSS styles the manual confirmation action row' );
 
 done_testing();

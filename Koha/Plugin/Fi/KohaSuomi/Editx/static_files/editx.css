@@ -171,6 +171,28 @@
     margin-bottom: 0;
 }
 
+.editx-manual-sync-confirmation h2 {
+    font-size: 1.15rem;
+    margin: 0 0 0.35rem;
+}
+
+.editx-manual-sync-confirmation h3 {
+    font-size: 1rem;
+    margin: 1rem 0 0.45rem;
+}
+
+.editx-manual-sync-confirmation p {
+    color: #3f4d56;
+    max-width: 68rem;
+}
+
+.editx-confirm-actions {
+    align-items: center;
+    display: flex;
+    gap: 0.55rem;
+    margin-top: 0.85rem;
+}
+
 .editx-collapsible > legend {
     display: flex;
 }

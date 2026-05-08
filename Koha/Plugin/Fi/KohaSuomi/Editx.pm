@@ -174,6 +174,7 @@ sub tool {
     my @messages;
     my $manual_sync_result;
     my $manual_run_attempted;
+    my $manual_run_confirmation;
 
     $self->_install_or_upgrade_tables();
 
@@ -182,12 +183,17 @@ sub tool {
         my $manual_messages;
         ( $manual_messages, $manual_sync_result ) = $self->_run_manual_sync_action($cgi);
         push @messages, @$manual_messages;
+    } elsif ( $cgi->request_method eq 'POST' && $cgi->param('review_sync_now') ) {
+        my $manual_messages;
+        ( $manual_messages, $manual_run_confirmation ) = $self->_manual_sync_confirmation($cgi);
+        push @messages, @$manual_messages;
     }
 
     $self->_output_tool_page(
-        messages             => \@messages,
-        manual_sync_result   => $manual_sync_result,
-        manual_run_attempted => $manual_run_attempted,
+        messages                => \@messages,
+        manual_sync_result      => $manual_sync_result,
+        manual_run_attempted    => $manual_run_attempted,
+        manual_run_confirmation => $manual_run_confirmation,
     );
 }
 
@@ -540,6 +546,64 @@ sub _run_manual_sync_action {
     return ( \@messages, $manual_sync_result );
 }
 
+sub _manual_sync_confirmation {
+    my ( $self, $cgi ) = @_;
+
+    my @messages;
+    if ( !$self->_csrf_token_valid($cgi) ) {
+        push @messages, $self->_configure_message( error => 'Manual EDItX synchronization confirmation was not prepared because the security token was invalid. Reload the page and try again.' );
+        $self->_log_runtime( warn => 'Manual EDItX synchronization confirmation rejected by invalid CSRF token', { operation => 'manual_sync', interface => 'staff' } );
+        return ( \@messages, undef );
+    }
+
+    my $procurement_settings = $self->_procurement_settings();
+    my ( $procurement_messages, $has_procurement_errors ) = $self->_validate_procurement_settings( $procurement_settings, 1 );
+    push @messages, @$procurement_messages;
+
+    my ( $sources, $sftp_messages, $has_sftp_errors ) = $self->_parse_sftp_sources_yaml( $self->_sftp_sources_yaml() );
+    push @messages, @$sftp_messages;
+    if ( !@$sources ) {
+        push @messages, $self->_configure_message( error => 'No EDItX SFTP sources are configured.' );
+        $has_sftp_errors = 1;
+    }
+
+    return ( \@messages, undef ) if $has_procurement_errors || $has_sftp_errors;
+
+    my @sources = map {
+        my $local_dir = $_->{local_dir} || $procurement_settings->{import_tmp_path};
+        {
+            id             => $_->{id},
+            host           => $_->{host},
+            port           => $_->{port},
+            user           => $_->{user},
+            identity_file  => $_->{identity_file},
+            remote_dir     => $_->{remote_dir},
+            pattern        => $_->{pattern},
+            local_dir      => $local_dir,
+            local_dir_note => $_->{local_dir} ? 'SFTP source override' : 'Temporary download folder',
+            after_download => $_->{after_download},
+            remote_archive_dir => $_->{remote_archive_dir},
+            known_hosts_file   => $_->{known_hosts_file},
+        }
+    } @$sources;
+
+    my @folders = (
+        { label => 'Temporary download folder', path => $procurement_settings->{import_tmp_path} },
+        { label => 'Import load folder',        path => $procurement_settings->{import_load_path} },
+        { label => 'Successful archive folder', path => $procurement_settings->{import_archive_path} },
+        { label => 'Failed import folder',      path => $procurement_settings->{import_failed_path} },
+        { label => 'Archived failed folder',    path => $procurement_settings->{import_failed_archived_path} },
+    );
+
+    return (
+        \@messages,
+        {
+            sources => \@sources,
+            folders => \@folders,
+        }
+    );
+}
+
 sub _tool_sftp_status {
     my ( $self, $procurement_settings ) = @_;
 
@@ -583,6 +647,7 @@ sub _output_tool_page {
         messages               => $params{messages},
         manual_sync_result     => $params{manual_sync_result},
         manual_run_attempted   => $params{manual_run_attempted},
+        manual_run_confirmation => $params{manual_run_confirmation},
         nightly_sync_enabled   => $self->_nightly_sync_enabled(),
         procurement_settings   => $procurement_settings,
         sftp_sources_count     => $sftp_status->{count},

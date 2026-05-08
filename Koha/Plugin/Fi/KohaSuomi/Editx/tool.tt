@@ -100,15 +100,86 @@
                     </div>
                 [% END %]
 
+                [% IF manual_run_confirmation %]
+                    <div class="page-section editx-manual-sync-confirmation">
+                        <h2>Confirm manual download and import</h2>
+                        <p>Review the saved configuration that will be used for this run.</p>
+
+                        <h3>SFTP intake</h3>
+                        <table class="table table-striped">
+                            <thead>
+                                <tr>
+                                    <th>Source</th>
+                                    <th>Remote</th>
+                                    <th>Pattern</th>
+                                    <th>Local target</th>
+                                    <th>After download</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                [% FOREACH source IN manual_run_confirmation.sources %]
+                                    <tr>
+                                        <td>[% source.id | html %]</td>
+                                        <td>
+                                            [% source.user | html %]@[% source.host | html %]:[% source.port | html %]
+                                            <code>[% source.remote_dir | html %]</code>
+                                            [% IF source.identity_file %]
+                                                <span class="editx-status-note">Identity file: [% source.identity_file | html %]</span>
+                                            [% END %]
+                                            [% IF source.known_hosts_file %]
+                                                <span class="editx-status-note">Known hosts: [% source.known_hosts_file | html %]</span>
+                                            [% END %]
+                                        </td>
+                                        <td><code>[% source.pattern | html %]</code></td>
+                                        <td>
+                                            <code>[% source.local_dir | html %]</code>
+                                            <span class="editx-status-note">[% source.local_dir_note | html %]</span>
+                                        </td>
+                                        <td>
+                                            [% source.after_download | html %]
+                                            [% IF source.remote_archive_dir %]
+                                                <span class="editx-status-note">Remote archive: [% source.remote_archive_dir | html %]</span>
+                                            [% END %]
+                                        </td>
+                                    </tr>
+                                [% END %]
+                            </tbody>
+                        </table>
+
+                        <h3>Import folders</h3>
+                        <table class="table table-striped">
+                            <tbody>
+                                [% FOREACH folder IN manual_run_confirmation.folders %]
+                                    <tr>
+                                        <th>[% folder.label | html %]</th>
+                                        <td><code>[% folder.path | html %]</code></td>
+                                    </tr>
+                                [% END %]
+                            </tbody>
+                        </table>
+
+                        <form method="post" class="editx-confirm-actions">
+                            <input type="hidden" name="class" value="[% CLASS | html %]" />
+                            <input type="hidden" name="method" value="[% METHOD | html %]" />
+                            <input type="hidden" name="op" value="cud-run-sync-now" />
+                            <input type="hidden" name="run_sync_now" value="1" />
+                            [% INCLUDE 'csrf-token.inc' %]
+                            <button type="submit" class="btn btn-primary">Confirm and run import</button>
+                            <a class="btn btn-default" href="[% tool_href | html %]">Cancel</a>
+                        </form>
+                    </div>
+                [% END %]
+
+                [% UNLESS manual_run_confirmation %]
                 <form method="post" class="page-section editx-manual-sync-form">
                     <input type="hidden" name="class" value="[% CLASS | html %]" />
                     <input type="hidden" name="method" value="[% METHOD | html %]" />
-                    <input type="hidden" name="op" value="cud-run-sync-now" />
-                    <input type="hidden" name="run_sync_now" value="1" />
+                    <input type="hidden" name="op" value="cud-review-sync-now" />
+                    <input type="hidden" name="review_sync_now" value="1" />
                     [% INCLUDE 'csrf-token.inc' %]
                     <div>
                         <h2>Download and import</h2>
-                        <p>Downloads EDItX XML files from saved SFTP sources and immediately starts the importer.</p>
+                        <p>Reviews saved EDItX SFTP and import settings before starting the importer.</p>
                         [% UNLESS manual_run_available %]
                             <p class="editx-action-note">
                                 Fix SFTP configuration before running a manual import.
@@ -118,9 +189,9 @@
                     </div>
                     <button type="submit"
                             class="btn btn-primary"
-                            [% UNLESS manual_run_available %]disabled="disabled"[% END %]
-                            onclick="return confirm('Run EDItX SFTP download and import now using the saved plugin configuration?');">Download and import now</button>
+                            [% UNLESS manual_run_available %]disabled="disabled"[% END %]>Review download and import</button>
                 </form>
+                [% END %]
             </main>
         </div>
     </div>
