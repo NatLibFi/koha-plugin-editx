@@ -76,6 +76,34 @@ YAML
     like( $message_text, qr{SFTP source 2 repeats id 'invalid-id'\.}, 'Parser reports duplicate source ids' );
 };
 
+subtest 'SFTP YAML default does not preload example sources' => sub {
+    no strict 'refs';
+    no warnings qw(once redefine);
+    local *{ $plugin_class . '::retrieve_data' } = sub { return; };
+
+    my $yaml = $plugin->_sftp_sources_yaml();
+    my ( $sources, $messages, $has_blocking_errors ) = $plugin->_parse_sftp_sources_yaml($yaml);
+
+    is( $yaml, "sources: []\n", 'Missing saved SFTP config defaults to an empty source list' );
+    unlike( $yaml, qr{alexandria_library|sftp\.example\.org}, 'Default SFTP YAML contains no example source values' );
+    ok( !$has_blocking_errors, 'Empty default SFTP YAML has no parser errors' );
+    is_deeply( $messages, [], 'Empty default SFTP YAML has no parser messages' );
+    is( scalar @$sources, 0, 'Empty default SFTP YAML has no sources' );
+};
+
+subtest 'Tool SFTP status rejects an empty saved source list' => sub {
+    no strict 'refs';
+    no warnings qw(once redefine);
+    local *{ $plugin_class . '::retrieve_data' } = sub { return "sources: []\n"; };
+
+    my $status = $plugin->_tool_sftp_status( { import_tmp_path => '/tmp/editx' } );
+    my $message_text = _message_text( $status->{messages} );
+
+    is( $status->{count}, 0, 'Tool status counts no saved SFTP sources' );
+    ok( $status->{has_errors}, 'Tool status marks an empty source list as not runnable' );
+    like( $message_text, qr{No SFTP sources are saved in the EDItX plugin configuration\.}, 'Tool status reports missing SFTP sources' );
+};
+
 subtest 'ProductForm CSV parser nulls unknown itemtypes without blocking save' => sub {
     no strict 'refs';
     no warnings qw(once redefine);

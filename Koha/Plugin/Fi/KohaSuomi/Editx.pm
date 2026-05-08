@@ -555,6 +555,11 @@ sub _tool_sftp_status {
     my ( $sources, $messages, $has_errors ) = $self->_parse_sftp_sources_yaml($saved_sftp_sources_yaml);
     my $default_local_dir = $procurement_settings->{import_tmp_path} // '';
 
+    if ( !$has_errors && !@$sources ) {
+        push @$messages, $self->_configure_message( warning => 'No SFTP sources are saved in the EDItX plugin configuration.' );
+        $has_errors = 1;
+    }
+
     for my $source (@$sources) {
         next if $source->{local_dir} || $default_local_dir;
         push @$messages, $self->_configure_message( warning => "SFTP source '$source->{id}' has no local_dir and import_tmp_path is not set." );
@@ -877,26 +882,12 @@ sub _nightly_sync_enabled {
 sub _sftp_sources_yaml {
     my ($self) = @_;
 
-    return $self->retrieve_data('sftp_sources_yaml') || $self->_empty_sftp_sources_yaml();
+    my $sftp_sources_yaml = $self->retrieve_data('sftp_sources_yaml');
+    return defined $sftp_sources_yaml ? $sftp_sources_yaml : $self->_empty_sftp_sources_yaml();
 }
 
 sub _empty_sftp_sources_yaml {
-    return <<'YAML';
-sources:
-  - id: alexandria_library
-    host: sftp.example.org
-    port: 22
-    user: editx-user
-    identity_file: /var/lib/koha/<instance>/.ssh/editx_sftp
-    remote_dir: /out/alexandria
-    local_dir:
-    pattern: "*.xml"
-    after_download: keep
-    remote_archive_dir:
-    known_hosts_file:
-    strict_host_key_checking: "yes"
-    ssh_config:
-YAML
+    return "sources: []\n";
 }
 
 sub _parse_productform_mapping_csv {
