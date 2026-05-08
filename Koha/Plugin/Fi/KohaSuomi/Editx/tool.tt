@@ -109,18 +109,18 @@
                     <div>
                         <h2>Download and import</h2>
                         <p>Downloads EDItX XML files from saved SFTP sources and immediately starts the importer.</p>
+                        [% UNLESS manual_run_available %]
+                            <p class="editx-action-note">
+                                Fix SFTP configuration before running a manual import.
+                                <a href="[% configure_href | html %]">Open configuration</a>
+                            </p>
+                        [% END %]
                     </div>
                     <button type="submit"
                             class="btn btn-primary"
                             [% UNLESS manual_run_available %]disabled="disabled"[% END %]
                             onclick="return confirm('Run EDItX SFTP download and import now using the saved plugin configuration?');">Download and import now</button>
                 </form>
-
-                [% UNLESS manual_run_available %]
-                    <div class="alert alert-warning">
-                        Manual download and import needs valid SFTP sources. <a href="[% configure_href | html %]">Open configuration</a>
-                    </div>
-                [% END %]
             </main>
         </div>
     </div>

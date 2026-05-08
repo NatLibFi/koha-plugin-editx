@@ -171,6 +171,12 @@
     max-width: 58rem;
 }
 
+.editx-manual-sync-form .editx-action-note {
+    color: #6b5d24;
+    font-weight: 600;
+    margin-top: 0.35rem;
+}
+
 .editx-manual-sync-form .btn {
     flex: 0 0 auto;
 }

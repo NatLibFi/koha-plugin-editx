@@ -57,5 +57,9 @@ like( $tool, qr{Download and import now}, 'Tool page has the manual download/imp
 like( $tool, qr{Manual run result}, 'Tool page renders manual run results' );
 like( $tool, qr{nightly_sync_enabled}, 'Tool page shows read-only nightly automation status' );
 like( $tool, qr{href="\[%\s*configure_href\s*\|\s*html\s*%\]">Configure</a>}, 'Tool page links to configuration' );
+like( $tool, qr{sftp_config_messages[\s\S]+editx-manual-sync-form}, 'Tool page renders SFTP prerequisite warnings before the manual action form' );
+like( $tool, qr{editx-action-note}, 'Tool page explains disabled manual runs inside the manual action form' );
+unlike( $tool, qr{Manual download and import needs valid SFTP sources}, 'Tool page does not duplicate SFTP warnings below the manual action form' );
+like( $css, qr{\.editx-manual-sync-form\s+\.editx-action-note}, 'CSS styles the manual action disabled note' );
 
 done_testing();
