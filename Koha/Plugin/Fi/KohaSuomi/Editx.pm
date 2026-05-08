@@ -1189,13 +1189,14 @@ sub _procurement_settings {
     my $config = Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Config->new->getSettings();
     my $settings = $config->{settings} || {};
     my $notifications = $config->{notifications} || {};
+    my $recommended_import_paths = $self->_recommended_import_paths();
 
     return {
-        import_tmp_path                  => $self->_config_scalar( $settings->{import_tmp_path} ),
-        import_load_path                 => $self->_config_scalar( $settings->{import_load_path} ),
-        import_archive_path              => $self->_config_scalar( $settings->{import_archive_path} ),
-        import_failed_path               => $self->_config_scalar( $settings->{import_failed_path} ),
-        import_failed_archived_path      => $self->_config_scalar( $settings->{import_failed_archived_path} ),
+        import_tmp_path                  => $self->_config_scalar( $settings->{import_tmp_path} ) || $recommended_import_paths->{tmp},
+        import_load_path                 => $self->_config_scalar( $settings->{import_load_path} ) || $recommended_import_paths->{load},
+        import_archive_path              => $self->_config_scalar( $settings->{import_archive_path} ) || $recommended_import_paths->{archive},
+        import_failed_path               => $self->_config_scalar( $settings->{import_failed_path} ) || $recommended_import_paths->{fail},
+        import_failed_archived_path      => $self->_config_scalar( $settings->{import_failed_archived_path} ) || $recommended_import_paths->{failed_archived},
         authoriser                       => $self->_config_scalar( $settings->{authoriser} ),
         allowed_locations                => $self->_config_scalar( $settings->{allowed_locations} ),
         productform_alternative_triggers => $self->_config_scalar( $settings->{productform_alternative_triggers} ),
@@ -1228,19 +1229,25 @@ sub _validate_procurement_settings {
     my $has_blocking_errors;
     my $blocking_type = $strict ? 'error' : 'warning';
 
-    for my $field (qw(import_tmp_path import_load_path import_archive_path import_failed_path authoriser allowed_locations)) {
+    for my $field (qw(authoriser allowed_locations)) {
         next if defined $settings->{$field} && $settings->{$field} ne '';
         push @messages, $self->_configure_message( $blocking_type => "$field is required before EDItX import can run." );
         $has_blocking_errors ||= $strict;
     }
 
+    my %folder_labels = (
+        import_tmp_path             => 'Temporary download folder',
+        import_load_path            => 'Import load folder',
+        import_archive_path         => 'Successful archive folder',
+        import_failed_path          => 'Failed import folder',
+        import_failed_archived_path => 'Archived failed folder',
+    );
     for my $field (qw(import_tmp_path import_load_path import_archive_path import_failed_path import_failed_archived_path)) {
         my $path = $settings->{$field};
-        next unless defined $path && $path ne '';
-        next if -d $path && -w $path;
-
-        push @messages, $self->_configure_message( $blocking_type => "$field does not point to a writable directory: $path" );
-        $has_blocking_errors ||= $strict;
+        for my $error ( @{ $self->_directory_validation_errors( $folder_labels{$field}, $path ) } ) {
+            push @messages, $self->_configure_message( error => $error );
+            $has_blocking_errors = 1;
+        }
     }
 
     if ( defined $settings->{authoriser} && $settings->{authoriser} ne '' ) {
@@ -1285,6 +1292,64 @@ sub _validate_procurement_settings {
     }
 
     return ( \@messages, $has_blocking_errors );
+}
+
+sub _directory_validation_errors {
+    my ( $self, $label, $path ) = @_;
+
+    my @errors;
+    if ( !defined $path || $path eq '' ) {
+        push @errors, "$label is required before EDItX import can run.";
+        return \@errors;
+    }
+
+    if ( !File::Spec->file_name_is_absolute($path) ) {
+        push @errors, "$label must be an absolute path: $path";
+        return \@errors;
+    }
+
+    my @path_parts = File::Spec->splitdir($path);
+    if ( grep { $_ eq '..' } @path_parts ) {
+        push @errors, "$label must not contain parent-directory segments: $path";
+        return \@errors;
+    }
+
+    my $normalized_path = File::Spec->canonpath($path);
+    if ( -e $normalized_path ) {
+        if ( !-d $normalized_path ) {
+            push @errors, "$label exists but is not a directory: $normalized_path";
+        } elsif ( !-w $normalized_path || !-x $normalized_path ) {
+            push @errors, "$label exists but is not writable by the Koha process: $normalized_path";
+        }
+        return \@errors;
+    }
+
+    my $parent = $self->_nearest_existing_path($normalized_path);
+    if ( !$parent || !-d $parent ) {
+        push @errors, "$label cannot be created because the nearest existing parent is not a directory: $parent";
+    } elsif ( !-w $parent || !-x $parent ) {
+        push @errors, "$label cannot be created because the nearest existing parent is not writable by the Koha process: $parent";
+    }
+
+    return \@errors;
+}
+
+sub _nearest_existing_path {
+    my ( $self, $path ) = @_;
+
+    my $candidate = File::Spec->canonpath($path);
+    while ( defined $candidate && $candidate ne '' ) {
+        return $candidate if -e $candidate;
+
+        my @parts = File::Spec->splitdir($candidate);
+        last if @parts <= 1;
+        pop @parts;
+        my $parent = File::Spec->catdir(@parts);
+        last if !defined $parent || $parent eq $candidate;
+        $candidate = $parent;
+    }
+
+    return File::Spec->rootdir;
 }
 
 sub _default_import_tmp_path {

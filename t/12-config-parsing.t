@@ -4,6 +4,7 @@ use Modern::Perl;
 
 use FindBin qw($Bin);
 use File::Spec;
+use File::Temp qw(tempdir);
 use Test::More;
 
 my $plugin_root = File::Spec->catdir( $Bin, '..' );
@@ -31,6 +32,23 @@ sub _message_text {
     my ($messages) = @_;
 
     return join "\n", map { $_->{text} } @$messages;
+}
+
+sub _valid_procurement_settings {
+    my ($base) = @_;
+
+    return {
+        import_tmp_path                  => File::Spec->catdir( $base, 'tmp' ),
+        import_load_path                 => File::Spec->catdir( $base, 'load' ),
+        import_archive_path              => File::Spec->catdir( $base, 'archive' ),
+        import_failed_path               => File::Spec->catdir( $base, 'fail' ),
+        import_failed_archived_path      => File::Spec->catdir( $base, 'failed_archived' ),
+        authoriser                       => 1,
+        allowed_locations                => 'MAIN',
+        productform_alternative_triggers => '',
+        notification_mailto              => '',
+        notification_mailfrom            => '',
+    };
 }
 
 subtest 'SFTP YAML parser normalizes optional source fields' => sub {
@@ -117,6 +135,76 @@ subtest 'Recommended import paths are scoped to the Koha instance' => sub {
     is( $paths->{archive}, '/var/lib/koha/kohadev/spool/editx/archive', 'Recommended archive path is below the base path' );
     is( $paths->{fail}, '/var/lib/koha/kohadev/spool/editx/fail', 'Recommended fail path is below the base path' );
     is( $paths->{failed_archived}, '/var/lib/koha/kohadev/spool/editx/failed_archived', 'Recommended failed archive path is below the base path' );
+};
+
+subtest 'Procurement settings prefill missing import folders from the Koha instance' => sub {
+    no strict 'refs';
+    no warnings qw(once redefine);
+    require Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Config;
+    local *{ $plugin_class . '::_koha_instance' } = sub { return 'kohadev'; };
+    local *Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Config::getSettings = sub {
+        return { settings => {}, notifications => {} };
+    };
+
+    my $settings = $plugin->_procurement_settings();
+
+    is( $settings->{import_tmp_path}, '/var/lib/koha/kohadev/spool/editx/tmp', 'Missing tmp folder uses the default Koha instance path' );
+    is( $settings->{import_load_path}, '/var/lib/koha/kohadev/spool/editx/load', 'Missing load folder uses the default Koha instance path' );
+    is( $settings->{import_archive_path}, '/var/lib/koha/kohadev/spool/editx/archive', 'Missing archive folder uses the default Koha instance path' );
+    is( $settings->{import_failed_path}, '/var/lib/koha/kohadev/spool/editx/fail', 'Missing fail folder uses the default Koha instance path' );
+    is( $settings->{import_failed_archived_path}, '/var/lib/koha/kohadev/spool/editx/failed_archived', 'Missing failed archive folder uses the default Koha instance path' );
+};
+
+subtest 'Procurement folder validation accepts creatable absolute paths' => sub {
+    no strict 'refs';
+    no warnings qw(once redefine);
+    local *{ $plugin_class . '::_patron_exists' } = sub { return 1; };
+    local *{ $plugin_class . '::_authorised_values' } = sub { return ['MAIN']; };
+
+    my $root = tempdir( CLEANUP => 1 );
+    my $settings = _valid_procurement_settings( File::Spec->catdir( $root, 'spool', 'editx' ) );
+    my ( $messages, $has_blocking_errors ) = $plugin->_validate_procurement_settings( $settings, 1 );
+
+    ok( !$has_blocking_errors, 'Creatable folder hierarchy is accepted' );
+    is_deeply( $messages, [], 'Creatable folder hierarchy has no validation messages' );
+};
+
+subtest 'Procurement folder validation rejects unsafe paths' => sub {
+    no strict 'refs';
+    no warnings qw(once redefine);
+    local *{ $plugin_class . '::_patron_exists' } = sub { return 1; };
+    local *{ $plugin_class . '::_authorised_values' } = sub { return ['MAIN']; };
+
+    my $root = tempdir( CLEANUP => 1 );
+    my $settings = _valid_procurement_settings( File::Spec->catdir( $root, 'spool', 'editx' ) );
+    $settings->{import_tmp_path} = File::Spec->catdir( $root, '..', 'editx-tmp' );
+    $settings->{import_load_path} = 'relative/load';
+    my ( $messages, $has_blocking_errors ) = $plugin->_validate_procurement_settings( $settings, 1 );
+    my $message_text = _message_text($messages);
+
+    ok( $has_blocking_errors, 'Unsafe folder paths block configuration save' );
+    like( $message_text, qr{Temporary download folder must not contain parent-directory segments}, 'Validation rejects parent-directory path segments' );
+    like( $message_text, qr{Import load folder must be an absolute path}, 'Validation rejects relative paths' );
+};
+
+subtest 'Procurement folder validation rejects non-directory parents' => sub {
+    no strict 'refs';
+    no warnings qw(once redefine);
+    local *{ $plugin_class . '::_patron_exists' } = sub { return 1; };
+    local *{ $plugin_class . '::_authorised_values' } = sub { return ['MAIN']; };
+
+    my $root = tempdir( CLEANUP => 1 );
+    my $file_parent = File::Spec->catfile( $root, 'archive-file' );
+    open my $fh, '>', $file_parent or die "Cannot create $file_parent: $!";
+    close $fh;
+
+    my $settings = _valid_procurement_settings( File::Spec->catdir( $root, 'spool', 'editx' ) );
+    $settings->{import_archive_path} = File::Spec->catdir( $file_parent, 'archive' );
+    my ( $messages, $has_blocking_errors ) = $plugin->_validate_procurement_settings( $settings, 1 );
+    my $message_text = _message_text($messages);
+
+    ok( $has_blocking_errors, 'Non-directory parent blocks configuration save' );
+    like( $message_text, qr{Successful archive folder cannot be created because the nearest existing parent is not a directory}, 'Validation rejects non-directory parents' );
 };
 
 subtest 'ProductForm CSV parser nulls unknown itemtypes without blocking save' => sub {

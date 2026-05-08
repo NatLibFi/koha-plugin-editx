@@ -24,7 +24,17 @@ The legacy `/etc/koha/sites/<instance>/procurement-config.xml` file is still rea
 
 ## Nightly EDItX synchronization
 
-The plugin importer reads incoming EDItX XML from `import_tmp_path` in the plugin configuration page. The plugin implements Koha's `cronjob_nightly` hook, so the normal Koha nightly plugin cron can download SFTP files and import them.
+The plugin importer reads incoming EDItX XML from `import_tmp_path` in the plugin configuration page. New configurations are prefilled with instance-owned folders under `/var/lib/koha/<instance>/spool/editx/`:
+
+- `tmp`
+- `load`
+- `archive`
+- `fail`
+- `failed_archived`
+
+These folder paths can still be overridden with other absolute paths, for example to place archive copies on a different mounted disk. Saving the configuration validates that each folder is an absolute path, does not use parent-directory segments, and either already exists as a writable directory or can be created below a writable existing parent directory.
+
+The plugin implements Koha's `cronjob_nightly` hook, so the normal Koha nightly plugin cron can download SFTP files and import them.
 
 Configure SFTP sources from the plugin configuration page. The YAML field accepts one or more sources:
 
@@ -58,7 +68,7 @@ Koha packages already run `/usr/share/koha/bin/cronjobs/plugins_nightly.pl` from
 
 For preproduction testing, check these Koha settings before enabling nightly synchronization:
 
-- Plugin import folder paths exist and are writable by `<instance>-koha`.
+- Plugin import folder paths exist and are writable by `<instance>-koha`, or their nearest existing parent directory is writable so Koha can create the missing hierarchy.
 - Each SFTP source either leaves `local_dir` empty or sets it to the same directory as `import_tmp_path`.
 - The configured `authoriser` is an existing Koha borrowernumber.
 - `allowed_locations` and `productform_alternative_triggers` match Koha LOC authorised values.
