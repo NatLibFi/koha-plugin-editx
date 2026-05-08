@@ -30,6 +30,7 @@ like( $plugin_pm, qr{sub\s+tool\s*\{}, 'Plugin exposes a Koha tool page' );
 like( $plugin_pm, qr{\$method\s*\|\|=\s*'tool'}, 'Plugin method URL defaults to the tool page' );
 like( $plugin_pm, qr{tool_href\s*=>\s*\$self->plugin_method_url\('tool'\)}, 'Configure template receives tool_href' );
 like( $plugin_pm, qr{manual_run_available}, 'Tool template receives manual action availability context' );
+like( $plugin_pm, qr{recommended_import_paths}, 'Configure template receives recommended import path examples' );
 like( $plugin_pm, qr{get_qualified_table_name\('procurement_file'\)}, 'Plugin install uses a qualified procurement_file table' );
 like( $plugin_pm, qr{_migrate_legacy_procurement_file_table}, 'Plugin install migrates legacy procurement_file data' );
 like( $install_sql, qr{CREATE TABLE IF NOT EXISTS `koha_plugin_fi_kohasuomi_editx_map_productform`}, 'Install SQL still creates the ProductForm mapping table' );
@@ -48,7 +49,12 @@ like( $configure, qr{id="mapping_csv"[\s\S]+?rows="8"}, 'Configure page keeps th
 like( $configure, qr{data-editx-collapsible-storage="editx\.configure\.runtimeLogging\.v1"}, 'Runtime logging section has persisted collapse state' );
 like( $configure, qr{data-editx-collapsible-default="collapsed"}, 'Runtime logging section is collapsed by default' );
 like( $configure, qr{window\.localStorage}, 'Configure page persists the runtime logging collapse state in localStorage' );
+like( $configure, qr{Recommended instance-owned base}, 'Configure page explains the recommended import folder base' );
+like( $configure, qr{placeholder="\[%\s*recommended_import_paths\.tmp\s*\|\s*html\s*%\]"}, 'Configure page shows an instance-aware tmp folder placeholder' );
+like( $configure, qr{recommended_import_paths\.failed_archived}, 'Configure page shows an instance-aware failed archive example' );
+unlike( $configure, qr{editx-folder-flow}, 'Configure page does not render the old folder flow badges' );
 like( $css, qr{\.editx-collapsible\.is-collapsed\s+\.editx-collapsible-body}, 'CSS hides collapsed runtime logging content' );
+unlike( $css, qr{editx-folder-flow}, 'CSS does not keep unused folder flow badge styles' );
 
 like( $tool, qr{active_text='Operations'\s+active_method='tool'}, 'Tool page marks the Operations breadcrumb active' );
 like( $tool, qr{\[%\s+USE\s+raw\s+%\]}, 'Tool page loads Koha raw plugin before using template filters' );

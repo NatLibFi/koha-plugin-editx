@@ -104,6 +104,21 @@ subtest 'Tool SFTP status rejects an empty saved source list' => sub {
     like( $message_text, qr{No SFTP sources are saved in the EDItX plugin configuration\.}, 'Tool status reports missing SFTP sources' );
 };
 
+subtest 'Recommended import paths are scoped to the Koha instance' => sub {
+    no strict 'refs';
+    no warnings qw(once redefine);
+    local *{ $plugin_class . '::_koha_instance' } = sub { return 'kohadev'; };
+
+    my $paths = $plugin->_recommended_import_paths();
+
+    is( $paths->{base}, '/var/lib/koha/kohadev/spool/editx', 'Recommended base path uses the detected Koha instance' );
+    is( $paths->{tmp}, '/var/lib/koha/kohadev/spool/editx/tmp', 'Recommended tmp path is below the base path' );
+    is( $paths->{load}, '/var/lib/koha/kohadev/spool/editx/load', 'Recommended load path is below the base path' );
+    is( $paths->{archive}, '/var/lib/koha/kohadev/spool/editx/archive', 'Recommended archive path is below the base path' );
+    is( $paths->{fail}, '/var/lib/koha/kohadev/spool/editx/fail', 'Recommended fail path is below the base path' );
+    is( $paths->{failed_archived}, '/var/lib/koha/kohadev/spool/editx/failed_archived', 'Recommended failed archive path is below the base path' );
+};
+
 subtest 'ProductForm CSV parser nulls unknown itemtypes without blocking save' => sub {
     no strict 'refs';
     no warnings qw(once redefine);

@@ -123,35 +123,56 @@
 
                     <fieldset class="rows">
                         <legend>Import folders</legend>
-                        <div class="editx-folder-flow">
-                            <span>tmp</span>
-                            <span>load</span>
-                            <span>archive</span>
-                            <span>fail</span>
+                        <div class="hint">
+                            Recommended instance-owned base:
+                            <code class="editx-config-value">[% recommended_import_paths.base | html %]</code>.
+                            Create the folders owned and writable by the Koha instance user.
                         </div>
                         <ol>
                             <li>
                                 <label for="import_tmp_path">Temporary download folder</label>
-                                <input id="import_tmp_path" name="import_tmp_path" type="text" size="80" value="[% procurement_settings.import_tmp_path | html %]" />
-                                <div class="hint">SFTP puts new XML files here unless a source has its own local_dir.</div>
+                                <input id="import_tmp_path" name="import_tmp_path" type="text" size="80" value="[% procurement_settings.import_tmp_path | html %]" placeholder="[% recommended_import_paths.tmp | html %]" />
+                                <div class="hint">
+                                    Example:
+                                    <code class="editx-config-value">[% recommended_import_paths.tmp | html %]</code>.
+                                    SFTP puts new XML files here unless a source has its own local_dir.
+                                </div>
                             </li>
                             <li>
                                 <label for="import_load_path">Import load folder</label>
-                                <input id="import_load_path" name="import_load_path" type="text" size="80" value="[% procurement_settings.import_load_path | html %]" />
-                                <div class="hint">Importer reads files from here after moving them out of the temporary folder.</div>
+                                <input id="import_load_path" name="import_load_path" type="text" size="80" value="[% procurement_settings.import_load_path | html %]" placeholder="[% recommended_import_paths.load | html %]" />
+                                <div class="hint">
+                                    Example:
+                                    <code class="editx-config-value">[% recommended_import_paths.load | html %]</code>.
+                                    Importer reads files from here after moving them out of the temporary folder.
+                                </div>
                             </li>
                             <li>
                                 <label for="import_archive_path">Successful archive folder</label>
-                                <input id="import_archive_path" name="import_archive_path" type="text" size="80" value="[% procurement_settings.import_archive_path | html %]" />
+                                <input id="import_archive_path" name="import_archive_path" type="text" size="80" value="[% procurement_settings.import_archive_path | html %]" placeholder="[% recommended_import_paths.archive | html %]" />
+                                <div class="hint">
+                                    Example:
+                                    <code class="editx-config-value">[% recommended_import_paths.archive | html %]</code>.
+                                    Successfully imported files are moved here.
+                                </div>
                             </li>
                             <li>
                                 <label for="import_failed_path">Failed import folder</label>
-                                <input id="import_failed_path" name="import_failed_path" type="text" size="80" value="[% procurement_settings.import_failed_path | html %]" />
+                                <input id="import_failed_path" name="import_failed_path" type="text" size="80" value="[% procurement_settings.import_failed_path | html %]" placeholder="[% recommended_import_paths.fail | html %]" />
+                                <div class="hint">
+                                    Example:
+                                    <code class="editx-config-value">[% recommended_import_paths.fail | html %]</code>.
+                                    Files that failed import are moved here for review.
+                                </div>
                             </li>
                             <li>
                                 <label for="import_failed_archived_path">Archived failed folder</label>
-                                <input id="import_failed_archived_path" name="import_failed_archived_path" type="text" size="80" value="[% procurement_settings.import_failed_archived_path | html %]" />
-                                <div class="hint">Used by failure notification and requeue helper scripts.</div>
+                                <input id="import_failed_archived_path" name="import_failed_archived_path" type="text" size="80" value="[% procurement_settings.import_failed_archived_path | html %]" placeholder="[% recommended_import_paths.failed_archived | html %]" />
+                                <div class="hint">
+                                    Example:
+                                    <code class="editx-config-value">[% recommended_import_paths.failed_archived | html %]</code>.
+                                    Used by failure notification and requeue helper scripts.
+                                </div>
                             </li>
                         </ol>
                     </fieldset>

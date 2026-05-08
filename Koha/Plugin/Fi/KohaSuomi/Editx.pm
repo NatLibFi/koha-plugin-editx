@@ -614,6 +614,7 @@ sub _output_configure_page {
         branches_text          => join( ', ', @{ $self->_branches() } ),
         last_configured_by     => $self->retrieve_data('last_configured_by'),
         last_upgraded          => $self->retrieve_data('last_upgraded'),
+        recommended_import_paths => $self->_recommended_import_paths(),
         configure_href         => $self->plugin_method_url('configure'),
         tool_href              => $self->plugin_method_url('tool'),
         css_href               => $self->static_asset_url('static_files/editx.css'),
@@ -1293,6 +1294,28 @@ sub _default_import_tmp_path {
     my $settings = Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Config->new->getSettings();
 
     return $settings->{settings}->{import_tmp_path} // '';
+}
+
+sub _recommended_import_paths {
+    my ($self) = @_;
+
+    my $instance = $self->_koha_instance();
+    if ( defined $instance && $instance ne '' ) {
+        $instance =~ s/[^A-Za-z0-9_.-]/_/g;
+    } else {
+        $instance = '<instance>';
+    }
+
+    my $base = "/var/lib/koha/$instance/spool/editx";
+
+    return {
+        base            => $base,
+        tmp             => "$base/tmp",
+        load            => "$base/load",
+        archive         => "$base/archive",
+        fail            => "$base/fail",
+        failed_archived => "$base/failed_archived",
+    };
 }
 
 sub _shell_quote {

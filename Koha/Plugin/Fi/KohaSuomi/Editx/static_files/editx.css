@@ -77,30 +77,6 @@
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
 }
 
-.editx-folder-flow {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.45rem;
-    margin: 0.25rem 0 0.85rem;
-}
-
-.editx-folder-flow span {
-    background: #eef5f1;
-    border: 1px solid #bfd7cc;
-    border-radius: 0.35rem;
-    color: #264b3d;
-    font-size: 0.86rem;
-    font-weight: 700;
-    padding: 0.34rem 0.62rem;
-}
-
-.editx-folder-flow span:not(:last-child)::after {
-    color: #6b7b72;
-    content: ">";
-    font-weight: 400;
-    margin-left: 0.55rem;
-}
-
 .editx-reference-list {
     color: #3f4d56;
     display: block;
