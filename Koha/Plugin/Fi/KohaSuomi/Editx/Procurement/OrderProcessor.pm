@@ -660,6 +660,12 @@ sub updateAqbudgetLog {
     my $self = shift;
     my ($copyDetail, $itemDetail, $order, $biblio) = @_;
 
+    my $dbh = C4::Context->dbh;
+    if ( !$self->_table_exists( $dbh, 'aqbudgets_spend_log' ) ) {
+        $self->getLogger()->log('Skipping aqbudgets_spend_log update because the table does not exist.');
+        return 1;
+    }
+
     my $copyQty = $copyDetail->getCopyQuantity();
     my $totalAmount = $copyDetail->getFundMonetaryAmount() * $copyQty;
 
@@ -673,7 +679,6 @@ sub updateAqbudgetLog {
     my $destinationlocation = $copyDetail->getBranchCode();
     my $collectioncode = $copyDetail->getLocation();
 
-    my $dbh = C4::Context->dbh;
     my $stmnt = $dbh->prepare(qq{INSERT INTO aqbudgets_spend_log (monetary_amount,timestamp,origin,fund,account,itemtype,copy_quantity,total_amount,location,collection,biblionumber) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)});
     $stmnt->execute($monetaryamount,$timestamp,$tied,$fundnumber,$personname,$productform,$copyquantity,$totalAmount,$destinationlocation,$collectioncode,$biblio) or die($DBI::errstr);
 }
@@ -777,6 +782,24 @@ sub _itemtype_exists {
 
     my $dbh = C4::Context->dbh;
     my ($exists) = $dbh->selectrow_array( 'SELECT COUNT(*) FROM itemtypes WHERE itemtype = ?', undef, $itemtype );
+    return $exists ? 1 : 0;
+}
+
+sub _table_exists {
+    my ( $self, $dbh, $table ) = @_;
+
+    return unless $table;
+
+    my ($exists) = $dbh->selectrow_array(
+        q{
+            SELECT COUNT(*)
+            FROM information_schema.TABLES
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = ?
+        },
+        undef,
+        $table
+    );
     return $exists ? 1 : 0;
 }
 
