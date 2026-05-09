@@ -13,7 +13,10 @@ use Fcntl qw(S_ISDIR);
 use IO::Handle;
 use C4::Context;
 use Koha::DateUtils qw(dt_from_string);
+use Koha::Patrons;
 use Koha::Token;
+use Koha::Plugin::Fi::KohaSuomi::Editx::Config;
+use Koha::Plugin::Fi::KohaSuomi::Editx::FlashCookie;
 use Koha::Plugin::Fi::KohaSuomi::Editx::RuntimeLog;
 use Mojo::JSON qw(decode_json encode_json);
 use Mojo::Util qw(url_escape);
@@ -21,21 +24,24 @@ use Net::SFTP::Foreign;
 use POSIX qw(strftime);
 use Text::CSV_XS;
 use XML::LibXML;
-use YAML::XS qw(Load);
+use YAML::XS qw(Load Dump);
 use utf8;
 ## Here we set our plugin version
-our $VERSION = "{VERSION}";
+our $VERSION = "0.0.2";
 ## Here is our metadata, some keys are required, some are optional
 our $metadata = {
     name            => 'EDItX-plugin',
-    author          => 'Lari Strand',
+    author          => 'Lari Strand and Kansalliskirjasto Koha Dev Team',
     date_authored   => '2022-04-05',
     date_updated    => '1900-01-01',
     minimum_version => '23.11',
     maximum_version => undef,
     version         => $VERSION,
-    description     => 'Adds EDItX functionality to Koha. (Paikalliskannat)',
+    description     => 'Adds EDItX functionality to Koha. KK version. (Paikalliskannat)',
 };
+
+our $INSTANCE = _instance_from_koha_conf_path( _guess_koha_conf_path() );
+
 ## This is the minimum code required for a plugin's 'new' method
 ## More can be added, but none should be removed
 sub new {
@@ -57,7 +63,7 @@ sub install() {
     my ( $self, $args ) = @_;
 
     $self->_log_runtime( info => 'EDItX plugin install started', { operation => 'install' } );
-    my $success = $self->_install_or_upgrade_tables();
+    my $success = $self->_install_or_upgrade_tables( migrate_legacy => 0 );
     $self->_log_runtime(
         $success ? 'info' : 'error',
         $success ? 'EDItX plugin install finished' : 'EDItX plugin install failed',
@@ -68,12 +74,26 @@ sub install() {
 }
 
 sub _install_or_upgrade_tables {
-    my ($self) = @_;
+    my ( $self, %args ) = @_;
 
     my $dbh = C4::Context->dbh;
-    my $sequences_table = $self->_quote_identifier( $self->get_qualified_table_name('sequences') );
-    my $map_productform_table = $self->_quote_identifier( $self->get_qualified_table_name('map_productform') );
-    my $procurement_file_table = $self->_quote_identifier( $self->get_qualified_table_name('procurement_file') );
+    my $migrate_legacy = $args{migrate_legacy} ? 1 : 0;
+    my $sequences_table_name = $self->get_qualified_table_name('sequences');
+    my $map_productform_table_name = $self->get_qualified_table_name('map_productform');
+    my $procurement_file_table_name = $self->get_qualified_table_name('procurement_file');
+    my %table_existed_before_upgrade;
+
+    if ($migrate_legacy) {
+        %table_existed_before_upgrade = (
+            sequences        => $self->_table_exists($sequences_table_name),
+            map_productform  => $self->_table_exists($map_productform_table_name),
+            procurement_file => $self->_table_exists($procurement_file_table_name),
+        );
+    }
+
+    my $sequences_table = $self->_quote_identifier($sequences_table_name);
+    my $map_productform_table = $self->_quote_identifier($map_productform_table_name);
+    my $procurement_file_table = $self->_quote_identifier($procurement_file_table_name);
 
     my $success = $dbh->do( "
         CREATE TABLE IF NOT EXISTS $sequences_table (
@@ -125,9 +145,14 @@ sub _install_or_upgrade_tables {
 
     $success &&= $self->_drop_map_productform_foreign_keys();
     $success &&= $self->_allow_nullable_map_productform_columns();
-    $success &&= $self->_migrate_legacy_sequences_table();
-    $success &&= $self->_migrate_legacy_map_productform_table();
-    $success &&= $self->_migrate_legacy_procurement_file_table();
+    if ($migrate_legacy) {
+        $success &&= $self->_migrate_legacy_sequences_table()
+            unless $table_existed_before_upgrade{sequences};
+        $success &&= $self->_migrate_legacy_map_productform_table()
+            unless $table_existed_before_upgrade{map_productform};
+        $success &&= $self->_migrate_legacy_procurement_file_table()
+            unless $table_existed_before_upgrade{procurement_file};
+    }
     $success &&= $self->_ensure_sequences_row();
 
     return $success;
@@ -142,7 +167,7 @@ sub upgrade {
     $self->store_data( { last_upgraded => $dt->ymd('-') . ' ' . $dt->hms(':') } );
 
     $self->_log_runtime( info => 'EDItX plugin upgrade started', { operation => 'upgrade' } );
-    my $success = $self->_install_or_upgrade_tables();
+    my $success = $self->_install_or_upgrade_tables( migrate_legacy => 1 );
     $self->_log_runtime(
         $success ? 'info' : 'error',
         $success ? 'EDItX plugin upgrade finished' : 'EDItX plugin upgrade failed',
@@ -158,13 +183,16 @@ sub uninstall() {
     my ( $self, $args ) = @_;
 
     my $success = 1;
-    my $sequences_table = $self->_quote_identifier( $self->get_qualified_table_name('sequences') );
-    my $map_productform_table = $self->_quote_identifier( $self->get_qualified_table_name('map_productform') );
-    my $procurement_file_table = $self->_quote_identifier( $self->get_qualified_table_name('procurement_file') );
-
-    $success &&= C4::Context->dbh->do("DROP TABLE IF EXISTS $sequences_table");
-    $success &&= C4::Context->dbh->do("DROP TABLE IF EXISTS $map_productform_table");
-    $success &&= C4::Context->dbh->do("DROP TABLE IF EXISTS $procurement_file_table");
+    $success &&= $self->_drop_tables_if_exist(
+        $self->get_qualified_table_name('sequences'),
+        $self->get_qualified_table_name('map_productform'),
+        $self->get_qualified_table_name('procurement_file'),
+        qw(
+            editx_sequences sequences
+            editx_map_productform map_productform
+            editx_procurement_file procurement_file
+        )
+    );
 
     $self->_log_runtime(
         $success ? 'info' : 'error',
@@ -235,8 +263,26 @@ sub configure {
     my ( $self, $args ) = @_;
     my $cgi = $self->{'cgi'};
     my @messages;
-    my $saved;
     my $is_save = $cgi->request_method eq 'POST' && $cgi->param('save');
+    my $is_export_mapping_csv = $cgi->request_method eq 'POST' && $cgi->param('export_mapping_csv');
+    my $is_import_mapping_csv = $cgi->request_method eq 'POST' && $cgi->param('import_mapping_csv');
+    my $is_add_mapping_row = $cgi->request_method eq 'POST' && $cgi->param('add_mapping_row');
+    my $is_update_mapping_row = $cgi->request_method eq 'POST' && $cgi->param('update_mapping_row');
+    my $is_delete_mapping_row = $cgi->request_method eq 'POST' && $cgi->param('delete_mapping_row');
+    my $is_mapping_action = $is_import_mapping_csv || $is_add_mapping_row || $is_update_mapping_row || $is_delete_mapping_row;
+    my $edit_mapping_onix_code = $self->_trim_csv_value( scalar $cgi->param('edit_mapping_onix_code') );
+    my $flash = $cgi->request_method eq 'GET'
+        ? Koha::Plugin::Fi::KohaSuomi::Editx::FlashCookie->consume(
+            {
+                cgi       => $cgi,
+                namespace => 'editx_configure',
+            }
+        )
+        : {};
+    if ( my $flash_message = $self->_configure_flash_message( $flash->{code} ) ) {
+        push @messages, $flash_message;
+    }
+
     my $runtime_log_level =
           $is_save
         ? Koha::Plugin::Fi::KohaSuomi::Editx::RuntimeLog->normalize_level( scalar $cgi->param('runtime_log_level') )
@@ -245,10 +291,10 @@ sub configure {
           $is_save
         ? ( $cgi->param('nightly_sync_enabled') ? 1 : 0 )
         : $self->_nightly_sync_enabled();
-    my $sftp_sources_yaml =
+    my $sftp_sources =
           $is_save
-        ? ( $cgi->param('sftp_sources_yaml') // '' )
-        : $self->_sftp_sources_yaml();
+        ? $self->_sftp_sources_from_cgi($cgi)
+        : $self->_sftp_sources();
     my $procurement_settings =
           $is_save
         ? $self->_procurement_settings_from_cgi($cgi)
@@ -256,29 +302,57 @@ sub configure {
 
     $self->_install_or_upgrade_tables();
 
-    if ($is_save) {
-        my $mapping_csv = $cgi->param('mapping_csv') // '';
+    if ($is_mapping_action) {
+        my $handled = $self->_handle_productform_mapping_action(
+            cgi                    => $cgi,
+            messages               => \@messages,
+            sftp_sources           => $sftp_sources,
+            procurement_settings   => $procurement_settings,
+            nightly_sync_enabled   => $nightly_sync_enabled,
+            runtime_log_level      => $runtime_log_level,
+        );
+        return if $handled;
+    }
+
+    if ($is_export_mapping_csv) {
         if ( !$self->_csrf_token_valid($cgi) ) {
-            push @messages, $self->_configure_message( error => 'Configuration was not saved because the security token was invalid. Reload the page and try again.' );
+            push @messages, $self->_configure_message( error => 'ProductForm mapping CSV was not exported because the security token was invalid. Reload the page and try again.' );
             $self->_output_configure_page(
-                mapping_csv            => $mapping_csv,
-                sftp_sources_yaml      => $sftp_sources_yaml,
+                mapping_rows           => $self->_productform_mapping_rows(),
+                sftp_sources           => $sftp_sources,
                 procurement_settings   => $procurement_settings,
                 messages               => \@messages,
                 nightly_sync_enabled   => $nightly_sync_enabled,
-                saved                  => 0,
                 runtime_log_level      => $runtime_log_level,
             );
             return;
         }
 
-        my ( $rows, $parse_messages, $has_blocking_errors ) = $self->_parse_productform_mapping_csv($mapping_csv);
-        my ( $sftp_sources, $sftp_messages, $has_sftp_blocking_errors ) = $self->_parse_sftp_sources_yaml($sftp_sources_yaml);
+        $self->_output_productform_mapping_csv();
+        return;
+    }
+
+    if ($is_save) {
+        if ( !$self->_csrf_token_valid($cgi) ) {
+            push @messages, $self->_configure_message( error => 'Configuration was not saved because the security token was invalid. Reload the page and try again.' );
+            $self->_output_configure_page(
+                mapping_rows           => $self->_productform_mapping_rows(),
+                sftp_sources           => $sftp_sources,
+                procurement_settings   => $procurement_settings,
+                messages               => \@messages,
+                nightly_sync_enabled   => $nightly_sync_enabled,
+                runtime_log_level      => $runtime_log_level,
+                edit_mapping_onix_code => $edit_mapping_onix_code,
+            );
+            return;
+        }
+
+        my ( $normalized_sftp_sources, $sftp_messages, $has_sftp_blocking_errors ) = $self->_normalize_sftp_sources($sftp_sources);
+        $sftp_sources = $normalized_sftp_sources;
         my ( $procurement_messages, $has_procurement_blocking_errors ) = $self->_validate_procurement_settings( $procurement_settings, $nightly_sync_enabled );
-        push @messages, @$parse_messages;
         push @messages, @$sftp_messages;
         push @messages, @$procurement_messages;
-        $has_blocking_errors ||= $has_sftp_blocking_errors;
+        my $has_blocking_errors = $has_sftp_blocking_errors;
         $has_blocking_errors ||= $has_procurement_blocking_errors;
 
         if ( !$has_blocking_errors && $nightly_sync_enabled ) {
@@ -296,37 +370,28 @@ sub configure {
 
         if ($has_blocking_errors) {
             $self->_output_configure_page(
-                mapping_csv            => $mapping_csv,
-                sftp_sources_yaml      => $sftp_sources_yaml,
+                mapping_rows           => $self->_productform_mapping_rows(),
+                sftp_sources           => $sftp_sources,
                 procurement_settings   => $procurement_settings,
                 messages               => \@messages,
                 nightly_sync_enabled   => $nightly_sync_enabled,
-                saved                  => 0,
                 runtime_log_level      => $runtime_log_level,
-            );
-            return;
-        }
-
-        my $save_messages = $self->_save_productform_mappings($rows);
-        push @messages, @$save_messages;
-        if (@$save_messages) {
-            $self->_output_configure_page(
-                mapping_csv            => $mapping_csv,
-                sftp_sources_yaml      => $sftp_sources_yaml,
-                procurement_settings   => $procurement_settings,
-                messages               => \@messages,
-                nightly_sync_enabled   => $nightly_sync_enabled,
-                saved                  => 0,
-                runtime_log_level      => $runtime_log_level,
+                edit_mapping_onix_code => $edit_mapping_onix_code,
             );
             return;
         }
         $self->store_data(
             {
                 nightly_sync_enabled => $nightly_sync_enabled,
-                sftp_sources_yaml    => $sftp_sources_yaml,
                 runtime_log_level    => $runtime_log_level,
-                %{ $self->_procurement_settings_store_data($procurement_settings) },
+                %{ Koha::Plugin::Fi::KohaSuomi::Editx::Config->store_data(
+                    Koha::Plugin::Fi::KohaSuomi::Editx::Config->from_flat(
+                        {
+                            procurement_settings => $procurement_settings,
+                            sftp_sources         => $sftp_sources,
+                        }
+                    )
+                ) },
                 last_configured_by   => ( C4::Context->userenv || {} )->{'number'},
             }
         );
@@ -339,17 +404,20 @@ sub configure {
             },
             { runtime_log_level => $runtime_log_level }
         );
-        $saved = 1;
+
+        $self->_redirect_configure_with_flash('configuration_saved');
+        return;
     }
 
     $self->_output_configure_page(
-        mapping_csv            => $self->_productform_mapping_csv(),
-        sftp_sources_yaml      => $self->_sftp_sources_yaml(),
+        mapping_rows           => $self->_productform_mapping_rows(),
+        sftp_sources           => $sftp_sources,
         procurement_settings   => $procurement_settings,
         messages               => \@messages,
         nightly_sync_enabled   => $nightly_sync_enabled,
-        saved                  => $saved,
         runtime_log_level      => $runtime_log_level,
+        cookies                => $flash->{cookie},
+        edit_mapping_onix_code => $edit_mapping_onix_code,
     );
 }
 
@@ -387,19 +455,6 @@ sub plugin_method_url {
         . url_escape($method);
 }
 
-sub static_asset_url {
-    my ( $self, $path ) = @_;
-
-    $path =~ s{\A/+}{};
-
-    return '/api/v1/contrib/'
-        . $self->api_namespace
-        . '/static/'
-        . $path
-        . '?v='
-        . $self->_static_asset_version($path);
-}
-
 sub template_include_paths {
     my ($self) = @_;
 
@@ -419,12 +474,14 @@ sub _migrate_legacy_sequences_table {
 
         my $quoted_source = $self->_quote_identifier($source);
         my ($target_count) = $dbh->selectrow_array("SELECT COUNT(*) FROM $quoted_target");
-        next if $target_count;
+        if ( !$target_count ) {
+            $dbh->do( "
+                INSERT INTO $quoted_target (invoicenumber, item_barcode_nextval)
+                SELECT invoicenumber, item_barcode_nextval FROM $quoted_source LIMIT 1
+            " ) or return;
+        }
 
-        $dbh->do( "
-            INSERT INTO $quoted_target (invoicenumber, item_barcode_nextval)
-            SELECT invoicenumber, item_barcode_nextval FROM $quoted_source LIMIT 1
-        " ) or return;
+        $dbh->do("DROP TABLE IF EXISTS $quoted_source") or return;
     }
 
     return 1;
@@ -438,11 +495,13 @@ sub _migrate_legacy_map_productform_table {
     my $quoted_target = $self->_quote_identifier($target);
     my ($target_count) = $dbh->selectrow_array("SELECT COUNT(*) FROM $quoted_target");
 
-    return 1 if $target_count;
-
+    my $has_legacy;
     for my $source ( 'editx_map_productform', 'map_productform' ) {
         next if $source eq $target;
         next unless $self->_table_exists($source);
+
+        $has_legacy = 1;
+        next if $target_count;
 
         my $quoted_source = $self->_quote_identifier($source);
         $dbh->do( "
@@ -453,10 +512,12 @@ sub _migrate_legacy_map_productform_table {
                 productform_alternative = VALUES(productform_alternative)
         " ) or return;
 
-        return 1;
+        ($target_count) = $dbh->selectrow_array("SELECT COUNT(*) FROM $quoted_target");
     }
 
-    return 1;
+    return $has_legacy
+        ? $self->_drop_tables_if_exist(qw(editx_map_productform map_productform))
+        : 1;
 }
 
 sub _migrate_legacy_procurement_file_table {
@@ -465,10 +526,15 @@ sub _migrate_legacy_procurement_file_table {
     my $dbh = C4::Context->dbh;
     my $target = $self->get_qualified_table_name('procurement_file');
     my $quoted_target = $self->_quote_identifier($target);
+    my ($target_count) = $dbh->selectrow_array("SELECT COUNT(*) FROM $quoted_target");
+    my $has_legacy;
 
     for my $source ( 'editx_procurement_file', 'procurement_file' ) {
         next if $source eq $target;
         next unless $self->_table_exists($source);
+
+        $has_legacy = 1;
+        next if $target_count;
 
         my $quoted_source = $self->_quote_identifier($source);
         $dbh->do( "
@@ -476,6 +542,26 @@ sub _migrate_legacy_procurement_file_table {
             SELECT file_name, file_hash FROM $quoted_source
             WHERE file_name IS NOT NULL AND file_hash IS NOT NULL
         " ) or return;
+
+        ($target_count) = $dbh->selectrow_array("SELECT COUNT(*) FROM $quoted_target");
+    }
+
+    return $has_legacy
+        ? $self->_drop_tables_if_exist(qw(editx_procurement_file procurement_file))
+        : 1;
+}
+
+sub _drop_tables_if_exist {
+    my ( $self, @table_names ) = @_;
+
+    my $dbh = C4::Context->dbh;
+    my %seen;
+    for my $table_name (@table_names) {
+        next unless defined $table_name && length $table_name;
+        next if $seen{$table_name}++;
+
+        my $quoted_table_name = $self->_quote_identifier($table_name);
+        $dbh->do("DROP TABLE IF EXISTS $quoted_table_name") or return;
     }
 
     return 1;
@@ -595,7 +681,7 @@ sub _manual_sync_confirmation {
     my ( $procurement_messages, $has_procurement_errors ) = $self->_validate_procurement_settings( $procurement_settings, 1 );
     push @messages, @$procurement_messages;
 
-    my ( $sources, $sftp_messages, $has_sftp_errors ) = $self->_parse_sftp_sources_yaml( $self->_sftp_sources_yaml() );
+    my ( $sources, $sftp_messages, $has_sftp_errors ) = $self->_normalize_sftp_sources( $self->_sftp_sources );
     push @messages, @$sftp_messages;
     if ( !@$sources ) {
         push @messages, $self->_configure_message( error => 'No EDItX SFTP sources are configured.' );
@@ -895,7 +981,7 @@ sub _manual_stage_prerequisites {
     my ( $procurement_messages, $has_procurement_errors ) = $self->_validate_procurement_settings( $procurement_settings, 1 );
     push @messages, @$procurement_messages;
 
-    my ( $sources, $sftp_messages, $has_sftp_errors ) = $self->_parse_sftp_sources_yaml( $self->_sftp_sources_yaml() );
+    my ( $sources, $sftp_messages, $has_sftp_errors ) = $self->_normalize_sftp_sources( $self->_sftp_sources );
     push @messages, @$sftp_messages;
     if ( !@$sources ) {
         push @messages, $self->_configure_message( error => 'No EDItX SFTP sources are configured.' );
@@ -949,7 +1035,7 @@ sub _manual_selected_sftp_sources {
 sub _manual_stage_source_options {
     my ( $self, $procurement_settings ) = @_;
 
-    my ( $sources ) = $self->_parse_sftp_sources_yaml( $self->_sftp_sources_yaml() );
+    my ( $sources ) = $self->_normalize_sftp_sources( $self->_sftp_sources );
     return [
         map {
             {
@@ -1332,16 +1418,7 @@ sub _manual_stage_file_already_imported {
 sub _tool_sftp_status {
     my ( $self, $procurement_settings ) = @_;
 
-    my $saved_sftp_sources_yaml = $self->retrieve_data('sftp_sources_yaml') // '';
-    if ( $saved_sftp_sources_yaml !~ /\S/ ) {
-        return {
-            count      => 0,
-            has_errors => 1,
-            messages   => [ $self->_configure_message( warning => 'No SFTP sources are saved in the EDItX plugin configuration.' ) ],
-        };
-    }
-
-    my ( $sources, $messages, $has_errors ) = $self->_parse_sftp_sources_yaml($saved_sftp_sources_yaml);
+    my ( $sources, $messages, $has_errors ) = $self->_normalize_sftp_sources( $self->_sftp_sources );
     my $default_local_dir = $procurement_settings->{import_tmp_path} // '';
 
     if ( !$has_errors && !@$sources ) {
@@ -1383,7 +1460,6 @@ sub _output_tool_page {
         manual_run_available   => !$sftp_status->{has_errors} && $sftp_status->{count} ? 1 : 0,
         configure_href         => $self->plugin_method_url('configure'),
         tool_href              => $self->plugin_method_url('tool'),
-        css_href               => $self->static_asset_url('static_files/editx.css'),
         plugin_display_version => $self->plugin_display_version(),
     );
 
@@ -1394,22 +1470,24 @@ sub _output_configure_page {
     my ( $self, %params ) = @_;
 
     my $template = $self->get_template( { file => 'configure.tt' } );
+    my $itemtypes = $self->_itemtypes();
     $template->param(
-        mapping_csv            => $params{mapping_csv},
-        sftp_sources_yaml      => $params{sftp_sources_yaml},
+        mapping_rows           => $params{mapping_rows},
+        edit_mapping_onix_code => $params{edit_mapping_onix_code},
+        sftp_sources           => $params{sftp_sources},
         procurement_settings   => $params{procurement_settings},
         messages               => $params{messages},
         nightly_sync_enabled   => $params{nightly_sync_enabled},
-        saved                  => $params{saved},
-        itemtypes_text         => join( ', ', @{ $self->_itemtypes() } ),
+        itemtypes              => $itemtypes,
+        itemtypes_text         => join( ', ', @{$itemtypes} ),
         locations_text         => join( ', ', @{ $self->_authorised_values('LOC') } ),
         branches_text          => join( ', ', @{ $self->_branches() } ),
-        last_configured_by     => $self->retrieve_data('last_configured_by'),
-        last_upgraded          => $self->retrieve_data('last_upgraded'),
+        last_configured_by     => scalar $self->_last_configured_by_context(),
+        last_upgraded          => scalar $self->retrieve_data('last_upgraded'),
         recommended_import_paths => $self->_recommended_import_paths(),
+        recommended_sftp_paths   => $self->_recommended_sftp_paths(),
         configure_href         => $self->plugin_method_url('configure'),
         tool_href              => $self->plugin_method_url('tool'),
-        css_href               => $self->static_asset_url('static_files/editx.css'),
         plugin_display_version => $self->plugin_display_version(),
         runtime_log_level      => $params{runtime_log_level} || $self->_runtime_log_level(),
         runtime_log_levels     => Koha::Plugin::Fi::KohaSuomi::Editx::RuntimeLog->levels,
@@ -1417,13 +1495,251 @@ sub _output_configure_page {
         runtime_log_tail       => Koha::Plugin::Fi::KohaSuomi::Editx::RuntimeLog->tail,
     );
 
-    return $self->output_html( $template->output() );
+    return $self->output_html(
+        $template->output(),
+        undef,
+        undef,
+        undef,
+        Koha::Plugin::Fi::KohaSuomi::Editx::FlashCookie->merge_cookies(
+            $self->{_auth_cookies},
+            $params{cookies},
+        )
+    );
+}
+
+sub _output_productform_mapping_csv {
+    my ($self) = @_;
+
+    my $cgi = $self->{'cgi'};
+    print $cgi->header(
+        -type       => 'text/csv; charset=utf-8',
+        -attachment => 'editx-productform-mappings.csv',
+    );
+    print $self->_productform_mapping_csv();
+
+    return;
+}
+
+sub _handle_productform_mapping_action {
+    my ( $self, %params ) = @_;
+
+    my $cgi = $params{cgi};
+    my $messages = $params{messages} || [];
+
+    if ( !$self->_csrf_token_valid($cgi) ) {
+        push @{$messages}, $self->_configure_message( error => 'ProductForm mapping was not changed because the security token was invalid. Reload the page and try again.' );
+        $self->_output_configure_page(
+            mapping_rows           => $self->_productform_mapping_rows(),
+            sftp_sources           => $params{sftp_sources},
+            procurement_settings   => $params{procurement_settings},
+            messages               => $messages,
+            nightly_sync_enabled   => $params{nightly_sync_enabled},
+            runtime_log_level      => $params{runtime_log_level},
+            edit_mapping_onix_code => scalar $cgi->param('mapping_original_onix_code'),
+        );
+        return 1;
+    }
+
+    if ( $cgi->param('import_mapping_csv') ) {
+        return $self->_handle_productform_mapping_csv_import(%params);
+    }
+
+    if ( $cgi->param('delete_mapping_row') ) {
+        my $onix_code = $self->_trim_csv_value( scalar $cgi->param('delete_mapping_row') );
+        my $delete_messages = $self->_delete_productform_mapping($onix_code);
+        push @{$messages}, @{$delete_messages};
+        if ( @{$delete_messages} ) {
+            $self->_output_configure_page(
+                mapping_rows           => $self->_productform_mapping_rows(),
+                sftp_sources           => $params{sftp_sources},
+                procurement_settings   => $params{procurement_settings},
+                messages               => $messages,
+                nightly_sync_enabled   => $params{nightly_sync_enabled},
+                runtime_log_level      => $params{runtime_log_level},
+            );
+            return 1;
+        }
+
+        $self->_store_last_configured_by();
+        $self->_redirect_configure_with_flash('productform_mapping_deleted');
+        return 1;
+    }
+
+    my ( $row, $edit_mapping_onix_code, $action_code );
+    if ( $cgi->param('update_mapping_row') ) {
+        $row = $self->_productform_mapping_row_from_cgi( $cgi, 'edit_mapping', 'Mapping row' );
+        $edit_mapping_onix_code = $self->_trim_csv_value( scalar $cgi->param('mapping_original_onix_code') );
+        $action_code = 'productform_mapping_updated';
+    } else {
+        $row = $self->_productform_mapping_row_from_cgi( $cgi, 'add_mapping', 'New mapping row' );
+        $action_code = 'productform_mapping_added';
+    }
+
+    my ( $rows, $row_messages, $has_blocking_errors ) = $self->_normalize_productform_mapping_rows( [$row] );
+    push @{$messages}, @{$row_messages};
+    if ($has_blocking_errors) {
+        $self->_output_configure_page(
+            mapping_rows           => $self->_productform_mapping_rows(),
+            sftp_sources           => $params{sftp_sources},
+            procurement_settings   => $params{procurement_settings},
+            messages               => $messages,
+            nightly_sync_enabled   => $params{nightly_sync_enabled},
+            runtime_log_level      => $params{runtime_log_level},
+            edit_mapping_onix_code => $edit_mapping_onix_code,
+        );
+        return 1;
+    }
+
+    my $save_messages = $cgi->param('update_mapping_row')
+        ? $self->_update_productform_mapping( $edit_mapping_onix_code, $rows->[0] )
+        : $self->_upsert_productform_mapping( $rows->[0] );
+    push @{$messages}, @{$save_messages};
+    if ( @{$save_messages} ) {
+        $self->_output_configure_page(
+            mapping_rows           => $self->_productform_mapping_rows(),
+            sftp_sources           => $params{sftp_sources},
+            procurement_settings   => $params{procurement_settings},
+            messages               => $messages,
+            nightly_sync_enabled   => $params{nightly_sync_enabled},
+            runtime_log_level      => $params{runtime_log_level},
+            edit_mapping_onix_code => $edit_mapping_onix_code,
+        );
+        return 1;
+    }
+
+    $self->_store_last_configured_by();
+    $self->_redirect_configure_with_flash($action_code);
+    return 1;
+}
+
+sub _handle_productform_mapping_csv_import {
+    my ( $self, %params ) = @_;
+
+    my $cgi = $params{cgi};
+    my $messages = $params{messages} || [];
+    my $mapping_csv_import = $self->_uploaded_productform_mapping_csv($cgi);
+
+    if ( !defined $mapping_csv_import ) {
+        push @{$messages}, $self->_configure_message( error => 'Choose a ProductForm mapping CSV file before importing.' );
+        $self->_output_configure_page(
+            mapping_rows         => $self->_productform_mapping_rows(),
+            sftp_sources         => $params{sftp_sources},
+            procurement_settings => $params{procurement_settings},
+            messages             => $messages,
+            nightly_sync_enabled => $params{nightly_sync_enabled},
+            runtime_log_level    => $params{runtime_log_level},
+        );
+        return 1;
+    }
+
+    my ( $rows, $parse_messages, $has_blocking_errors ) = $self->_parse_productform_mapping_csv($mapping_csv_import);
+    push @{$messages}, @{$parse_messages};
+    if ($has_blocking_errors) {
+        $self->_output_configure_page(
+            mapping_rows         => $self->_productform_mapping_rows(),
+            sftp_sources         => $params{sftp_sources},
+            procurement_settings => $params{procurement_settings},
+            messages             => $messages,
+            nightly_sync_enabled => $params{nightly_sync_enabled},
+            runtime_log_level    => $params{runtime_log_level},
+        );
+        return 1;
+    }
+
+    my $save_messages = $self->_save_productform_mappings($rows);
+    push @{$messages}, @{$save_messages};
+    if ( @{$save_messages} ) {
+        $self->_output_configure_page(
+            mapping_rows         => $self->_productform_mapping_rows(),
+            sftp_sources         => $params{sftp_sources},
+            procurement_settings => $params{procurement_settings},
+            messages             => $messages,
+            nightly_sync_enabled => $params{nightly_sync_enabled},
+            runtime_log_level    => $params{runtime_log_level},
+        );
+        return 1;
+    }
+
+    $self->_store_last_configured_by();
+    $self->_redirect_configure_with_flash('productform_mapping_imported');
+    return 1;
+}
+
+sub _redirect_configure_with_flash {
+    my ( $self, $code ) = @_;
+
+    Koha::Plugin::Fi::KohaSuomi::Editx::FlashCookie->redirect_with_flash(
+        {
+            cgi       => $self->{'cgi'},
+            uri       => $self->plugin_method_url('configure'),
+            namespace => 'editx_configure',
+            code      => $code,
+            cookies   => $self->{_auth_cookies},
+        }
+    );
+
+    return;
+}
+
+sub _configure_flash_message {
+    my ( $self, $code ) = @_;
+
+    return unless defined $code && length $code;
+
+    my %messages = (
+        configuration_saved          => [ success => 'EDItX plugin configuration saved.' ],
+        productform_mapping_added    => [ success => 'ProductForm mapping row added.' ],
+        productform_mapping_updated  => [ success => 'ProductForm mapping row updated.' ],
+        productform_mapping_deleted  => [ success => 'ProductForm mapping row deleted.' ],
+        productform_mapping_imported => [ success => 'ProductForm mapping CSV imported.' ],
+    );
+
+    return unless $messages{$code};
+
+    return $self->_configure_message( @{ $messages{$code} } );
+}
+
+sub _store_last_configured_by {
+    my ($self) = @_;
+
+    $self->store_data(
+        {
+            last_configured_by => ( C4::Context->userenv || {} )->{'number'},
+        }
+    );
+
+    return;
+}
+
+sub _last_configured_by_context {
+    my ($self) = @_;
+
+    my $borrowernumber = $self->retrieve_data('last_configured_by');
+    return unless defined $borrowernumber && length $borrowernumber;
+
+    my $patron = eval { Koha::Patrons->find($borrowernumber) };
+    if ($patron) {
+        my $label = join q{ }, grep { defined $_ && length $_ } ( $patron->firstname, $patron->surname );
+        $label ||= $patron->cardnumber;
+        $label ||= 'borrowernumber ' . $borrowernumber;
+
+        return {
+            borrowernumber => $borrowernumber,
+            label          => $label,
+            href           => '/cgi-bin/koha/members/moremember.pl?borrowernumber=' . url_escape($borrowernumber),
+        };
+    }
+
+    return {
+        borrowernumber => $borrowernumber,
+        label          => 'borrowernumber ' . $borrowernumber,
+    };
 }
 
 sub _write_sftp_config_file {
     my ( $self, $koha_instance ) = @_;
 
-    my ( $sources, $messages, $has_errors ) = $self->_parse_sftp_sources_yaml( $self->_sftp_sources_yaml() );
+    my ( $sources, $messages, $has_errors ) = $self->_normalize_sftp_sources( $self->_sftp_sources );
     die join( "\n", map { $_->{text} } @$messages ) . "\n" if $has_errors;
     die "No EDItX SFTP sources configured.\n" unless @$sources;
     $self->_log_runtime( debug => 'Writing temporary EDItX SFTP configuration', { source_count => scalar @$sources } );
@@ -1474,10 +1790,8 @@ sub _run_nightly_sync {
 
     $options ||= {};
 
-    my $koha_instance = $ENV{KOHA_INSTANCE} || $self->_koha_instance();
-    die "KOHA_INSTANCE is not set and could not be detected from KOHA_CONF." unless $koha_instance;
-
-    local $ENV{KOHA_INSTANCE} = $koha_instance;
+    my $koha_instance = $self->_koha_instance();
+    die "Koha instance could not be detected from Koha configuration." unless $koha_instance;
 
     my $plugin_path = $self->bundle_path();
     my $fetch_script = "$plugin_path/cronjobs/fetch_editx_sftp.sh";
@@ -1498,13 +1812,12 @@ sub _run_nightly_sync {
 
     my $success = eval {
         $sftp_config_file = $self->_write_sftp_config_file($koha_instance);
-        local $ENV{EDITX_SFTP_CONFIG} = $sftp_config_file;
         local $ENV{EDITX_RUNTIME_LOG} = Koha::Plugin::Fi::KohaSuomi::Editx::RuntimeLog->path;
         local $ENV{EDITX_RUNTIME_LOG_LEVEL} = $self->_runtime_log_level();
 
         $self->_log_runtime( info => 'Starting EDItX synchronization chain', { operation => 'sync', koha_instance => $koha_instance } );
         $self->_sync_print( $options, "Starting EDItX nightly synchronization for $koha_instance.\n" );
-        $self->_run_command( $options, $fetch_script );
+        $self->_run_command( $options, $fetch_script, $sftp_config_file, $koha_instance );
         $self->_run_command( $options, $^X, $import_script );
         $self->_sync_print( $options, "Finished EDItX nightly synchronization for $koha_instance.\n" );
         $self->_log_runtime( info => 'Finished EDItX synchronization chain', { operation => 'sync', koha_instance => $koha_instance } );
@@ -1667,8 +1980,24 @@ sub _manual_sync_result {
 sub _koha_instance {
     my ($self) = @_;
 
-    return $ENV{KOHA_INSTANCE} if $ENV{KOHA_INSTANCE};
-    return $1 if ( $ENV{KOHA_CONF} // '' ) =~ m{/etc/koha/sites/([^/]+)/koha-conf\.xml\z};
+    return $INSTANCE;
+}
+
+sub _guess_koha_conf_path {
+    my $koha_conf = eval {
+        require Koha::Config;
+        Koha::Config->guess_koha_conf();
+    };
+
+    return $koha_conf || '';
+}
+
+sub _instance_from_koha_conf_path {
+    my ($koha_conf) = @_;
+
+    return unless defined $koha_conf;
+    return $1 if $koha_conf =~ m{\A/etc/koha/sites/([^/]+)/koha-conf\.xml\z};
+
     return;
 }
 
@@ -1681,12 +2010,71 @@ sub _nightly_sync_enabled {
 sub _sftp_sources_yaml {
     my ($self) = @_;
 
+    my $config_json = $self->retrieve_data( Koha::Plugin::Fi::KohaSuomi::Editx::Config::CONFIG_KEY() );
+    if ( defined $config_json && $config_json =~ /\S/ ) {
+        return Dump( { sources => $self->_sftp_sources } );
+    }
+
     my $sftp_sources_yaml = $self->retrieve_data('sftp_sources_yaml');
     return defined $sftp_sources_yaml ? $sftp_sources_yaml : $self->_empty_sftp_sources_yaml();
 }
 
 sub _empty_sftp_sources_yaml {
     return "sources: []\n";
+}
+
+sub _editx_config {
+    my ($self) = @_;
+
+    return Koha::Plugin::Fi::KohaSuomi::Editx::Config->load($self);
+}
+
+sub _sftp_sources {
+    my ($self) = @_;
+
+    return Koha::Plugin::Fi::KohaSuomi::Editx::Config->sftp_sources( $self->_editx_config );
+}
+
+sub _sftp_sources_from_cgi {
+    my ( $self, $cgi ) = @_;
+
+    my @ids = $cgi->multi_param('sftp_id');
+    my @keys = qw(
+        id host port user identity_file remote_dir local_dir pattern after_download remote_archive_dir
+        known_hosts_file strict_host_key_checking ssh_config
+    );
+    my %values = (
+        id                       => \@ids,
+        host                     => [ $cgi->multi_param('sftp_host') ],
+        port                     => [ $cgi->multi_param('sftp_port') ],
+        user                     => [ $cgi->multi_param('sftp_user') ],
+        identity_file            => [ $cgi->multi_param('sftp_identity_file') ],
+        remote_dir               => [ $cgi->multi_param('sftp_remote_dir') ],
+        local_dir                => [ $cgi->multi_param('sftp_local_dir') ],
+        pattern                  => [ $cgi->multi_param('sftp_pattern') ],
+        after_download           => [ $cgi->multi_param('sftp_after_download') ],
+        remote_archive_dir       => [ $cgi->multi_param('sftp_remote_archive_dir') ],
+        known_hosts_file         => [ $cgi->multi_param('sftp_known_hosts_file') ],
+        strict_host_key_checking => [ $cgi->multi_param('sftp_strict_host_key_checking') ],
+        ssh_config               => [ $cgi->multi_param('sftp_ssh_config') ],
+    );
+
+    my $max_index = -1;
+    for my $key (@keys) {
+        $max_index = $#{ $values{$key} } if $#{ $values{$key} } > $max_index;
+    }
+
+    my @sources;
+    for my $index ( 0 .. $max_index ) {
+        my %source;
+        for my $key (@keys) {
+            $source{$key} = $values{$key}->[$index];
+        }
+        next unless grep { defined $_ && $_ ne '' } @source{qw(id host user remote_dir)};
+        push @sources, \%source;
+    }
+
+    return \@sources;
 }
 
 sub _parse_productform_mapping_csv {
@@ -1763,30 +2151,135 @@ sub _parse_productform_mapping_csv {
     return ( \@rows, \@messages, $has_blocking_errors );
 }
 
+sub _uploaded_productform_mapping_csv {
+    my ( $self, $cgi ) = @_;
+
+    return unless $cgi;
+
+    my $upload = $cgi->upload('mapping_csv_file');
+    return unless $upload;
+
+    local $/;
+    my $mapping_csv = <$upload>;
+
+    return $mapping_csv // '';
+}
+
+sub _productform_mapping_row_from_cgi {
+    my ( $self, $cgi, $prefix, $label ) = @_;
+
+    return {
+        onix_code               => $self->_trim_csv_value( scalar $cgi->param( $prefix . '_onix_code' ) ),
+        productform             => $self->_trim_csv_value( scalar $cgi->param( $prefix . '_productform' ) ),
+        productform_alternative => $self->_trim_csv_value( scalar $cgi->param( $prefix . '_productform_alternative' ) ),
+        _label                  => $label,
+    };
+}
+
+sub _productform_mapping_rows_from_cgi {
+    my ( $self, $cgi ) = @_;
+
+    my @onix_codes = $cgi->multi_param('mapping_onix_code');
+    my @productforms = $cgi->multi_param('mapping_productform');
+    my @productform_alternatives = $cgi->multi_param('mapping_productform_alternative');
+
+    my $max_index = $#onix_codes;
+    $max_index = $#productforms if $#productforms > $max_index;
+    $max_index = $#productform_alternatives if $#productform_alternatives > $max_index;
+
+    my @rows;
+    for my $index ( 0 .. $max_index ) {
+        my $row = {
+            onix_code               => $self->_trim_csv_value( $onix_codes[$index] ),
+            productform             => $self->_trim_csv_value( $productforms[$index] ),
+            productform_alternative => $self->_trim_csv_value( $productform_alternatives[$index] ),
+        };
+        next unless grep { defined $_ && $_ ne '' } values %{$row};
+        $row->{_label} = 'Row ' . ( $index + 1 );
+        push @rows, $row;
+    }
+
+    return \@rows;
+}
+
+sub _normalize_productform_mapping_rows {
+    my ( $self, $raw_rows ) = @_;
+
+    my %itemtypes = map { $_ => 1 } @{ $self->_itemtypes() };
+    my ( @rows, @messages, %seen_onix_codes );
+    my $has_blocking_errors;
+
+    for my $index ( 0 .. $#$raw_rows ) {
+        my $raw = $raw_rows->[$index] || {};
+        my $label = $raw->{_label} || 'Row ' . ( $index + 1 );
+        my $onix_code = $self->_trim_csv_value( $raw->{onix_code} );
+        my $productform = $self->_trim_csv_value( $raw->{productform} );
+        my $productform_alternative = $self->_trim_csv_value( $raw->{productform_alternative} );
+
+        unless ($onix_code) {
+            push @messages, $self->_configure_message( error => "$label has no ONIX code." );
+            $has_blocking_errors = 1;
+            next;
+        }
+
+        if ( $seen_onix_codes{$onix_code}++ ) {
+            push @messages, $self->_configure_message( warning => "$label repeats ONIX code '$onix_code'; the later value will win." );
+        }
+
+        if ( $productform && !$itemtypes{$productform} ) {
+            push @messages, $self->_configure_message( warning => "$label: item type '$productform' does not exist; productform was stored as NULL." );
+            $productform = undef;
+        }
+
+        if ( $productform_alternative && !$itemtypes{$productform_alternative} ) {
+            push @messages, $self->_configure_message( warning => "$label: item type '$productform_alternative' does not exist; productform_alternative was stored as NULL." );
+            $productform_alternative = undef;
+        }
+
+        push @rows,
+            {
+                onix_code               => $onix_code,
+                productform             => $productform,
+                productform_alternative => $productform_alternative,
+            };
+    }
+
+    unless (@rows) {
+        push @messages, $self->_configure_message( error => 'No product form mappings found.' );
+        $has_blocking_errors = 1;
+    }
+
+    return ( \@rows, \@messages, $has_blocking_errors );
+}
+
 sub _parse_sftp_sources_yaml {
     my ( $self, $sftp_sources_yaml ) = @_;
 
-    my ( @messages, %seen_ids );
-    my $has_blocking_errors;
     my $config = eval { Load($sftp_sources_yaml) };
 
     if ($@) {
-        push @messages, $self->_configure_message( error => "SFTP YAML parse failed: $@" );
-        return ( [], \@messages, 1 );
+        return ( [], [ $self->_configure_message( error => "SFTP YAML parse failed: $@" ) ], 1 );
     }
 
     $config ||= {};
     if ( ref $config ne 'HASH' ) {
-        push @messages, $self->_configure_message( error => 'SFTP YAML must be a mapping with a sources list.' );
-        return ( [], \@messages, 1 );
+        return ( [], [ $self->_configure_message( error => 'SFTP YAML must be a mapping with a sources list.' ) ], 1 );
     }
 
     my $sources = $config->{sources} || [];
     if ( ref $sources ne 'ARRAY' ) {
-        push @messages, $self->_configure_message( error => 'SFTP YAML sources must be a list.' );
-        return ( [], \@messages, 1 );
+        return ( [], [ $self->_configure_message( error => 'SFTP YAML sources must be a list.' ) ], 1 );
     }
 
+    return $self->_normalize_sftp_sources($sources);
+}
+
+sub _normalize_sftp_sources {
+    my ( $self, $sources ) = @_;
+
+    $sources ||= [];
+    my ( @messages, %seen_ids );
+    my $has_blocking_errors;
     my @sources;
     for my $index ( 0 .. $#$sources ) {
         my $source = $sources->[$index];
@@ -1838,6 +2331,9 @@ sub _parse_sftp_sources_yaml {
 
         if ( defined $normalized{port} && $normalized{port} !~ /\A[0-9]+\z/ ) {
             push @messages, $self->_configure_message( error => "SFTP source $source_number port '$normalized{port}' is not numeric." );
+            $has_blocking_errors = 1;
+        } elsif ( defined $normalized{port} && ( $normalized{port} < 1 || $normalized{port} > 65535 ) ) {
+            push @messages, $self->_configure_message( error => "SFTP source $source_number port '$normalized{port}' must be between 1 and 65535." );
             $has_blocking_errors = 1;
         }
 
@@ -1903,17 +2399,96 @@ sub _save_productform_mappings {
     return \@messages;
 }
 
-sub _productform_mapping_csv {
-    my ($self) = @_;
+sub _upsert_productform_mapping {
+    my ( $self, $row ) = @_;
 
     my $dbh = C4::Context->dbh;
     my $map_productform_table = $self->_quote_identifier( $self->get_qualified_table_name('map_productform') );
-    my $sth = $dbh->prepare( "
-        SELECT onix_code, productform, productform_alternative
-        FROM $map_productform_table
-        ORDER BY onix_code
-    " );
-    $sth->execute();
+    my @messages;
+
+    my $saved = eval {
+        my $sth = $dbh->prepare( "
+            INSERT INTO $map_productform_table (onix_code, productform, productform_alternative)
+            VALUES (?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+                productform = VALUES(productform),
+                productform_alternative = VALUES(productform_alternative)
+        " );
+        $sth->execute( $row->{onix_code}, $row->{productform}, $row->{productform_alternative} ) or die $dbh->errstr;
+        1;
+    };
+
+    if ( !$saved ) {
+        my $error = $@ || $dbh->errstr;
+        push @messages, $self->_configure_message( error => "Could not save product form mapping row: $error" );
+    }
+
+    return \@messages;
+}
+
+sub _update_productform_mapping {
+    my ( $self, $original_onix_code, $row ) = @_;
+
+    $original_onix_code = $self->_trim_csv_value($original_onix_code);
+    return [ $self->_configure_message( error => 'Could not update product form mapping row: original ONIX code is missing.' ) ]
+        unless $original_onix_code;
+
+    my $dbh = C4::Context->dbh;
+    my $map_productform_table = $self->_quote_identifier( $self->get_qualified_table_name('map_productform') );
+    my @messages;
+
+    my $saved = eval {
+        $dbh->begin_work;
+        if ( $original_onix_code ne $row->{onix_code} ) {
+            $dbh->do( "DELETE FROM $map_productform_table WHERE onix_code = ?", undef, $original_onix_code ) or die $dbh->errstr;
+        }
+        my $sth = $dbh->prepare( "
+            INSERT INTO $map_productform_table (onix_code, productform, productform_alternative)
+            VALUES (?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+                productform = VALUES(productform),
+                productform_alternative = VALUES(productform_alternative)
+        " );
+        $sth->execute( $row->{onix_code}, $row->{productform}, $row->{productform_alternative} ) or die $dbh->errstr;
+        $dbh->commit;
+        1;
+    };
+
+    if ( !$saved ) {
+        my $error = $@ || $dbh->errstr;
+        eval { $dbh->rollback };
+        push @messages, $self->_configure_message( error => "Could not update product form mapping row: $error" );
+    }
+
+    return \@messages;
+}
+
+sub _delete_productform_mapping {
+    my ( $self, $onix_code ) = @_;
+
+    $onix_code = $self->_trim_csv_value($onix_code);
+    return [ $self->_configure_message( error => 'Could not delete product form mapping row: ONIX code is missing.' ) ]
+        unless $onix_code;
+
+    my $dbh = C4::Context->dbh;
+    my $map_productform_table = $self->_quote_identifier( $self->get_qualified_table_name('map_productform') );
+    my @messages;
+
+    my $deleted = eval {
+        $dbh->do( "DELETE FROM $map_productform_table WHERE onix_code = ?", undef, $onix_code ) or die $dbh->errstr;
+        1;
+    };
+
+    if ( !$deleted ) {
+        my $error = $@ || $dbh->errstr;
+        push @messages, $self->_configure_message( error => "Could not delete product form mapping row: $error" );
+    }
+
+    return \@messages;
+}
+
+sub _productform_mapping_csv {
+    my ($self) = @_;
 
     my $csv = Text::CSV_XS->new(
         {
@@ -1926,7 +2501,7 @@ sub _productform_mapping_csv {
     open my $fh, '>', \$mapping_csv or die "Cannot write product form mapping CSV: $!";
     $csv->print( $fh, [qw(onix_code productform productform_alternative)] );
 
-    while ( my $row = $sth->fetchrow_hashref ) {
+    for my $row ( @{ $self->_productform_mapping_rows } ) {
         $csv->print(
             $fh,
             [
@@ -1940,6 +2515,26 @@ sub _productform_mapping_csv {
     close $fh;
 
     return $mapping_csv;
+}
+
+sub _productform_mapping_rows {
+    my ($self) = @_;
+
+    my $dbh = C4::Context->dbh;
+    my $map_productform_table = $self->_quote_identifier( $self->get_qualified_table_name('map_productform') );
+    my $sth = $dbh->prepare( "
+        SELECT onix_code, productform, productform_alternative
+        FROM $map_productform_table
+        ORDER BY onix_code
+    " );
+    $sth->execute();
+
+    my @rows;
+    while ( my $row = $sth->fetchrow_hashref ) {
+        push @rows, $row;
+    }
+
+    return \@rows;
 }
 
 sub _itemtypes {
@@ -2186,6 +2781,24 @@ sub _recommended_import_paths {
     };
 }
 
+sub _recommended_sftp_paths {
+    my ($self) = @_;
+
+    my $instance = $self->_koha_instance();
+    if ( defined $instance && $instance ne '' ) {
+        $instance =~ s/[^A-Za-z0-9_.-]/_/g;
+    } else {
+        $instance = '<instance>';
+    }
+
+    my $base = "/var/lib/koha/$instance/.ssh";
+
+    return {
+        identity_file    => "$base/editx_sftp",
+        known_hosts_file => "$base/known_hosts",
+    };
+}
+
 sub _shell_quote {
     my ( $self, $value ) = @_;
 
@@ -2266,23 +2879,6 @@ sub _csrf_token_valid {
             token      => scalar $cgi->param('csrf_token'),
         }
     );
-}
-
-sub _static_asset_version {
-    my ( $self, $path ) = @_;
-
-    my $version = $self->plugin_version();
-    $version =~ s/[^A-Za-z0-9_.-]+/_/g;
-
-    my @parts = ($version);
-    if ( my $bundle_path = $self->bundle_path ) {
-        my $full_path = File::Spec->catfile( $bundle_path, split m{/}, $path );
-        if ( my @stat = stat $full_path ) {
-            push @parts, $stat[9], $stat[7];
-        }
-    }
-
-    return join '-', @parts;
 }
 
 sub plugin_version {

@@ -25,8 +25,45 @@ if ($core_root) {
 
 my $plugin_class = 'Koha::Plugin::Fi::KohaSuomi::Editx';
 use_ok($plugin_class);
+use_ok('Koha::Plugin::Fi::KohaSuomi::Editx::Config');
 
 my $plugin = bless {}, $plugin_class;
+
+{
+    package KohaSuomi::Editx::TestCGI;
+
+    sub multi_param {
+        my ( $self, $name ) = @_;
+
+        return @{ $self->{$name} || [] };
+    }
+}
+
+{
+    package KohaSuomi::Editx::TestDbh;
+
+    sub new {
+        my ( $class, %args ) = @_;
+        $args{do_calls}     ||= [];
+        $args{select_calls} ||= [];
+        return bless \%args, $class;
+    }
+
+    sub do {
+        my ( $self, $sql ) = @_;
+
+        push @{ $self->{do_calls} }, $sql;
+        return exists $self->{do_result} ? $self->{do_result} : 1;
+    }
+
+    sub selectrow_array {
+        my ( $self, $sql ) = @_;
+
+        push @{ $self->{select_calls} }, $sql;
+        return shift @{ $self->{counts} } if $self->{counts} && @{ $self->{counts} };
+        return $self->{count} || 0;
+    }
+}
 
 sub _message_text {
     my ($messages) = @_;
@@ -50,6 +87,162 @@ sub _valid_procurement_settings {
         notification_mailfrom            => '',
     };
 }
+
+subtest 'Install table setup does not touch legacy tables' => sub {
+    no strict 'refs';
+    no warnings qw(once redefine);
+
+    my $dbh = KohaSuomi::Editx::TestDbh->new;
+    my %called;
+    local *C4::Context::dbh = sub { return $dbh; };
+    local *{ $plugin_class . '::get_qualified_table_name' } = sub {
+        my ( $self, $table_name ) = @_;
+        return "koha_plugin_fi_kohasuomi_editx_$table_name";
+    };
+    local *{ $plugin_class . '::_drop_map_productform_foreign_keys' } = sub { $called{drop_foreign_keys}++; return 1; };
+    local *{ $plugin_class . '::_allow_nullable_map_productform_columns' } = sub { $called{allow_nullable}++; return 1; };
+    local *{ $plugin_class . '::_ensure_sequences_row' } = sub { $called{ensure_sequences}++; return 1; };
+    local *{ $plugin_class . '::_migrate_legacy_sequences_table' } = sub { die 'install must not migrate legacy sequences'; };
+    local *{ $plugin_class . '::_migrate_legacy_map_productform_table' } = sub { die 'install must not migrate legacy ProductForm mappings'; };
+    local *{ $plugin_class . '::_migrate_legacy_procurement_file_table' } = sub { die 'install must not migrate legacy procurement files'; };
+
+    ok( $plugin->_install_or_upgrade_tables( migrate_legacy => 0 ), 'Install table setup succeeds without legacy migration' );
+    is( $called{ensure_sequences}, 1, 'Install still ensures the qualified sequences row' );
+    like( join( "\n", @{ $dbh->{do_calls} } ), qr{CREATE TABLE IF NOT EXISTS `koha_plugin_fi_kohasuomi_editx_map_productform`}, 'Install creates the qualified ProductForm table' );
+};
+
+subtest 'Upgrade table setup enables legacy migration' => sub {
+    no strict 'refs';
+    no warnings qw(once redefine);
+
+    my $dbh = KohaSuomi::Editx::TestDbh->new;
+    my %called;
+    local *C4::Context::dbh = sub { return $dbh; };
+    local *{ $plugin_class . '::get_qualified_table_name' } = sub {
+        my ( $self, $table_name ) = @_;
+        return "koha_plugin_fi_kohasuomi_editx_$table_name";
+    };
+    local *{ $plugin_class . '::_drop_map_productform_foreign_keys' } = sub { $called{drop_foreign_keys}++; return 1; };
+    local *{ $plugin_class . '::_allow_nullable_map_productform_columns' } = sub { $called{allow_nullable}++; return 1; };
+    local *{ $plugin_class . '::_ensure_sequences_row' } = sub { $called{ensure_sequences}++; return 1; };
+    local *{ $plugin_class . '::_table_exists' } = sub { return 0; };
+    local *{ $plugin_class . '::_migrate_legacy_sequences_table' } = sub { $called{migrate_sequences}++; return 1; };
+    local *{ $plugin_class . '::_migrate_legacy_map_productform_table' } = sub { $called{migrate_productform}++; return 1; };
+    local *{ $plugin_class . '::_migrate_legacy_procurement_file_table' } = sub { $called{migrate_procurement_file}++; return 1; };
+
+    ok( $plugin->_install_or_upgrade_tables( migrate_legacy => 1 ), 'Upgrade table setup succeeds with legacy migration enabled' );
+    is( $called{migrate_sequences}, 1, 'Upgrade migrates legacy sequences' );
+    is( $called{migrate_productform}, 1, 'Upgrade migrates legacy ProductForm mappings' );
+    is( $called{migrate_procurement_file}, 1, 'Upgrade migrates legacy procurement files' );
+};
+
+subtest 'Upgrade ignores legacy when qualified tables already exist' => sub {
+    no strict 'refs';
+    no warnings qw(once redefine);
+
+    my $dbh = KohaSuomi::Editx::TestDbh->new;
+    my %called;
+    local *C4::Context::dbh = sub { return $dbh; };
+    local *{ $plugin_class . '::get_qualified_table_name' } = sub {
+        my ( $self, $table_name ) = @_;
+        return "koha_plugin_fi_kohasuomi_editx_$table_name";
+    };
+    local *{ $plugin_class . '::_drop_map_productform_foreign_keys' } = sub { $called{drop_foreign_keys}++; return 1; };
+    local *{ $plugin_class . '::_allow_nullable_map_productform_columns' } = sub { $called{allow_nullable}++; return 1; };
+    local *{ $plugin_class . '::_ensure_sequences_row' } = sub { $called{ensure_sequences}++; return 1; };
+    local *{ $plugin_class . '::_table_exists' } = sub { return 1; };
+    local *{ $plugin_class . '::_migrate_legacy_sequences_table' } = sub { die 'upgrade must not inspect legacy sequences when the qualified table already exists'; };
+    local *{ $plugin_class . '::_migrate_legacy_map_productform_table' } = sub { die 'upgrade must not inspect legacy ProductForm mappings when the qualified table already exists'; };
+    local *{ $plugin_class . '::_migrate_legacy_procurement_file_table' } = sub { die 'upgrade must not inspect legacy procurement files when the qualified table already exists'; };
+
+    ok( $plugin->_install_or_upgrade_tables( migrate_legacy => 1 ), 'Upgrade table setup succeeds without legacy migration when qualified tables exist' );
+    is( $called{ensure_sequences}, 1, 'Upgrade still runs normal qualified-table maintenance' );
+};
+
+subtest 'ProductForm legacy migration imports into a newly created target and removes old tables' => sub {
+    no strict 'refs';
+    no warnings qw(once redefine);
+
+    my $dbh = KohaSuomi::Editx::TestDbh->new( counts => [ 0, 3 ] );
+    local *C4::Context::dbh = sub { return $dbh; };
+    local *{ $plugin_class . '::get_qualified_table_name' } = sub {
+        my ( $self, $table_name ) = @_;
+        return "koha_plugin_fi_kohasuomi_editx_$table_name";
+    };
+    local *{ $plugin_class . '::_table_exists' } = sub {
+        my ( $self, $table_name ) = @_;
+        return $table_name eq 'map_productform';
+    };
+
+    ok( $plugin->_migrate_legacy_map_productform_table, 'ProductForm migration succeeds from the legacy unqualified table' );
+    my $sql = join "\n", @{ $dbh->{do_calls} };
+    like( $sql, qr{INSERT INTO `koha_plugin_fi_kohasuomi_editx_map_productform`.*FROM `map_productform`}s, 'Legacy ProductForm rows are copied for a newly created target table' );
+    like( $sql, qr{DROP TABLE IF EXISTS `map_productform`}, 'Unqualified ProductForm legacy table is removed after upgrade migration' );
+    like( $sql, qr{DROP TABLE IF EXISTS `editx_map_productform`}, 'Older prefixed ProductForm legacy table name is also cleaned' );
+};
+
+subtest 'Structured config model stores stable settings and preserves scalar runtime-style keys outside the blob' => sub {
+    my $config = Koha::Plugin::Fi::KohaSuomi::Editx::Config->from_flat(
+        {
+            procurement_settings => {
+                import_tmp_path                  => '/var/lib/koha/kohadev/editx/tmp',
+                import_load_path                 => '/var/lib/koha/kohadev/editx/load',
+                import_archive_path              => '/var/lib/koha/kohadev/editx/archive',
+                import_failed_path               => '/var/lib/koha/kohadev/editx/fail',
+                import_failed_archived_path      => '/var/lib/koha/kohadev/editx/failed_archived',
+                authoriser                       => 51,
+                allowed_locations                => 'MAIN,STACK',
+                productform_alternative_triggers => 'STACK',
+                automatch_biblios                => 'yes',
+                use_finna_materialtype           => 'no',
+                notification_mailto              => 'editx@example.org',
+                notification_mailfrom            => 'koha@example.org',
+                runtime_log_level                => 'debug',
+            },
+            sftp_sources => [
+                {
+                    id         => 'alexandria',
+                    host       => 'sftp.example.org',
+                    user       => 'editx-user',
+                    remote_dir => '/out',
+                },
+            ],
+        }
+    );
+    my $json = Koha::Plugin::Fi::KohaSuomi::Editx::Config->to_json($config);
+
+    like( $json, qr{"sftp_sources"}, 'Structured config JSON stores SFTP sources' );
+    unlike( $json, qr{runtime_log_level}, 'Runtime log level is not packed into structured config JSON' );
+
+    my $settings = Koha::Plugin::Fi::KohaSuomi::Editx::Config->procurement_settings($config);
+    is( $settings->{authoriser}, 51, 'Structured config exposes flat procurement settings' );
+    is( $settings->{notification_mailto}, 'editx@example.org', 'Structured config exposes notification settings' );
+    is( $config->{sftp_sources}->[0]->{port}, 22, 'Structured config defaults SFTP port' );
+    is( $config->{sftp_sources}->[0]->{pattern}, '*.xml', 'Structured config defaults SFTP pattern' );
+};
+
+subtest 'Structured config model migrates legacy plugin keys' => sub {
+    my $config = Koha::Plugin::Fi::KohaSuomi::Editx::Config->from_plugin_data(
+        {
+            procurement_import_tmp_path       => '/tmp/editx',
+            procurement_authoriser            => 51,
+            procurement_notification_mailto   => 'editx@example.org',
+            procurement_notification_mailfrom => 'koha@example.org',
+            sftp_sources_yaml                 => <<'YAML',
+sources:
+  - id: legacy
+    host: sftp.example.org
+    user: editx-user
+    remote_dir: /out
+YAML
+        }
+    );
+
+    my $settings = Koha::Plugin::Fi::KohaSuomi::Editx::Config->procurement_settings($config);
+    is( $settings->{import_tmp_path}, '/tmp/editx', 'Legacy import folder is migrated' );
+    is( $settings->{notification_mailfrom}, 'koha@example.org', 'Legacy notification sender is migrated' );
+    is( $config->{sftp_sources}->[0]->{id}, 'legacy', 'Legacy SFTP YAML source is migrated' );
+};
 
 subtest 'SFTP YAML parser normalizes optional source fields' => sub {
     my ( $sources, $messages, $has_blocking_errors ) = $plugin->_parse_sftp_sources_yaml(<<'YAML');
@@ -80,18 +273,24 @@ sources:
     host: sftp.example.org
     user: editx-user
     remote_dir: /out
+  - id: out_of_range
+    host: sftp.example.org
+    user: editx-user
+    remote_dir: /out
+    port: 70000
 YAML
 
     my $message_text = _message_text($messages);
 
     ok( $has_blocking_errors, 'Invalid SFTP YAML has blocking errors' );
-    is( scalar @$sources, 2, 'Parser still returns normalized source entries for reporting' );
+    is( scalar @$sources, 3, 'Parser still returns normalized source entries for reporting' );
     like( $message_text, qr{SFTP source 1 has no host\.}, 'Parser reports missing host' );
     like( $message_text, qr{SFTP source 1 has no user\.}, 'Parser reports missing user' );
     like( $message_text, qr{SFTP source 1 has no remote_dir\.}, 'Parser reports missing remote_dir' );
     like( $message_text, qr{SFTP source 1 port 'abc' is not numeric\.}, 'Parser reports a nonnumeric port' );
     like( $message_text, qr{SFTP source 1 uses archive but has no remote_archive_dir\.}, 'Parser reports archive without remote_archive_dir' );
     like( $message_text, qr{SFTP source 2 repeats id 'invalid-id'\.}, 'Parser reports duplicate source ids' );
+    like( $message_text, qr{SFTP source 3 port '70000' must be between 1 and 65535\.}, 'Parser reports an out-of-range port' );
 };
 
 subtest 'SFTP YAML parser allows simple globs and rejects unsafe patterns' => sub {
@@ -401,12 +600,35 @@ subtest 'Tool SFTP status rejects an empty saved source list' => sub {
     like( $message_text, qr{No SFTP sources are saved in the EDItX plugin configuration\.}, 'Tool status reports missing SFTP sources' );
 };
 
+subtest 'Koha instance detection uses the Koha configuration path' => sub {
+    no strict 'refs';
+    no warnings qw(once redefine);
+
+    local $ENV{ 'KOHA' . '_INSTANCE' } = 'kofipre';
+    my $detect_instance = \&{ $plugin_class . '::_instance_from_koha_conf_path' };
+    local ${ $plugin_class . '::INSTANCE' } = $detect_instance->('/etc/koha/sites/kohadev/koha-conf.xml');
+
+    is( $detect_instance->('/etc/koha/sites/kohadev/koha-conf.xml'), 'kohadev', 'Koha instance parser reads the Debian KOHA_CONF path' );
+    is( $plugin->_koha_instance(), 'kohadev', 'Koha instance comes from cached KOHA_CONF parsing, not unofficial instance environment' );
+};
+
+subtest 'Koha instance detection does not guess from non-Debian paths' => sub {
+    no strict 'refs';
+    no warnings qw(once redefine);
+
+    my $detect_instance = \&{ $plugin_class . '::_instance_from_koha_conf_path' };
+    local ${ $plugin_class . '::INSTANCE' } = $detect_instance->('/home/koha/etc/koha-conf.xml');
+
+    is( $plugin->_koha_instance(), undef, 'Koha instance is not guessed when KOHA_CONF is not a Debian site path' );
+};
+
 subtest 'Recommended import paths are scoped to the Koha instance' => sub {
     no strict 'refs';
     no warnings qw(once redefine);
     local *{ $plugin_class . '::_koha_instance' } = sub { return 'kohadev'; };
 
     my $paths = $plugin->_recommended_import_paths();
+    my $sftp_paths = $plugin->_recommended_sftp_paths();
 
     is( $paths->{base}, '/var/lib/koha/kohadev/editx', 'Recommended base path uses the detected Koha instance' );
     is( $paths->{tmp}, '/var/lib/koha/kohadev/editx/tmp', 'Recommended tmp path is below the base path' );
@@ -414,7 +636,29 @@ subtest 'Recommended import paths are scoped to the Koha instance' => sub {
     is( $paths->{archive}, '/var/lib/koha/kohadev/editx/archive', 'Recommended archive path is below the base path' );
     is( $paths->{fail}, '/var/lib/koha/kohadev/editx/fail', 'Recommended fail path is below the base path' );
     is( $paths->{failed_archived}, '/var/lib/koha/kohadev/editx/failed_archived', 'Recommended failed archive path is below the base path' );
+    is( $sftp_paths->{identity_file}, '/var/lib/koha/kohadev/.ssh/editx_sftp', 'Recommended SFTP identity file uses the detected Koha instance .ssh directory' );
+    is( $sftp_paths->{known_hosts_file}, '/var/lib/koha/kohadev/.ssh/known_hosts', 'Recommended SFTP known hosts file uses the detected Koha instance .ssh directory' );
     unlike( $paths->{base}, qr{/spool/}, 'Recommended base path avoids the root-owned Koha spool area' );
+};
+
+subtest 'Blank SFTP table defaults do not create an empty source' => sub {
+    my $cgi = bless {
+        sftp_id                       => [''],
+        sftp_host                     => [''],
+        sftp_port                     => ['22'],
+        sftp_user                     => [''],
+        sftp_identity_file            => ['/var/lib/koha/kohadev/.ssh/editx_sftp'],
+        sftp_remote_dir               => [''],
+        sftp_local_dir                => [''],
+        sftp_pattern                  => ['*.xml'],
+        sftp_after_download           => ['keep'],
+        sftp_remote_archive_dir       => [''],
+        sftp_known_hosts_file         => ['/var/lib/koha/kohadev/.ssh/known_hosts'],
+        sftp_strict_host_key_checking => ['yes'],
+        sftp_ssh_config               => [''],
+    }, 'KohaSuomi::Editx::TestCGI';
+
+    is_deeply( $plugin->_sftp_sources_from_cgi($cgi), [], 'Path-only SFTP defaults are ignored until a real source is entered' );
 };
 
 subtest 'Procurement settings prefill missing import folders from the Koha instance' => sub {
@@ -439,7 +683,11 @@ subtest 'Procurement Config applies the same import folder defaults for console 
     no warnings qw(once redefine);
     require Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Config;
 
-    local $ENV{KOHA_INSTANCE} = 'kohadev';
+    local $ENV{ 'KOHA' . '_INSTANCE' } = 'kofipre';
+    local $Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Config::INSTANCE = 'kohadev';
+    local *Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Config::kohaConfigPath = sub {
+        return '/etc/koha/sites/kohadev/koha-conf.xml';
+    };
     local *Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Config::loadConfigXml = sub {
         return { settings => {}, notifications => {} };
     };
@@ -449,11 +697,11 @@ subtest 'Procurement Config applies the same import folder defaults for console 
 
     my $settings = Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Config->new->getSettings;
 
-    is( $settings->{settings}->{import_tmp_path}, '/var/lib/koha/kohadev/editx/tmp', 'Console config defaults tmp folder from KOHA_INSTANCE' );
-    is( $settings->{settings}->{import_load_path}, '/var/lib/koha/kohadev/editx/load', 'Console config defaults load folder from KOHA_INSTANCE' );
-    is( $settings->{settings}->{import_archive_path}, '/var/lib/koha/kohadev/editx/archive', 'Console config defaults archive folder from KOHA_INSTANCE' );
-    is( $settings->{settings}->{import_failed_path}, '/var/lib/koha/kohadev/editx/fail', 'Console config defaults failed folder from KOHA_INSTANCE' );
-    is( $settings->{settings}->{import_failed_archived_path}, '/var/lib/koha/kohadev/editx/failed_archived', 'Console config defaults failed archive folder from KOHA_INSTANCE' );
+    is( $settings->{settings}->{import_tmp_path}, '/var/lib/koha/kohadev/editx/tmp', 'Console config defaults tmp folder from KOHA_CONF' );
+    is( $settings->{settings}->{import_load_path}, '/var/lib/koha/kohadev/editx/load', 'Console config defaults load folder from KOHA_CONF' );
+    is( $settings->{settings}->{import_archive_path}, '/var/lib/koha/kohadev/editx/archive', 'Console config defaults archive folder from KOHA_CONF' );
+    is( $settings->{settings}->{import_failed_path}, '/var/lib/koha/kohadev/editx/fail', 'Console config defaults failed folder from KOHA_CONF' );
+    is( $settings->{settings}->{import_failed_archived_path}, '/var/lib/koha/kohadev/editx/failed_archived', 'Console config defaults failed archive folder from KOHA_CONF' );
 };
 
 subtest 'Procurement folder validation accepts creatable absolute paths' => sub {

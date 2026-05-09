@@ -5,12 +5,15 @@ use XML::Simple;
 use File::Basename;
 use Data::Dumper;
 use C4::Context;
+use Koha::Plugin::Fi::KohaSuomi::Editx::Config;
 use Koha::Plugin::Fi::KohaSuomi::Editx::RuntimeLog;
 
 use constant PLUGIN_CLASS => 'Koha::Plugin::Fi::KohaSuomi::Editx';
 
 my $singleton;
 my $configFile = "procurement-config.xml";
+my $kohaConfigPath = _guess_koha_conf_path();
+our $INSTANCE = _instance_from_koha_conf_path($kohaConfigPath);
 
 my @PLUGIN_SETTING_KEYS = qw(
     import_tmp_path
@@ -49,10 +52,9 @@ sub loadConfigXml{
 
 sub getConfigXmlPath{
     my $self = shift;
-    my $kohaConfigPath = $ENV{'KOHA_CONF'} // '';
+    my $kohaConfigPath = $self->kohaConfigPath();
     return $configFile unless $kohaConfigPath;
 
-    my $kohaPath = $ENV{'KOHA_PATH'};
     my($file, $path, $ext) = fileparse($kohaConfigPath);
     my $procurementConfigPath = $path . $configFile; # use the same path as koha_config.xml file
     return $procurementConfigPath;
@@ -132,18 +134,29 @@ sub recommendedImportPaths {
 sub kohaInstance {
     my $self = shift;
 
-    return $ENV{'KOHA_INSTANCE'} if defined $ENV{'KOHA_INSTANCE'} && $ENV{'KOHA_INSTANCE'} ne '';
+    return $INSTANCE;
+}
 
-    my $kohaConfigPath = $ENV{'KOHA_CONF'} // '';
-    if ( $kohaConfigPath =~ m{/etc/koha/sites/([^/]+)/} ) {
-        return $1;
-    }
+sub kohaConfigPath {
+    my $self = shift;
 
-    my ( undef, $path ) = fileparse($kohaConfigPath);
-    $path =~ s{/$}{};
-    if ( $path =~ m{/([^/]+)$} ) {
-        return $1;
-    }
+    return $kohaConfigPath;
+}
+
+sub _guess_koha_conf_path {
+    my $kohaConfigPath = eval {
+        require Koha::Config;
+        Koha::Config->guess_koha_conf();
+    };
+
+    return $kohaConfigPath || '';
+}
+
+sub _instance_from_koha_conf_path {
+    my ($kohaConfigPath) = @_;
+
+    return unless defined $kohaConfigPath;
+    return $1 if $kohaConfigPath =~ m{\A/etc/koha/sites/([^/]+)/koha-conf\.xml\z};
 
     return;
 }
@@ -152,6 +165,7 @@ sub loadPluginData {
     my $self = shift;
 
     my @pluginKeys = (
+        Koha::Plugin::Fi::KohaSuomi::Editx::Config->plugin_data_keys,
         map { "procurement_$_" } @PLUGIN_SETTING_KEYS,
         map { "procurement_notification_$_" } @PLUGIN_NOTIFICATION_KEYS,
     );
@@ -163,7 +177,14 @@ sub loadPluginData {
         @pluginKeys
     );
 
-    return { map { $_->{plugin_key} => $_->{plugin_value} } @$rows };
+    my $plugin_data = { map { $_->{plugin_key} => $_->{plugin_value} } @$rows };
+    if ( exists $plugin_data->{ Koha::Plugin::Fi::KohaSuomi::Editx::Config::CONFIG_KEY() } ) {
+        return Koha::Plugin::Fi::KohaSuomi::Editx::Config->procurement_plugin_data(
+            Koha::Plugin::Fi::KohaSuomi::Editx::Config->from_plugin_data($plugin_data)
+        );
+    }
+
+    return $plugin_data;
 }
 
 sub getUseAutomatchBiblios {

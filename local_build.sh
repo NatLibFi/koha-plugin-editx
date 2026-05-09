@@ -4,7 +4,7 @@
 # or inside some containers but without CI/CD. For building in CI/CD, use the
 # .github/workflows/main.yml file and push tag to master on GitHub.
 
-DEFAULT_VERSION="${1:-0.0.1}"
+OVERRIDE_VERSION="${1:-}"
 
 # set base variables:
 CURRENT_DIR="$(pwd)"
@@ -24,7 +24,17 @@ PM_FOLDER="$(dirname "${PM_PATH}")/${PM_SUBFOLDER}"
 PM_FOLDER_RELATIVE="${PM_PATH#"${SCRIPT_DIR}"/}"
 DATE="$(date +"%Y-%m-%d")"
 VERSION="$(git -C "${SCRIPT_DIR}" describe --tags --abbrev=0 2>/dev/null | sed -e "s/v//")"
-[ -z "${VERSION}" ] && { echo " - No version tag found, will default to ${DEFAULT_VERSION}"; VERSION="${DEFAULT_VERSION}"; }
+SOURCE_VERSION="$(perl -ne 'print "$1\n" and exit if /our\s+\$VERSION\s*=\s*["'\'']([^"'\'']+)["'\'']/' "${PM_PATH}")"
+if [ -z "${VERSION}" ]; then
+    if [ -n "${OVERRIDE_VERSION}" ]; then
+        VERSION="${OVERRIDE_VERSION}"
+        echo " - No version tag found, using explicit version ${VERSION}"
+    else
+        VERSION="${SOURCE_VERSION}"
+        echo " - No version tag found, using source version ${VERSION}"
+    fi
+fi
+[ -z "${VERSION}" ] && { echo "Plugin version not found"; exit 1; }
 RELEASE_FILE="koha-plugin-${PM_SUBFOLDER}-kk-${VERSION}.kpz"
 
 echo "Local plugin builder. Building '${PM_SUBFOLDER}' plugin version '${VERSION}'"
@@ -53,6 +63,7 @@ find "${TMP_DIR}" -name .DS_Store -delete
 SED_CMD=(sed -i)
 [[ "$OSTYPE" == "darwin"* ]] && SED_CMD=(sed -i "")
 "${SED_CMD[@]}" -e "s/{VERSION}/${VERSION}/g" "${TMP_DIR}/${PM_FOLDER_RELATIVE}" || { echo "Failed to set version in ${PM_FILE}"; exit 1; }
+"${SED_CMD[@]}" -e "s/our \\\$VERSION = [\"'][^\"']*[\"'];/our \\\$VERSION = \"${VERSION}\";/" "${TMP_DIR}/${PM_FOLDER_RELATIVE}" || { echo "Failed to set version in ${PM_FILE}"; exit 1; }
 "${SED_CMD[@]}" -e "s/1900-01-01/${DATE}/g" "${TMP_DIR}/${PM_FOLDER_RELATIVE}" || { echo "Failed to set date in ${PM_FILE}"; exit 1; }
 cd "${TMP_DIR}" || { echo "Failed to change directory"; exit 1; }
 zip -qr "${CURRENT_DIR}/${RELEASE_FILE}" "Koha" || { echo "Failed to create zip file"; exit 1; }

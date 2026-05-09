@@ -67,6 +67,17 @@
     margin-bottom: 1rem;
 }
 
+.editx-config-form::after {
+    clear: both;
+    content: "";
+    display: block;
+}
+
+.editx-config-form fieldset.rows > .hint,
+.editx-config-form fieldset.rows > .editx-reference-list {
+    margin-left: 0;
+}
+
 .editx-config-form textarea,
 .editx-config-form input[type="text"] {
     max-width: min(100%, 64rem);
@@ -105,16 +116,31 @@
     font-weight: 700;
 }
 
-.editx-example-grid {
-    display: grid;
-    gap: 0.85rem;
-    grid-template-columns: repeat(auto-fit, minmax(22rem, 1fr));
-    margin-top: 0.55rem;
+.editx-config-form fieldset.rows .editx-example label {
+    display: block;
+    float: none;
+    margin: 0.75rem 0 0.25rem;
+    text-align: left;
+    width: auto;
 }
 
-.editx-example-grid h2 {
-    font-size: 1rem;
-    margin: 0 0 0.35rem;
+.editx-config-form fieldset.rows .editx-example .hint {
+    margin-left: 0;
+}
+
+.editx-config-form fieldset.rows .editx-inline-check {
+    align-items: center;
+    display: inline-flex;
+    float: none;
+    gap: 0.35rem;
+    margin: 0.75rem 0 0.25rem;
+    padding: 0;
+    text-align: left;
+    width: auto;
+}
+
+.editx-inline-check input {
+    margin: 0;
 }
 
 .editx-code-example {
@@ -127,6 +153,300 @@
     overflow-x: auto;
     padding: 0.75rem 0.85rem;
     white-space: pre;
+}
+
+.editx-code-example-watermark {
+    isolation: isolate;
+    position: relative;
+}
+
+.editx-code-example-watermark::before {
+    align-items: center;
+    color: rgba(36, 49, 58, 0.08);
+    content: attr(data-editx-watermark);
+    display: flex;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: clamp(2.5rem, 8vw, 7rem);
+    font-weight: 700;
+    inset: 0;
+    justify-content: center;
+    letter-spacing: 0;
+    line-height: 1;
+    pointer-events: none;
+    position: absolute;
+    text-transform: uppercase;
+    z-index: 0;
+}
+
+.editx-code-example-watermark code {
+    position: relative;
+    z-index: 1;
+}
+
+.editx-table-wrap {
+    max-width: 100%;
+    overflow-x: auto;
+}
+
+.editx-partial-table-wrap {
+    max-height: 24rem;
+    overflow: auto;
+    transition: max-height 0.18s ease;
+}
+
+.editx-partial-table-wrap.is-expanded {
+    max-height: var(--editx-expanded-table-height, 120rem);
+}
+
+.editx-config-table {
+    min-width: 86rem;
+    table-layout: fixed;
+    width: 100%;
+}
+
+.editx-config-table th,
+.editx-config-table td {
+    vertical-align: top;
+}
+
+.editx-config-table thead th {
+    background: #fff;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+.editx-config-table input,
+.editx-config-table select {
+    box-sizing: border-box;
+    max-width: 100%;
+    width: 100%;
+}
+
+.editx-config-table th:last-child,
+.editx-config-table td:last-child {
+    width: 7rem;
+}
+
+.editx-import-folders-table {
+    display: inline-table;
+    max-width: 100%;
+    min-width: 0;
+    table-layout: auto;
+    width: max-content;
+}
+
+.editx-import-folders-table th {
+    text-align: left;
+}
+
+.editx-import-folders-table th:first-child,
+.editx-import-folders-table td:first-child {
+    width: 1%;
+    white-space: nowrap;
+}
+
+.editx-config-form fieldset.rows .editx-import-folders-table td:first-child label {
+    display: inline;
+    float: none;
+    margin: 0;
+    max-width: none;
+    padding: 0;
+    text-align: left;
+    width: auto;
+}
+
+.editx-config-table.editx-import-folders-table th:last-child,
+.editx-config-table.editx-import-folders-table td:last-child {
+    width: auto;
+}
+
+.editx-import-folders-table td:last-child input {
+    box-sizing: border-box;
+    display: block;
+    max-width: 100%;
+    min-width: 0;
+    width: 34rem;
+}
+
+.editx-config-form fieldset.rows .editx-import-folders-table .hint {
+    margin-left: 0;
+    margin-top: 0.3rem;
+    max-width: 34rem;
+}
+
+.editx-sftp-sources-table {
+    min-width: 58rem;
+    table-layout: fixed;
+    width: 100%;
+}
+
+.editx-config-table.editx-sftp-sources-table th:last-child,
+.editx-config-table.editx-sftp-sources-table td:last-child {
+    width: auto;
+}
+
+.editx-sftp-sources-table thead tr:first-child th:nth-child(1),
+.editx-sftp-sources-table tbody tr:first-child td:nth-child(1),
+.editx-sftp-sources-table thead tr:nth-child(2) th:nth-child(1),
+.editx-sftp-sources-table tbody tr:nth-child(2) td:nth-child(1) {
+    width: 16%;
+}
+
+.editx-sftp-sources-table thead tr:first-child th:nth-child(2),
+.editx-sftp-sources-table tbody tr:first-child td:nth-child(2),
+.editx-sftp-sources-table thead tr:nth-child(2) th:nth-child(2),
+.editx-sftp-sources-table tbody tr:nth-child(2) td:nth-child(2) {
+    width: 11%;
+}
+
+.editx-sftp-sources-table thead tr:first-child th:nth-child(3),
+.editx-sftp-sources-table tbody tr:first-child td:nth-child(3),
+.editx-sftp-sources-table thead tr:nth-child(2) th:nth-child(3),
+.editx-sftp-sources-table tbody tr:nth-child(2) td:nth-child(3) {
+    width: 34%;
+}
+
+.editx-sftp-sources-table thead tr:first-child th:nth-child(4),
+.editx-sftp-sources-table tbody tr:first-child td:nth-child(4),
+.editx-sftp-sources-table thead tr:nth-child(2) th:nth-child(4),
+.editx-sftp-sources-table tbody tr:nth-child(2) td:nth-child(4) {
+    width: 32%;
+}
+
+.editx-sftp-sources-table .editx-sftp-remove-cell {
+    text-align: right;
+    width: 7rem;
+}
+
+.editx-sftp-sources-table thead th.is-active-sftp-header {
+    background: rgba(0, 123, 186, 0.12);
+    box-shadow: inset 0 -2px 0 rgba(0, 90, 120, 0.35);
+}
+
+.editx-sftp-remote-pattern {
+    display: grid;
+    gap: 0.35rem;
+    grid-template-columns: minmax(0, 1fr) minmax(6rem, 8rem);
+}
+
+.editx-table-actions {
+    margin-top: 0.65rem;
+}
+
+.editx-productform-table {
+    min-width: 0;
+    table-layout: auto;
+    width: auto;
+}
+
+.editx-productform-table th:nth-child(1),
+.editx-productform-table td:nth-child(1) {
+    width: 7rem;
+}
+
+.editx-productform-table th:nth-child(2),
+.editx-productform-table td:nth-child(2),
+.editx-productform-table th:nth-child(3),
+.editx-productform-table td:nth-child(3) {
+    width: 12rem;
+}
+
+.editx-productform-table td:nth-child(1) input {
+    width: 6rem;
+}
+
+.editx-productform-table td:nth-child(2) select,
+.editx-productform-table td:nth-child(3) select {
+    width: 11rem;
+}
+
+.editx-productform-table .editx-row-actions {
+    white-space: nowrap;
+}
+
+.editx-productform-table .editx-row-actions .btn {
+    margin: 0 0.25rem 0.25rem 0;
+}
+
+.editx-productform-table tfoot td {
+    background: #f8faf9;
+    border-top: 2px solid var(--bs-border-color, #d9dee3);
+    bottom: 0;
+    position: sticky;
+    z-index: 2;
+}
+
+.editx-productform-table tfoot input,
+.editx-productform-table tfoot select {
+    margin-bottom: 0;
+}
+
+.editx-table-expander {
+    align-items: center;
+    display: flex;
+    gap: 0.75rem;
+    margin: 0.65rem 0 0.85rem;
+}
+
+.editx-table-expander::before,
+.editx-table-expander::after {
+    background: var(--bs-border-color, #d9dee3);
+    content: "";
+    flex: 1 1 auto;
+    height: 1px;
+}
+
+.editx-table-expander-button {
+    align-items: center;
+    background: transparent;
+    border: 0;
+    color: #005a78;
+    cursor: pointer;
+    display: inline-flex;
+    font-weight: 700;
+    gap: 0.35rem;
+    padding: 0.2rem 0.35rem;
+}
+
+.editx-table-expander-button:focus {
+    outline: 2px solid #2f6fab;
+    outline-offset: 2px;
+}
+
+.editx-table-expander-icon {
+    height: 0.75rem;
+    position: relative;
+    width: 0.9rem;
+}
+
+.editx-table-expander-icon::before,
+.editx-table-expander-icon::after {
+    border-bottom: 2px solid currentColor;
+    border-right: 2px solid currentColor;
+    content: "";
+    height: 0.4rem;
+    left: 0.18rem;
+    position: absolute;
+    transform: rotate(45deg);
+    width: 0.4rem;
+}
+
+.editx-table-expander-icon::before {
+    top: 0;
+}
+
+.editx-table-expander-icon::after {
+    top: 0.28rem;
+}
+
+.editx-table-expander-button.is-expanded .editx-table-expander-icon {
+    transform: rotate(180deg);
+}
+
+.editx-config-form input[type="file"] {
+    display: block;
+    max-width: 34rem;
 }
 
 .editx-manual-sync-form {
@@ -146,10 +466,11 @@
     max-width: 58rem;
 }
 
-.editx-manual-sync-form .editx-action-note {
+.editx-manual-sync-form .editx-action-note,
+.editx-inline-action .editx-action-note {
     color: #6b5d24;
     font-weight: 600;
-    margin-top: 0.35rem;
+    margin: 0;
 }
 
 .editx-manual-sync-form .btn {
@@ -324,21 +645,62 @@
 }
 
 .editx-collapsible-body {
-    display: grid;
-    grid-template-rows: 1fr;
-    opacity: 1;
-    overflow: hidden;
-    transition: grid-template-rows 0.18s ease, opacity 0.14s ease;
+    display: block;
 }
 
 .editx-collapsible.is-collapsed .editx-collapsible-body {
-    grid-template-rows: 0fr;
-    opacity: 0;
+    display: none;
 }
 
 .editx-collapsible-body-inner {
     min-height: 0;
-    overflow: hidden;
+}
+
+.editx-runtime-status-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.editx-runtime-status-list > li {
+    margin: 0 0 0.85rem;
+    padding: 0;
+}
+
+.editx-runtime-field-row {
+    align-items: start;
+    display: grid;
+    gap: 0.25rem 1rem;
+    grid-template-columns: 16rem minmax(0, 1fr);
+}
+
+.editx-config-form fieldset.rows .editx-runtime-field-row > label,
+.editx-config-form fieldset.rows .editx-runtime-field-row > .label {
+    background: transparent;
+    border: 0;
+    color: inherit;
+    display: block;
+    float: none;
+    font-size: inherit;
+    font-weight: 700;
+    line-height: 1.35;
+    margin: 0;
+    max-width: none;
+    padding: 0.25rem 0 0;
+    text-align: left;
+    width: auto;
+}
+
+.editx-config-form fieldset.rows .editx-runtime-field-row > .hint {
+    grid-column: 2;
+    margin-left: 0;
+    max-width: 62rem;
+}
+
+.editx-config-form fieldset.rows .editx-runtime-field-row > select {
+    max-width: 12rem;
+    min-width: 8rem;
+    width: auto;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -347,16 +709,29 @@
     }
 }
 
+.editx-runtime-log-block {
+    display: inline-block;
+    max-width: 100%;
+    width: auto;
+}
+
 .editx-runtime-log-toolbar {
     align-items: center;
+    box-sizing: border-box;
     display: flex;
     gap: 0.75rem;
     justify-content: space-between;
-    margin-bottom: 0.35rem;
+    margin-bottom: 0.25rem;
+    max-width: 100%;
+    width: 100%;
 }
 
-.editx-runtime-log-toolbar label {
+.editx-config-form fieldset.rows .editx-runtime-log-toolbar label {
+    float: none;
     margin-bottom: 0;
+    padding: 0;
+    text-align: left;
+    width: auto;
 }
 
 .editx-runtime-log-wrap-control {
@@ -371,8 +746,9 @@
     margin: 0;
 }
 
-.editx-runtime-log-tail {
+.editx-config-form textarea.editx-runtime-log-tail {
     box-sizing: border-box;
+    display: block;
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
     max-width: 100%;
     min-height: 14rem;
@@ -382,18 +758,25 @@
     width: 100%;
 }
 
-.editx-runtime-log-tail.editx-runtime-log-tail-wrapped {
+.editx-config-form textarea.editx-runtime-log-tail.editx-runtime-log-tail-wrapped {
     overflow-wrap: anywhere;
     white-space: pre-wrap;
 }
 
-.editx-upgrade-status {
+.editx-plugin-status-lines {
     color: #3f4d56;
 }
 
-.editx-upgrade-status h2 {
-    font-size: 1.15rem;
-    margin-top: 0;
+.editx-plugin-status-lines a {
+    font-weight: 700;
+}
+
+.editx-plugin-status-lines p {
+    margin: 0 0 0.35rem;
+}
+
+.editx-plugin-status-lines p:last-child {
+    margin-bottom: 0;
 }
 
 @media (max-width: 991.98px) {
@@ -421,5 +804,87 @@
 
     .editx-inline-action {
         margin-top: 0.85rem;
+    }
+
+    .editx-runtime-field-row {
+        display: block;
+    }
+
+    .editx-config-form fieldset.rows .editx-runtime-field-row > .hint {
+        margin-top: 0.25rem;
+        max-width: 100%;
+    }
+}
+
+@media (max-width: 640px) {
+    .editx-import-folders-table,
+    .editx-import-folders-table thead,
+    .editx-import-folders-table tbody,
+    .editx-import-folders-table tr,
+    .editx-import-folders-table th,
+    .editx-import-folders-table td {
+        display: block;
+        width: 100%;
+    }
+
+    .editx-import-folders-table thead {
+        display: none;
+    }
+
+    .editx-import-folders-table tr {
+        border-bottom: 1px solid var(--bs-border-color, #d9dee3);
+        padding: 0.45rem 0;
+    }
+
+    .editx-import-folders-table td {
+        border: 0;
+        padding: 0.2rem 0;
+    }
+
+    .editx-import-folders-table th:first-child,
+    .editx-import-folders-table td:first-child {
+        white-space: normal;
+        width: auto;
+    }
+
+    .editx-import-folders-table td:last-child input,
+    .editx-config-form fieldset.rows .editx-import-folders-table .hint {
+        max-width: 100%;
+        width: 100%;
+    }
+
+    .editx-productform-table,
+    .editx-productform-table thead,
+    .editx-productform-table tbody,
+    .editx-productform-table tr,
+    .editx-productform-table th,
+    .editx-productform-table td {
+        display: block;
+        width: 100%;
+    }
+
+    .editx-productform-table thead {
+        display: none;
+    }
+
+    .editx-productform-table tr {
+        border-bottom: 1px solid var(--bs-border-color, #d9dee3);
+        padding: 0.45rem 0;
+    }
+
+    .editx-productform-table td {
+        border: 0;
+        padding: 0.2rem 0;
+    }
+
+    .editx-productform-table td:nth-child(1) input,
+    .editx-productform-table td:nth-child(2) select,
+    .editx-productform-table td:nth-child(3) select {
+        max-width: 100%;
+        width: 100%;
+    }
+
+    .editx-productform-table tfoot td {
+        position: static;
     }
 }

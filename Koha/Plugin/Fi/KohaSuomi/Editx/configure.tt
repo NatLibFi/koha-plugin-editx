@@ -1,8 +1,9 @@
 [% USE KohaDates %]
 [% USE raw %]
+[% SET footerjs = 1 %]
 [% INCLUDE 'doc-head-open.inc' %]
 <title>Koha: Configure EDItX plugin v[% plugin_display_version | html %]</title>
-<link rel="stylesheet" href="[% css_href | html %]" />
+<link rel="stylesheet" href="/api/v1/contrib/editx/static/static_files/editx.css" />
 [% INCLUDE 'doc-head-close.inc' %]
 </head>
 <body id="plugins_editx_configure" class="plugins">
@@ -21,7 +22,7 @@
                 <div class="page-section editx-page-header">
                     <div>
                         <h1>Configure EDItX plugin v[% plugin_display_version | html %]</h1>
-                        <p class="help-block">Configure the nightly SFTP download, import folders, EDItX processing rules, notifications, and ONIX ProductForm mappings.</p>
+                        <p class="help-block">Configure the nightly SFTP download, import folders, EDItX processing rules, and ONIX ProductForm mappings.</p>
                     </div>
                     <div class="editx-status-strip">
                         <div class="editx-status-item">
@@ -42,18 +43,13 @@
                     </div>
                 </div>
 
-                [% IF saved %]
-                    <div class="alert alert-success">EDItX plugin configuration saved.</div>
-                [% END %]
-
                 [% FOREACH message IN messages %]
                     <div class="alert alert-[% message.alert_class | html %]">[% message.text | html %]</div>
                 [% END %]
 
-                <form method="post" class="page-section editx-config-form">
+                <form method="post" enctype="multipart/form-data" class="page-section editx-config-form">
                     <input type="hidden" name="class" value="[% CLASS | html %]" />
                     <input type="hidden" name="method" value="[% METHOD | html %]" />
-                    <input type="hidden" name="save" value="1" />
                     [% INCLUDE 'csrf-token.inc' %]
 
                     <fieldset class="rows">
@@ -68,56 +64,6 @@
                                        [% IF nightly_sync_enabled %]checked="checked"[% END %] />
                                 <div class="hint">Runs SFTP download first and then imports downloaded EDItX files from Koha's nightly plugin cron hook.</div>
                             </li>
-                            <li>
-                                <label for="sftp_sources_yaml">SFTP sources YAML</label>
-                                <textarea id="sftp_sources_yaml"
-                                          name="sftp_sources_yaml"
-                                          class="editx-monospace"
-                                          cols="100"
-                                          rows="18"
-                                          wrap="off">[% sftp_sources_yaml | html %]</textarea>
-                                <div class="hint">One source is enough for the first pilot; add more list entries when another remote folder or server is needed. Leave local_dir empty to use import_tmp_path below.</div>
-                                <details class="editx-example">
-                                    <summary>SFTP YAML examples</summary>
-                                    <div class="editx-example-grid">
-                                        <div>
-                                            <h2>Library of Alexandria</h2>
-                                            <pre class="editx-code-example"><code>sources:
-  - id: alexandria_library
-    host: sftp.example.org
-    port: 22
-    user: editx-user
-    identity_file: /var/lib/koha/&lt;instance&gt;/.ssh/editx_sftp
-    remote_dir: /out/alexandria
-    local_dir:
-    pattern: "*.xml"
-    after_download: keep
-    remote_archive_dir:
-    known_hosts_file:
-    strict_host_key_checking: "yes"
-    ssh_config:</code></pre>
-                                        </div>
-                                        <div>
-                                            <h2>Multiple sources</h2>
-                                            <pre class="editx-code-example"><code>sources:
-  - id: alexandria_library
-    host: sftp.example.org
-    user: editx-user
-    identity_file: /var/lib/koha/&lt;instance&gt;/.ssh/editx_sftp
-    remote_dir: /out/alexandria
-    pattern: "*.xml"
-    after_download: keep
-  - id: pergamum_library
-    host: sftp.example.org
-    user: editx-user
-    identity_file: /var/lib/koha/&lt;instance&gt;/.ssh/editx_sftp
-    remote_dir: /out/pergamum
-    local_dir:
-    pattern: "LibraryShipNotice_*.xml"</code></pre>
-                                        </div>
-                                    </div>
-                                </details>
-                            </li>
                         </ol>
                     </fieldset>
 
@@ -128,53 +74,151 @@
                             <code class="editx-config-value">[% recommended_import_paths.base | html %]</code>.
                             Create the folders owned and writable by the Koha instance user.
                         </div>
-                        <ol>
-                            <li>
-                                <label for="import_tmp_path">Temporary download folder</label>
-                                <input id="import_tmp_path" name="import_tmp_path" type="text" size="80" value="[% procurement_settings.import_tmp_path | html %]" placeholder="[% recommended_import_paths.tmp | html %]" />
-                                <div class="hint">
-                                    Example:
-                                    <code class="editx-config-value">[% recommended_import_paths.tmp | html %]</code>.
-                                    SFTP puts new XML files here unless a source has its own local_dir.
-                                </div>
-                            </li>
-                            <li>
-                                <label for="import_load_path">Import load folder</label>
-                                <input id="import_load_path" name="import_load_path" type="text" size="80" value="[% procurement_settings.import_load_path | html %]" placeholder="[% recommended_import_paths.load | html %]" />
-                                <div class="hint">
-                                    Example:
-                                    <code class="editx-config-value">[% recommended_import_paths.load | html %]</code>.
-                                    Importer reads files from here after moving them out of the temporary folder.
-                                </div>
-                            </li>
-                            <li>
-                                <label for="import_archive_path">Successful archive folder</label>
-                                <input id="import_archive_path" name="import_archive_path" type="text" size="80" value="[% procurement_settings.import_archive_path | html %]" placeholder="[% recommended_import_paths.archive | html %]" />
-                                <div class="hint">
-                                    Example:
-                                    <code class="editx-config-value">[% recommended_import_paths.archive | html %]</code>.
-                                    Successfully imported files are moved here.
-                                </div>
-                            </li>
-                            <li>
-                                <label for="import_failed_path">Failed import folder</label>
-                                <input id="import_failed_path" name="import_failed_path" type="text" size="80" value="[% procurement_settings.import_failed_path | html %]" placeholder="[% recommended_import_paths.fail | html %]" />
-                                <div class="hint">
-                                    Example:
-                                    <code class="editx-config-value">[% recommended_import_paths.fail | html %]</code>.
-                                    Files that failed import are moved here for review.
-                                </div>
-                            </li>
-                            <li>
-                                <label for="import_failed_archived_path">Archived failed folder</label>
-                                <input id="import_failed_archived_path" name="import_failed_archived_path" type="text" size="80" value="[% procurement_settings.import_failed_archived_path | html %]" placeholder="[% recommended_import_paths.failed_archived | html %]" />
-                                <div class="hint">
-                                    Example:
-                                    <code class="editx-config-value">[% recommended_import_paths.failed_archived | html %]</code>.
-                                    Used by failure notification and requeue helper scripts.
-                                </div>
-                            </li>
-                        </ol>
+                        <div class="editx-table-wrap">
+                            <table class="editx-config-table editx-import-folders-table">
+                                <thead>
+                                    <tr>
+                                        <th>Role</th>
+                                        <th>Folder</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr>
+                                        <td><label for="import_tmp_path">Temporary download</label></td>
+                                        <td>
+                                            <input id="import_tmp_path" name="import_tmp_path" type="text" value="[% procurement_settings.import_tmp_path | html %]" placeholder="[% recommended_import_paths.tmp | html %]" />
+                                            <div class="hint">SFTP puts new XML files here unless a source has its own local target.</div>
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td><label for="import_load_path">Import load</label></td>
+                                        <td>
+                                            <input id="import_load_path" name="import_load_path" type="text" value="[% procurement_settings.import_load_path | html %]" placeholder="[% recommended_import_paths.load | html %]" />
+                                            <div class="hint">Importer reads files from here after moving them out of the temporary folder.</div>
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td><label for="import_archive_path">Successful archive</label></td>
+                                        <td>
+                                            <input id="import_archive_path" name="import_archive_path" type="text" value="[% procurement_settings.import_archive_path | html %]" placeholder="[% recommended_import_paths.archive | html %]" />
+                                            <div class="hint">Successfully imported files are moved here.</div>
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td><label for="import_failed_path">Failed import</label></td>
+                                        <td>
+                                            <input id="import_failed_path" name="import_failed_path" type="text" value="[% procurement_settings.import_failed_path | html %]" placeholder="[% recommended_import_paths.fail | html %]" />
+                                            <div class="hint">Files that failed import are moved here for review.</div>
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td><label for="import_failed_archived_path">Archived failed</label></td>
+                                        <td>
+                                            <input id="import_failed_archived_path" name="import_failed_archived_path" type="text" value="[% procurement_settings.import_failed_archived_path | html %]" placeholder="[% recommended_import_paths.failed_archived | html %]" />
+                                            <div class="hint">Used by failure notification and requeue helper scripts.</div>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="hint">
+                            Example:
+                            <code class="editx-config-value">[% recommended_import_paths.base | html %]</code>
+                            gives
+                            <code class="editx-config-value">tmp</code>,
+                            <code class="editx-config-value">load</code>,
+                            <code class="editx-config-value">archive</code>,
+                            <code class="editx-config-value">fail</code>,
+                            and
+                            <code class="editx-config-value">failed_archived</code>.
+                        </div>
+                    </fieldset>
+
+                    <fieldset class="rows">
+                        <legend>SFTP sources</legend>
+                        <div class="hint">Leave local target empty to use the temporary download folder above.</div>
+                        <div class="editx-table-wrap">
+                            <table id="editx-sftp-sources-table"
+                                   class="editx-config-table editx-sftp-sources-table"
+                                   data-default-identity-file="[% recommended_sftp_paths.identity_file | html %]"
+                                   data-default-known-hosts-file="[% recommended_sftp_paths.known_hosts_file | html %]">
+                                <thead>
+                                    <tr>
+                                        <th data-editx-sftp-column="id">Source name</th>
+                                        <th data-editx-sftp-column="user">User</th>
+                                        <th data-editx-sftp-column="remote">Remote folder / Pattern</th>
+                                        <th data-editx-sftp-column="identity">Identity file</th>
+                                        <th class="NoSort editx-sftp-remove-cell" rowspan="2">&nbsp;</th>
+                                    </tr>
+                                    <tr>
+                                        <th data-editx-sftp-column="host">Host</th>
+                                        <th data-editx-sftp-column="port">Port</th>
+                                        <th data-editx-sftp-column="local">Local target</th>
+                                        <th data-editx-sftp-column="known-hosts">Known hosts</th>
+                                    </tr>
+                                </thead>
+                                [% IF sftp_sources.size %]
+                                    [% FOREACH source IN sftp_sources %]
+                                        <tbody class="editx-sftp-source" data-editx-sftp-source-row="1">
+                                            <tr>
+                                                <td><input name="sftp_id" type="text" value="[% source.id | html %]" placeholder="vendor_code" pattern="[A-Za-z0-9_]+" title="Use letters, numbers, and underscores only; no spaces." autocomplete="off" autocapitalize="none" spellcheck="false" data-editx-sftp-column="id" /></td>
+                                                <td><input name="sftp_user" type="text" value="[% source.user | html %]" placeholder="editx-user" data-editx-sftp-column="user" /></td>
+                                                <td>
+                                                    <div class="editx-sftp-remote-pattern">
+                                                        <input name="sftp_remote_dir" type="text" value="[% source.remote_dir | html %]" placeholder="/out/editx" data-editx-sftp-column="remote" />
+                                                        <input name="sftp_pattern" type="text" value="[% source.pattern | html %]" placeholder="*.xml" data-editx-sftp-column="remote" />
+                                                    </div>
+                                                </td>
+                                                <td><input name="sftp_identity_file" type="text" value="[% IF source.identity_file %][% source.identity_file | html %][% ELSE %][% recommended_sftp_paths.identity_file | html %][% END %]" placeholder="[% recommended_sftp_paths.identity_file | html %]" data-editx-sftp-column="identity" /></td>
+                                                <td class="editx-row-actions editx-sftp-remove-cell" rowspan="2">
+                                                    <input name="sftp_after_download" type="hidden" value="[% IF source.after_download %][% source.after_download | html %][% ELSE %]keep[% END %]" />
+                                                    <input name="sftp_remote_archive_dir" type="hidden" value="[% source.remote_archive_dir | html %]" />
+                                                    <input name="sftp_strict_host_key_checking" type="hidden" value="[% IF source.strict_host_key_checking %][% source.strict_host_key_checking | html %][% ELSE %]yes[% END %]" />
+                                                    <input name="sftp_ssh_config" type="hidden" value="[% source.ssh_config | html %]" />
+                                                    <button type="button" class="btn btn-default btn-sm js-editx-remove-row">Remove</button>
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td><input name="sftp_host" type="text" value="[% source.host | html %]" placeholder="sftp.vendor.example" data-editx-sftp-column="host" /></td>
+                                                <td><input name="sftp_port" type="text" inputmode="numeric" pattern="6553[0-5]|655[0-2][0-9]|65[0-4][0-9]{2}|6[0-4][0-9]{3}|[1-5][0-9]{4}|[1-9][0-9]{0,3}" maxlength="5" value="[% source.port | html %]" placeholder="22" title="Use a TCP port number from 1 to 65535." data-editx-sftp-column="port" /></td>
+                                                <td><input name="sftp_local_dir" type="text" value="[% source.local_dir | html %]" placeholder="default tmp" data-editx-sftp-column="local" /></td>
+                                                <td><input name="sftp_known_hosts_file" type="text" value="[% IF source.known_hosts_file %][% source.known_hosts_file | html %][% ELSE %][% recommended_sftp_paths.known_hosts_file | html %][% END %]" placeholder="[% recommended_sftp_paths.known_hosts_file | html %]" data-editx-sftp-column="known-hosts" /></td>
+                                            </tr>
+                                        </tbody>
+                                    [% END %]
+                                [% ELSE %]
+                                    <tbody class="editx-sftp-source" data-editx-sftp-source-row="1">
+                                        <tr>
+                                            <td><input name="sftp_id" type="text" value="" placeholder="vendor_code" pattern="[A-Za-z0-9_]+" title="Use letters, numbers, and underscores only; no spaces." autocomplete="off" autocapitalize="none" spellcheck="false" data-editx-sftp-column="id" /></td>
+                                            <td><input name="sftp_user" type="text" value="" placeholder="editx-user" data-editx-sftp-column="user" /></td>
+                                            <td>
+                                                <div class="editx-sftp-remote-pattern">
+                                                    <input name="sftp_remote_dir" type="text" value="" placeholder="/out/editx" data-editx-sftp-column="remote" />
+                                                    <input name="sftp_pattern" type="text" value="*.xml" placeholder="*.xml" data-editx-sftp-column="remote" />
+                                                </div>
+                                            </td>
+                                            <td><input name="sftp_identity_file" type="text" value="[% recommended_sftp_paths.identity_file | html %]" placeholder="[% recommended_sftp_paths.identity_file | html %]" data-editx-sftp-column="identity" /></td>
+                                            <td class="editx-row-actions editx-sftp-remove-cell" rowspan="2">
+                                                <input name="sftp_after_download" type="hidden" value="keep" />
+                                                <input name="sftp_remote_archive_dir" type="hidden" value="" />
+                                                <input name="sftp_strict_host_key_checking" type="hidden" value="yes" />
+                                                <input name="sftp_ssh_config" type="hidden" value="" />
+                                                <button type="button" class="btn btn-default btn-sm js-editx-remove-row">Remove</button>
+                                            </td>
+                                        </tr>
+                                        <tr>
+                                            <td><input name="sftp_host" type="text" value="" placeholder="sftp.vendor.example" data-editx-sftp-column="host" /></td>
+                                            <td><input name="sftp_port" type="text" inputmode="numeric" pattern="6553[0-5]|655[0-2][0-9]|65[0-4][0-9]{2}|6[0-4][0-9]{3}|[1-5][0-9]{4}|[1-9][0-9]{0,3}" maxlength="5" value="22" placeholder="22" title="Use a TCP port number from 1 to 65535." data-editx-sftp-column="port" /></td>
+                                            <td><input name="sftp_local_dir" type="text" value="" placeholder="default tmp" data-editx-sftp-column="local" /></td>
+                                            <td><input name="sftp_known_hosts_file" type="text" value="[% recommended_sftp_paths.known_hosts_file | html %]" placeholder="[% recommended_sftp_paths.known_hosts_file | html %]" data-editx-sftp-column="known-hosts" /></td>
+                                        </tr>
+                                    </tbody>
+                                [% END %]
+                            </table>
+                        </div>
+                        <div class="editx-table-actions">
+                            <button type="button" class="btn btn-default btn-sm" id="editx-add-sftp-source">Add SFTP source</button>
+                        </div>
                     </fieldset>
 
                     <fieldset class="rows">
@@ -182,7 +226,7 @@
                         <ol>
                             <li>
                                 <label for="authoriser">Order authoriser borrowernumber</label>
-                                <input id="authoriser" name="authoriser" type="number" min="1" value="[% procurement_settings.authoriser | html %]" />
+                                <input id="authoriser" name="authoriser" type="text" inputmode="numeric" pattern="[0-9]*" value="[% procurement_settings.authoriser | html %]" />
                                 <div class="hint">Used as the Koha user creating acquisition baskets and orders.</div>
                             </li>
                             <li>
@@ -219,45 +263,137 @@
                     </fieldset>
 
                     <fieldset class="rows">
-                        <legend>Failure notifications</legend>
-                        <ol>
-                            <li>
-                                <label for="notification_mailto">Recipients</label>
-                                <input id="notification_mailto" name="notification_mailto" type="text" size="80" value="[% procurement_settings.notification_mailto | html %]" />
-                                <div class="hint">Comma-separated email addresses for helper scripts that report failed EDItX processing.</div>
-                            </li>
-                            <li>
-                                <label for="notification_mailfrom">Sender</label>
-                                <input id="notification_mailfrom" name="notification_mailfrom" type="text" size="80" value="[% procurement_settings.notification_mailfrom | html %]" />
-                            </li>
-                        </ol>
-                    </fieldset>
-
-                    <fieldset class="rows">
                         <legend>Product form mappings</legend>
-                        <ol>
-                            <li>
-                                <label for="mapping_csv">CSV mappings</label>
-                                <textarea id="mapping_csv"
-                                          name="mapping_csv"
-                                          class="editx-monospace"
-                                          cols="100"
-                                          rows="8"
-                                          wrap="off">[% mapping_csv | html %]</textarea>
-                                <div class="hint">Invalid item type values are stored as empty mapping cells, then reported here before save.</div>
-                                <details class="editx-example">
-                                    <summary>CSV mapping example</summary>
-                                    <pre class="editx-code-example"><code>onix_code,productform,productform_alternative
+                        <div class="hint">Mappings are saved row by row. CSV import replaces the whole mapping table.</div>
+                        <div class="editx-table-wrap editx-partial-table-wrap" data-editx-partial-table="1">
+                            <table id="editx-productform-table" class="editx-config-table editx-productform-table">
+                                <thead>
+                                    <tr>
+                                        <th>ONIX code</th>
+                                        <th>ProductForm item type</th>
+                                        <th>Alternative item type</th>
+                                        <th class="NoSort">&nbsp;</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    [% IF mapping_rows.size %]
+                                        [% FOREACH mapping IN mapping_rows %]
+                                            [% IF edit_mapping_onix_code == mapping.onix_code %]
+                                                <tr class="editx-productform-row-editor">
+                                                    <td>
+                                                        <input name="mapping_original_onix_code" type="hidden" value="[% mapping.onix_code | html %]" />
+                                                        <input name="edit_mapping_onix_code" type="text" value="[% mapping.onix_code | html %]" />
+                                                    </td>
+                                                    <td>
+                                                        <select name="edit_mapping_productform">
+                                                            <option value=""></option>
+                                                            [% FOREACH itemtype IN itemtypes %]
+                                                                <option value="[% itemtype | html %]" [% IF mapping.productform == itemtype %]selected="selected"[% END %]>[% itemtype | html %]</option>
+                                                            [% END %]
+                                                        </select>
+                                                    </td>
+                                                    <td>
+                                                        <select name="edit_mapping_productform_alternative">
+                                                            <option value=""></option>
+                                                            [% FOREACH itemtype IN itemtypes %]
+                                                                <option value="[% itemtype | html %]" [% IF mapping.productform_alternative == itemtype %]selected="selected"[% END %]>[% itemtype | html %]</option>
+                                                            [% END %]
+                                                        </select>
+                                                    </td>
+                                                    <td class="editx-row-actions">
+                                                        <button type="submit" class="btn btn-primary btn-sm" name="update_mapping_row" value="1">Save</button>
+                                                        <a class="btn btn-default btn-sm" href="[% configure_href | html %]">Cancel</a>
+                                                    </td>
+                                                </tr>
+                                            [% ELSE %]
+                                                <tr>
+                                                    <td><code class="editx-config-value">[% mapping.onix_code | html %]</code></td>
+                                                    <td>[% IF mapping.productform %][% mapping.productform | html %][% ELSE %]<span class="text-muted">empty</span>[% END %]</td>
+                                                    <td>[% IF mapping.productform_alternative %][% mapping.productform_alternative | html %][% ELSE %]<span class="text-muted">empty</span>[% END %]</td>
+                                                    <td class="editx-row-actions">
+                                                        <button type="submit"
+                                                                class="btn btn-default btn-sm"
+                                                                name="edit_mapping_onix_code"
+                                                                value="[% mapping.onix_code | html %]">Edit</button>
+                                                        <button type="submit"
+                                                                class="btn btn-default btn-sm"
+                                                                name="delete_mapping_row"
+                                                                value="[% mapping.onix_code | html %]">Delete</button>
+                                                    </td>
+                                                </tr>
+                                            [% END %]
+                                        [% END %]
+                                    [% ELSE %]
+                                        <tr>
+                                            <td colspan="4">No ProductForm mappings configured.</td>
+                                        </tr>
+                                    [% END %]
+                                </tbody>
+                                <tfoot>
+                                    <tr class="editx-productform-add-row">
+                                        <td>
+                                            <input id="add_mapping_onix_code"
+                                                   name="add_mapping_onix_code"
+                                                   type="text"
+                                                   aria-label="ONIX code" />
+                                        </td>
+                                        <td>
+                                            <select id="add_mapping_productform"
+                                                    name="add_mapping_productform"
+                                                    aria-label="ProductForm item type">
+                                                <option value=""></option>
+                                                [% FOREACH itemtype IN itemtypes %]
+                                                    <option value="[% itemtype | html %]">[% itemtype | html %]</option>
+                                                [% END %]
+                                            </select>
+                                        </td>
+                                        <td>
+                                            <select id="add_mapping_productform_alternative"
+                                                    name="add_mapping_productform_alternative"
+                                                    aria-label="Alternative item type">
+                                                <option value=""></option>
+                                                [% FOREACH itemtype IN itemtypes %]
+                                                    <option value="[% itemtype | html %]">[% itemtype | html %]</option>
+                                                [% END %]
+                                            </select>
+                                        </td>
+                                        <td class="editx-row-actions">
+                                            <button type="submit" class="btn btn-default btn-sm" name="add_mapping_row" value="1">Add</button>
+                                        </td>
+                                    </tr>
+                                </tfoot>
+                            </table>
+                        </div>
+                        <div class="editx-table-expander">
+                            <button type="button"
+                                    class="editx-table-expander-button editx-partial-table-toggle"
+                                    aria-expanded="false">
+                                <span class="editx-table-expander-icon" aria-hidden="true"></span>
+                                <span class="editx-table-expander-label">Show all rows</span>
+                            </button>
+                        </div>
+                        <details class="editx-example">
+                            <summary>CSV import and export</summary>
+                            <label for="mapping_csv_file">Import CSV</label>
+                            <input id="mapping_csv_file"
+                                   name="mapping_csv_file"
+                                   type="file"
+                                   accept=".csv,text/csv" />
+                            <div class="hint">Import replaces the current ProductForm mapping table.</div>
+                            <button type="submit"
+                                    class="btn btn-default btn-sm"
+                                    name="import_mapping_csv"
+                                    value="1">Import CSV</button>
+                            <button type="submit"
+                                    class="btn btn-default btn-sm"
+                                    name="export_mapping_csv"
+                                    value="1">Export CSV</button>
+                            <pre class="editx-code-example editx-code-example-watermark" data-editx-watermark="Example"><code>onix_code,productform,productform_alternative
 AA,YLEIS,
 BB,ESINE,
 DG,LYHYT,LYHYTHH</code></pre>
-                                </details>
-                            </li>
-                            <li>
-                                <span class="label">Existing Koha item types</span>
-                                <span class="editx-reference-list">[% IF itemtypes_text %][% itemtypes_text | html %][% ELSE %]No item types found.[% END %]</span>
-                            </li>
-                        </ol>
+                        </details>
+                        <div class="editx-reference-list"><strong>Existing Koha item types:</strong> [% IF itemtypes_text %][% itemtypes_text | html %][% ELSE %]No item types found.[% END %]</div>
                     </fieldset>
 
                     <fieldset class="rows editx-collapsible is-collapsed"
@@ -270,13 +406,13 @@ DG,LYHYT,LYHYTHH</code></pre>
                                     aria-expanded="false"
                                     aria-controls="editx-config-section-runtime-logging">
                                 <span class="editx-collapsible-toggle-icon" aria-hidden="true">+</span>
-                                <span>Runtime logging</span>
+                                <span>Runtime and plugin status</span>
                             </button>
                         </legend>
-                        <div id="editx-config-section-runtime-logging" class="editx-collapsible-body" hidden="hidden">
+                        <div id="editx-config-section-runtime-logging" class="editx-collapsible-body" aria-hidden="true">
                             <div class="editx-collapsible-body-inner">
-                                <ol>
-                                    <li>
+                                <ol class="editx-runtime-status-list">
+                                    <li class="editx-runtime-field-row">
                                         <label for="runtime_log_level">Runtime log level</label>
                                         <select id="runtime_log_level" name="runtime_log_level">
                                             <option value="off" [% IF runtime_log_level == 'off' %]selected="selected"[% END %]>Off</option>
@@ -288,26 +424,80 @@ DG,LYHYT,LYHYTHH</code></pre>
                                         </select>
                                         <div class="hint">Controls the EDItX plugin runtime log for web actions, nightly SFTP downloads, import parsing, file moves, validation, and order creation.</div>
                                     </li>
-                                    <li>
+                                    <li class="editx-runtime-field-row">
                                         <label>Runtime log file</label>
                                         <span class="editx-config-value">[% runtime_log_path | html %]</span>
                                     </li>
-                                    <li>
-                                        <div class="editx-runtime-log-toolbar">
-                                            <label for="runtime_log_tail">Recent runtime log</label>
-                                            <label class="editx-runtime-log-wrap-control" for="editx-runtime-log-wrap-toggle">
-                                                <input type="checkbox"
-                                                       id="editx-runtime-log-wrap-toggle"
-                                                       value="1" />
-                                                Wrap lines
-                                            </label>
+                                    <li class="editx-runtime-log-row">
+                                        <div class="editx-runtime-log-block">
+                                            <div class="editx-runtime-log-toolbar">
+                                                <label for="runtime_log_tail">Recent runtime log</label>
+                                                <label class="editx-runtime-log-wrap-control" for="editx-runtime-log-wrap-toggle">
+                                                    <input type="checkbox"
+                                                           id="editx-runtime-log-wrap-toggle"
+                                                           value="1" />
+                                                    Wrap lines
+                                                </label>
+                                            </div>
+                                            <textarea id="runtime_log_tail"
+                                                      class="editx-runtime-log-tail"
+                                                      rows="12"
+                                                      cols="120"
+                                                      wrap="off"
+                                                      readonly="readonly">[% IF runtime_log_tail %][% runtime_log_tail | html %][% ELSE %]No runtime log entries yet.[% END %]</textarea>
                                         </div>
-                                        <textarea id="runtime_log_tail"
-                                                  class="editx-runtime-log-tail"
-                                                  rows="12"
-                                                  cols="120"
-                                                  wrap="off"
-                                                  readonly="readonly">[% IF runtime_log_tail %][% runtime_log_tail | html %][% ELSE %]No runtime log entries yet.[% END %]</textarea>
+                                    </li>
+                                    <li class="editx-runtime-field-row editx-plugin-status">
+                                        <span class="label">Plugin status</span>
+                                        <div class="editx-plugin-status-lines">
+                                            [% IF last_configured_by %]
+                                                <p>
+                                                    Last updated by
+                                                    [% IF last_configured_by.href %]
+                                                        <a href="[% last_configured_by.href | html %]">[% last_configured_by.label | html %]</a>.
+                                                    [% ELSE %]
+                                                        [% last_configured_by.label | html %].
+                                                    [% END %]
+                                                </p>
+                                            [% END %]
+                                            [% IF last_upgraded %]
+                                                <p>Plugin was last upgraded on this system on [% last_upgraded | $KohaDates with_hours => 1 %].</p>
+                                            [% ELSE %]
+                                                <p>Plugin has never been upgraded.</p>
+                                            [% END %]
+                                        </div>
+                                    </li>
+                                </ol>
+                            </div>
+                        </div>
+                    </fieldset>
+
+                    <fieldset class="rows editx-collapsible is-collapsed"
+                              data-editx-collapsible="1"
+                              data-editx-collapsible-default="collapsed"
+                              data-editx-collapsible-storage="editx.configure.legacyEmailNotifications.v1">
+                        <legend>
+                            <button type="button"
+                                    class="editx-collapsible-toggle"
+                                    aria-expanded="false"
+                                    aria-controls="editx-config-section-legacy-email-notifications">
+                                <span class="editx-collapsible-toggle-icon" aria-hidden="true">+</span>
+                                <span>Legacy email notification scripts</span>
+                            </button>
+                        </legend>
+                        <div id="editx-config-section-legacy-email-notifications" class="editx-collapsible-body" aria-hidden="true">
+                            <div class="editx-collapsible-body-inner">
+                                <div class="hint">Only used by separately scheduled notify_failed_editx scripts. The nightly EDItX synchronization does not send email.</div>
+                                <ol>
+                                    <li>
+                                        <label for="notification_mailto">Recipients</label>
+                                        <input id="notification_mailto" name="notification_mailto" type="text" size="80" value="[% procurement_settings.notification_mailto | html %]" />
+                                        <div class="hint">Comma-separated email addresses. Delivery depends on the server mail setup.</div>
+                                    </li>
+                                    <li>
+                                        <label for="notification_mailfrom">Sender</label>
+                                        <input id="notification_mailfrom" name="notification_mailfrom" type="text" size="80" value="[% procurement_settings.notification_mailfrom | html %]" />
+                                        <div class="hint">Envelope sender used by mailx -r when the helper script is run.</div>
                                     </li>
                                 </ol>
                             </div>
@@ -315,22 +505,11 @@ DG,LYHYT,LYHYTHH</code></pre>
                     </fieldset>
 
                     <fieldset class="action">
-                        <input type="submit" class="btn btn-primary" value="Save configuration" />
+                        <button type="submit" class="btn btn-primary" name="save" value="1">Save configuration</button>
                         <a class="btn btn-default" href="[% tool_href | html %]">Cancel</a>
                     </fieldset>
                 </form>
 
-                <div class="page-section editx-upgrade-status">
-                    <h2>Plugin status</h2>
-                    [% IF last_configured_by %]
-                        <p>Plugin settings were last updated by borrowernumber [% last_configured_by | html %].</p>
-                    [% END %]
-                    [% IF last_upgraded %]
-                        <p>Plugin was last upgraded on this system on [% last_upgraded | $KohaDates with_hours => 1 %].</p>
-                    [% ELSE %]
-                        <p>Plugin has never been upgraded.</p>
-                    [% END %]
-                </div>
             </main>
         </div>
     </div>
@@ -344,6 +523,8 @@ DG,LYHYT,LYHYTHH</code></pre>
             const logTail = document.getElementById("runtime_log_tail");
             const wrapToggle = document.getElementById("editx-runtime-log-wrap-toggle");
             const collapsibleSections = document.querySelectorAll("[data-editx-collapsible]");
+            const sftpTable = document.getElementById("editx-sftp-sources-table");
+            const addSftpSourceButton = document.getElementById("editx-add-sftp-source");
 
             function localStorageGet(key) {
                 try {
@@ -369,30 +550,9 @@ DG,LYHYT,LYHYTHH</code></pre>
                 const icon = section.querySelector(".editx-collapsible-toggle-icon");
                 const storageKey = section.getAttribute("data-editx-collapsible-storage");
 
-                if (body && !collapsed) {
-                    body.hidden = false;
-                    body.removeAttribute("aria-hidden");
-                    if ("inert" in body) {
-                        body.inert = false;
-                    }
-                    body.offsetHeight;
-                }
-
                 section.classList.toggle("is-collapsed", collapsed);
                 if (body) {
-                    if (collapsed) {
-                        body.setAttribute("aria-hidden", "true");
-                        if ("inert" in body) {
-                            body.inert = true;
-                        }
-                        window.setTimeout(function () {
-                            if (section.classList.contains("is-collapsed")) {
-                                body.hidden = true;
-                            }
-                        }, 220);
-                    } else {
-                        body.hidden = false;
-                    }
+                    body.setAttribute("aria-hidden", collapsed ? "true" : "false");
                 }
                 if (toggle) {
                     toggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
@@ -433,6 +593,156 @@ DG,LYHYT,LYHYTHH</code></pre>
                 wrapToggle.addEventListener("change", syncRuntimeLogWrap);
                 syncRuntimeLogWrap();
             }
+
+            function clearRowInputs(row, table) {
+                row.querySelectorAll("input").forEach(function (input) {
+                    if (input.name === "sftp_port") {
+                        input.value = "22";
+                    } else if (input.name === "sftp_pattern") {
+                        input.value = "*.xml";
+                    } else if (input.name === "sftp_identity_file") {
+                        input.value = table ? table.dataset.defaultIdentityFile || "" : "";
+                    } else if (input.name === "sftp_known_hosts_file") {
+                        input.value = table ? table.dataset.defaultKnownHostsFile || "" : "";
+                    } else if (input.name === "sftp_after_download") {
+                        input.value = "keep";
+                    } else if (input.name === "sftp_strict_host_key_checking") {
+                        input.value = "yes";
+                    } else {
+                        input.value = "";
+                    }
+                });
+            }
+
+            function ensureTableHasRow(table) {
+                if (!table || table.querySelector("tbody[data-editx-sftp-source-row]")) {
+                    return;
+                }
+
+                const templateRow = table.dataset.templateRow
+                    ? document.getElementById(table.dataset.templateRow)
+                    : null;
+                if (templateRow && templateRow.content) {
+                    table.appendChild(templateRow.content.firstElementChild.cloneNode(true));
+                }
+            }
+
+            function setActiveSftpHeader(column) {
+                if (!sftpTable) {
+                    return;
+                }
+
+                sftpTable.querySelectorAll("thead th.is-active-sftp-header").forEach(function (header) {
+                    header.classList.remove("is-active-sftp-header");
+                });
+                if (!column) {
+                    return;
+                }
+
+                const header = sftpTable.querySelector("thead th[data-editx-sftp-column='" + column + "']");
+                if (header) {
+                    header.classList.add("is-active-sftp-header");
+                }
+            }
+
+            function validateSftpSourceNames() {
+                if (!sftpTable) {
+                    return;
+                }
+
+                const nameInputs = Array.from(sftpTable.querySelectorAll("input[name='sftp_id']"));
+                const counts = {};
+                nameInputs.forEach(function (input) {
+                    const value = input.value.trim();
+                    input.setCustomValidity("");
+                    if (value) {
+                        counts[value] = (counts[value] || 0) + 1;
+                    }
+                });
+                nameInputs.forEach(function (input) {
+                    const value = input.value.trim();
+                    if (value && counts[value] > 1) {
+                        input.setCustomValidity("Source name must be unique.");
+                    }
+                });
+            }
+
+            if (sftpTable && addSftpSourceButton) {
+                const firstSourceRow = sftpTable.querySelector("tbody[data-editx-sftp-source-row]");
+                if (firstSourceRow) {
+                    const template = document.createElement("template");
+                    template.id = "editx-sftp-source-row-template";
+                    const clone = firstSourceRow.cloneNode(true);
+                    clearRowInputs(clone, sftpTable);
+                    template.content.appendChild(clone);
+                    document.body.appendChild(template);
+                    sftpTable.dataset.templateRow = template.id;
+                }
+
+                addSftpSourceButton.addEventListener("click", function () {
+                    const template = document.getElementById(sftpTable.dataset.templateRow);
+                    if (template && template.content) {
+                        sftpTable.appendChild(template.content.firstElementChild.cloneNode(true));
+                        validateSftpSourceNames();
+                    }
+                });
+
+                sftpTable.addEventListener("click", function (event) {
+                    const button = event.target.closest(".js-editx-remove-row");
+                    if (!button) {
+                        return;
+                    }
+
+                    const sourceRow = button.closest("tbody[data-editx-sftp-source-row]");
+                    if (sourceRow) {
+                        sourceRow.remove();
+                        ensureTableHasRow(sftpTable);
+                        validateSftpSourceNames();
+                    }
+                });
+
+                sftpTable.addEventListener("input", function () {
+                    validateSftpSourceNames();
+                });
+                sftpTable.addEventListener("change", function () {
+                    validateSftpSourceNames();
+                });
+                sftpTable.addEventListener("focusin", function (event) {
+                    const field = event.target.closest("[data-editx-sftp-column]");
+                    setActiveSftpHeader(field ? field.dataset.editxSftpColumn : null);
+                });
+                sftpTable.addEventListener("focusout", function () {
+                    window.setTimeout(function () {
+                        const active = document.activeElement;
+                        if (!active || !sftpTable.contains(active)) {
+                            setActiveSftpHeader(null);
+                        }
+                    }, 0);
+                });
+                validateSftpSourceNames();
+            }
+
+            document.querySelectorAll(".editx-partial-table-toggle").forEach(function (button) {
+                const expander = button.closest(".editx-table-expander");
+                const wrap = expander ? expander.previousElementSibling : null;
+                const label = button.querySelector(".editx-table-expander-label");
+                if (!wrap || !wrap.matches("[data-editx-partial-table]")) {
+                    return;
+                }
+
+                button.addEventListener("click", function () {
+                    const shouldExpand = !wrap.classList.contains("is-expanded");
+                    if (shouldExpand) {
+                        wrap.style.setProperty("--editx-expanded-table-height", wrap.scrollHeight + "px");
+                    }
+                    const expanded = wrap.classList.toggle("is-expanded", shouldExpand);
+                    button.classList.toggle("is-expanded", expanded);
+                    button.setAttribute("aria-expanded", expanded ? "true" : "false");
+                    if (label) {
+                        label.textContent = expanded ? "Show fewer rows" : "Show all rows";
+                    }
+                });
+            });
         }());
     </script>
 [% END %]

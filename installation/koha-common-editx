@@ -4,11 +4,9 @@
 SHELL=/bin/sh
 PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 
-KOHA_INSTANCE=library
-
 # Koha packages already run plugins_nightly.pl from koha-common.cron.daily.
 # If you need a dedicated cron entry instead, enable nightly sync in the plugin
 # configuration and run only this plugin through Koha's nightly hook.
 # 15 3 * * * root koha-foreach --chdir --enabled /usr/share/koha/bin/cronjobs/plugins_nightly.pl -m name=EDItX-plugin
 
-# */15 * * * * library-koha /var/lib/koha/library/plugins/Koha/Plugin/Fi/KohaSuomi/Editx/cronjobs/notify_failed_editx.sh
+# */15 * * * * library-koha KOHA_CONF=/etc/koha/sites/library/koha-conf.xml /var/lib/koha/library/plugins/Koha/Plugin/Fi/KohaSuomi/Editx/cronjobs/notify_failed_editx.sh

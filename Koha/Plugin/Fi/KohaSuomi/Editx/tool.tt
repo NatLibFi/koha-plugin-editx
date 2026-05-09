@@ -1,7 +1,8 @@
 [% USE raw %]
+[% SET footerjs = 1 %]
 [% INCLUDE 'doc-head-open.inc' %]
 <title>Koha: EDItX plugin v[% plugin_display_version | html %]</title>
-<link rel="stylesheet" href="[% css_href | html %]" />
+<link rel="stylesheet" href="/api/v1/contrib/editx/static/static_files/editx.css" />
 [% INCLUDE 'doc-head-close.inc' %]
 </head>
 <body id="plugins_editx_tool" class="plugins">
@@ -81,6 +82,12 @@
                                             <input type="hidden" name="manual_source_id" value="[% source.id | html %]" />
                                         [% END %]
                                     [% END %]
+                                    [% UNLESS manual_run_available %]
+                                        <p class="editx-action-note">
+                                            Fix SFTP configuration before using the staged workflow.
+                                            <a href="[% configure_href | html %]">Open configuration</a>
+                                        </p>
+                                    [% END %]
                                     <button type="submit"
                                             class="btn btn-primary"
                                             [% UNLESS manual_run_available %]disabled="disabled"[% END %]>Stage 1: Check remote files</button>
@@ -88,23 +95,15 @@
                             [% END %]
                         </div>
 
-                        [% UNLESS manual_run_available %]
-                            <p class="editx-action-note">
-                                Fix SFTP configuration before using the staged workflow.
-                                <a href="[% configure_href | html %]">Open configuration</a>
-                            </p>
-                        [% END %]
-
                     [% IF manual_stage && manual_stage.step == 'remote' %]
-                        <form method="post" class="editx-stage-form">
-                            <input type="hidden" name="class" value="[% CLASS | html %]" />
-                            <input type="hidden" name="method" value="[% METHOD | html %]" />
-                            <input type="hidden" name="op" value="cud-stage-download-selected" />
-                            <input type="hidden" name="stage_download_selected" value="1" />
-                            [% INCLUDE 'csrf-token.inc' %]
-
-                            <h3>Remote EDItX files</h3>
-                            [% IF manual_stage.files.size %]
+                        <h3>Remote EDItX files</h3>
+                        [% IF manual_stage.files.size %]
+                            <form method="post" class="editx-stage-form">
+                                <input type="hidden" name="class" value="[% CLASS | html %]" />
+                                <input type="hidden" name="method" value="[% METHOD | html %]" />
+                                <input type="hidden" name="op" value="cud-stage-download-selected" />
+                                <input type="hidden" name="stage_download_selected" value="1" />
+                                [% INCLUDE 'csrf-token.inc' %]
                                 <table class="table table-striped editx-stage-table">
                                     <thead>
                                         <tr>
@@ -133,11 +132,23 @@
                                 </table>
                                 <div class="editx-confirm-actions">
                                     <button type="submit" class="btn btn-primary">Download selected</button>
+                                    <a class="btn btn-default" href="[% tool_href | html %]">Cancel</a>
                                 </div>
-                            [% ELSE %]
-                                <p>No remote EDItX files matched the configured SFTP sources.</p>
-                            [% END %]
-                        </form>
+                            </form>
+                        [% ELSE %]
+                            <p>No remote EDItX files matched the configured SFTP sources.</p>
+                            <form method="post" class="editx-confirm-actions">
+                                <input type="hidden" name="class" value="[% CLASS | html %]" />
+                                <input type="hidden" name="method" value="[% METHOD | html %]" />
+                                <input type="hidden" name="op" value="cud-stage-check-remote" />
+                                <input type="hidden" name="stage_check_remote" value="1" />
+                                [% INCLUDE 'csrf-token.inc' %]
+                                <button type="submit"
+                                        class="btn btn-default"
+                                        [% UNLESS manual_run_available %]disabled="disabled"[% END %]>Check remote files again</button>
+                                <a class="btn btn-default" href="[% tool_href | html %]">Return to start</a>
+                            </form>
+                        [% END %]
                     [% END %]
 
                     [% IF manual_stage && manual_stage.step == 'downloaded' %]
@@ -160,15 +171,12 @@
                             <table class="table table-striped editx-stage-table">
                                 <thead>
                                     <tr>
-                                        <th><input type="checkbox" data-editx-check-all="stage_file" aria-label="Select all downloaded files" checked="checked" /></th>
+                                        <th><input type="checkbox" data-editx-check-all="stage_file" aria-label="Select all importable downloaded files" /></th>
                                         <th>Filename</th>
-                                        <th>Notice</th>
-                                        <th>Seller</th>
-                                        <th>Vendor IDs</th>
-                                        <th>Lines</th>
-                                        <th>Copies</th>
+                                        <th>Notice / Total</th>
+                                        <th>Seller / Vendor IDs</th>
+                                        <th>Lines / Copies</th>
                                         <th>Product forms</th>
-                                        <th>Total</th>
                                         <th>Status</th>
                                     </tr>
                                 </thead>
@@ -179,7 +187,8 @@
                                                 <input type="checkbox"
                                                        name="stage_file"
                                                        value="[% file.id | html %]"
-                                                       [% IF file.status == 'valid' %]checked="checked"[% ELSE %]disabled="disabled"[% END %] />
+                                                       [% IF file.status == 'valid' && file.duplicate_status != 'already imported' %]checked="checked"[% END %]
+                                                       [% IF file.status != 'valid' %]disabled="disabled"[% END %] />
                                             </td>
                                             <td>
                                                 <code>[% file.filename | html %]</code>
@@ -188,24 +197,21 @@
                                             <td>
                                                 [% file.ship_notice_number | html %]
                                                 <div class="editx-status-note">[% file.document_type | html %]</div>
+                                                <div>
+                                                    [% file.estimated_total | html %]
+                                                    [% IF file.currencies %]<span class="editx-status-note">[% file.currencies | html %]</span>[% END %]
+                                                </div>
                                             </td>
                                             <td>
                                                 [% file.seller_name | html %]
                                                 [% IF file.buyer_contact %]
                                                     <div class="editx-status-note">Contact: [% file.buyer_contact | html %]</div>
                                                 [% END %]
-                                            </td>
-                                            <td>
                                                 <span class="editx-status-note">VendorAssignedID: [% file.vendor_assigned_id | html %]</span>
                                                 <span class="editx-status-note">BuyerAssignedID: [% file.buyer_assigned_id | html %]</span>
                                             </td>
-                                            <td>[% file.item_count | html %]</td>
-                                            <td>[% file.copy_count | html %]</td>
+                                            <td>[% file.item_count | html %] / [% file.copy_count | html %]</td>
                                             <td>[% file.product_forms | html %]</td>
-                                            <td>
-                                                [% file.estimated_total | html %]
-                                                [% IF file.currencies %]<span class="editx-status-note">[% file.currencies | html %]</span>[% END %]
-                                            </td>
                                             <td>
                                                 [% IF file.status == 'valid' %]
                                                     <span class="text-success">XML OK</span>
@@ -223,12 +229,13 @@
                             </table>
                             <div class="editx-confirm-actions">
                                 <button type="submit" class="btn btn-primary">Import selected</button>
+                                <a class="btn btn-default" href="[% tool_href | html %]">Cancel</a>
                             </div>
                         </form>
                     [% END %]
 
                     [% IF manual_stage && manual_stage.step == 'imported' && manual_stage.import_result %]
-                        <h3>Selected import finished</h3>
+                        <h3>Staged import result</h3>
                         <p>
                             Processed <strong>[% manual_stage.import_result.processed | html %]</strong>,
                             failed <strong>[% manual_stage.import_result.failed | html %]</strong>,
@@ -251,7 +258,7 @@
 
                 [% IF manual_run_attempted %]
                     <div class="page-section editx-manual-sync-result">
-                        <h2>Manual run result</h2>
+                        <h2>Acquisition result</h2>
                         [% IF manual_sync_result && manual_sync_result.order_count %]
                             <p>
                                 Created or updated
@@ -291,7 +298,7 @@
                                 </tbody>
                             </table>
                         [% ELSE %]
-                            <p>No new acquisition order lines were found after the manual run started.</p>
+                            <p>No new acquisition order lines were found for this import.</p>
                             <p>
                                 <a class="btn btn-default" href="[% manual_sync_result.history_url | html %]">Search acquisition orders from this run date</a>
                             </p>

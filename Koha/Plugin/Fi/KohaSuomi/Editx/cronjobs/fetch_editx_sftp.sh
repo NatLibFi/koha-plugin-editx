@@ -303,11 +303,16 @@ run_target() {
 
 trap cleanup EXIT INT TERM
 
-test -n "${KOHA_INSTANCE:-}" || die "KOHA_INSTANCE is not set."
-
-config_file="${EDITX_SFTP_CONFIG:-${1:-/etc/koha/sites/$KOHA_INSTANCE/editx-sftp.conf}}"
+config_file="${EDITX_SFTP_CONFIG:-${1:-}}"
+test -n "$config_file" || die "No SFTP config file given. Pass /etc/koha/sites/<instance>/editx-sftp.conf or set EDITX_SFTP_CONFIG."
 test -f "$config_file" || die "No SFTP config file: $config_file"
-runtime_log info "Starting SFTP EDItX download for $KOHA_INSTANCE using $config_file."
+instance_label="${2:-}"
+if test -z "$instance_label"; then
+    instance_label="$(printf '%s\n' "$config_file" | sed -n 's#^/etc/koha/sites/\([^/]*\)/.*#\1#p')"
+fi
+test -n "$instance_label" || instance_label="editx"
+lock_label="$(printf '%s' "$instance_label" | sed 's/[^ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-]/_/g')"
+runtime_log info "Starting SFTP EDItX download for $instance_label using $config_file."
 
 # shellcheck disable=SC1090
 . "$config_file"
@@ -319,9 +324,9 @@ fi
 
 command -v sftp >/dev/null 2>&1 || die "No sftp command found."
 
-lock_dir="/tmp/editx-sftp-$KOHA_INSTANCE.lock"
+lock_dir="/tmp/editx-sftp-$lock_label.lock"
 if ! mkdir "$lock_dir" 2>/dev/null; then
-    log "Another fetch_editx_sftp.sh run is already active for $KOHA_INSTANCE."
+    log "Another fetch_editx_sftp.sh run is already active for $instance_label."
     exit 0
 fi
 
@@ -338,4 +343,4 @@ for target in ${SFTP_TARGETS:-__default__}; do
     total_downloaded=$((total_downloaded + target_downloaded))
 done
 
-log "Finished SFTP EDItX download for $KOHA_INSTANCE: $total_downloaded file(s)."
+log "Finished SFTP EDItX download for $instance_label: $total_downloaded file(s)."
