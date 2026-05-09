@@ -40,7 +40,9 @@ sub createFromXml{
     my $object;
 
     $self->determineObjectClass($xmlObject, $parser);
+    die 'Could not determine EDItX object class from XML.' if !$self->getObjectName();
     $object = $self->createObject($self->getObjectName());
+    die 'Could not create EDItX object ' . $self->getObjectName() . '.' if !$object;
     $self->fillValues($object, $xmlObject, $parser);
 
     return $object;
@@ -78,7 +80,10 @@ sub determineObjectClass{
         }
 
         if(is_class_loaded($className) && $className->can('determineObjectClass')){
-            $result = $className->determineObjectClass($xmlObject, $parser);
+            my $candidate_object = $self->createObject($className);
+            next unless $candidate_object;
+
+            $result = $candidate_object->determineObjectClass($xmlObject, $parser);
 
             if($result == 1){
                 $self->setObjectName($className);

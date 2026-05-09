@@ -81,6 +81,7 @@ sub closeBasket {
         if(defined $basket){
             Koha::Acquisition::Baskets->find( $basket )->close;
             $self->unsetBasket($basketName);
+            $result = 1;
         }
     }
     return $result;

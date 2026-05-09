@@ -49,7 +49,9 @@ sub loadConfigXml{
 
 sub getConfigXmlPath{
     my $self = shift;
-    my $kohaConfigPath = $ENV{'KOHA_CONF'};
+    my $kohaConfigPath = $ENV{'KOHA_CONF'} // '';
+    return $configFile unless $kohaConfigPath;
+
     my $kohaPath = $ENV{'KOHA_PATH'};
     my($file, $path, $ext) = fileparse($kohaConfigPath);
     my $procurementConfigPath = $path . $configFile; # use the same path as koha_config.xml file
@@ -81,9 +83,69 @@ sub getSettings{
         }
     }
 
+    $self->applyDefaultImportPaths( $confs->{'settings'} );
     $confs->{'settings'}->{'log_directory'} = $self->getLogDir();
 
     return $confs;
+}
+
+sub applyDefaultImportPaths {
+    my ( $self, $settings ) = @_;
+
+    my $paths = $self->recommendedImportPaths();
+    return unless $paths;
+
+    my %defaults = (
+        import_tmp_path             => $paths->{tmp},
+        import_load_path            => $paths->{load},
+        import_archive_path         => $paths->{archive},
+        import_failed_path          => $paths->{fail},
+        import_failed_archived_path => $paths->{failed_archived},
+    );
+
+    for my $key ( keys %defaults ) {
+        next if defined $settings->{$key} && $settings->{$key} ne '';
+        $settings->{$key} = $defaults{$key};
+    }
+
+    return 1;
+}
+
+sub recommendedImportPaths {
+    my $self = shift;
+
+    my $instance = $self->kohaInstance();
+    return unless defined $instance && $instance ne '';
+
+    $instance =~ s/[^A-Za-z0-9_.-]/_/g;
+    my $base = "/var/lib/koha/$instance/editx";
+
+    return {
+        tmp             => "$base/tmp",
+        load            => "$base/load",
+        archive         => "$base/archive",
+        fail            => "$base/fail",
+        failed_archived => "$base/failed_archived",
+    };
+}
+
+sub kohaInstance {
+    my $self = shift;
+
+    return $ENV{'KOHA_INSTANCE'} if defined $ENV{'KOHA_INSTANCE'} && $ENV{'KOHA_INSTANCE'} ne '';
+
+    my $kohaConfigPath = $ENV{'KOHA_CONF'} // '';
+    if ( $kohaConfigPath =~ m{/etc/koha/sites/([^/]+)/} ) {
+        return $1;
+    }
+
+    my ( undef, $path ) = fileparse($kohaConfigPath);
+    $path =~ s{/$}{};
+    if ( $path =~ m{/([^/]+)$} ) {
+        return $1;
+    }
+
+    return;
 }
 
 sub loadPluginData {

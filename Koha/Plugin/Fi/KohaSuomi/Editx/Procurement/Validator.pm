@@ -7,12 +7,14 @@ use Modern::Perl;
 use XML::LibXML qw ();
 use XML::LibXML::XPathContext;
 use MARC::Record;
+use C4::Context;
 use C4::Record qw( marc2marc marc2marcxml marcxml2marc marc2dcxml marc2modsxml marc2bibtex );
 
 use Koha::Plugins;
 use Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Config;
 use Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Logger;
 use Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::File;
+use Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::VendorEdiAccount;
 
 #use File::Slurp;
 #use Encode;
@@ -281,27 +283,23 @@ sub validateEditx {
 
     my $val = $node->to_literal();
 
-    my ($san, $qualifier, $bookseller) = (0, 91, 0);
+    my ( $san, $qualifier ) = Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::VendorEdiAccount->identifier_from_values(
+      $vendoridentifier,
+      $buyeridentifier
+    );
 
-    $san = $vendoridentifier;
-    if (!$san) {
-      $san       = $buyeridentifier;
-      $qualifier = 92;
-    }
-
-    my $dbh   = C4::Context->dbh;
-    my $stmnt = $dbh->prepare("SELECT vendor_id FROM vendor_edi_accounts WHERE san = ? AND id_code_qualifier=? AND transport='FILE' AND orders_enabled='1'");
-    $stmnt->execute($san, $qualifier) or die($DBI::errstr);
-    $bookseller = $stmnt->fetchrow_array();
-
-    if (!$bookseller) {
-      if ($san) {
-        $logger->logError($fileforlog . "No vendor for SAN $san (qualifier $qualifier) in vendor_edi_accounts.");
-        $errors++;
-      } else {
-        $logger->logError($fileforlog . "No vendor in shipment notice.");
-        $errors++;
+    my $dbh = C4::Context->dbh;
+    my $vendor = Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::VendorEdiAccount->find_vendor(
+      {
+        dbh       => $dbh,
+        san       => $san,
+        qualifier => $qualifier,
       }
+    );
+
+    if ( $vendor->{status} ne 'found' ) {
+      $logger->logError( $fileforlog . $vendor->{message} );
+      $errors++;
     }
   }
 
@@ -608,7 +606,7 @@ sub validateEditx {
   if ($errors > 0) {
     $logger->logError($fileforlog . "Validation failed");
     $logger->warn("LibraryShipNotice errors detected -> must die.");
-    die;
+    die "$fileforlog LibraryShipNotice validation failed with $errors required value error(s).";
 
   } else {
     $logger->info("Validation success.");

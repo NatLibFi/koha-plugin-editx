@@ -203,6 +203,45 @@ sub _file_manager {
         like( join( "\n", @{ $logger->messages } ), qr{already imported\. Removing it\.}, 'discardDuplicateFile logs the removal' );
     };
 
+    subtest 'fillLoadFolder reports duplicates skipped before parser processing' => sub {
+        my $tmp_dir = tempdir( CLEANUP => 1 );
+        my $tmp_path = File::Spec->catdir( $tmp_dir, 'tmp' );
+        my $load_path = File::Spec->catdir( $tmp_dir, 'load' );
+        mkdir $tmp_path or die "Could not create $tmp_path: $!";
+        mkdir $load_path or die "Could not create $load_path: $!";
+
+        my $file_path = File::Spec->catfile( $tmp_path, 'order.xml' );
+        open my $fh, '>', $file_path or die "Could not create $file_path: $!";
+        print {$fh} '<LibraryShipNotice><Header><ShipNoticeNumber>ASN-TEST</ShipNoticeNumber></Header></LibraryShipNotice>';
+        close $fh or die "Could not close $file_path: $!";
+
+        my $logger = Editx::FileTestLogger->new;
+        my $msg_updater = Editx::FileTestMsgUpdater->new;
+        my $file_manager = bless {
+            tmp_path  => $tmp_path . '/',
+            load_path => $load_path . '/',
+            logger    => $logger,
+            edi_msg   => $msg_updater,
+        }, 'Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::File';
+
+        local *Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::File::fileAlreadyImported = sub { return 1; };
+
+        my $result = $file_manager->fillLoadFolder;
+
+        is_deeply(
+            $result,
+            { staged => 0, skipped => 1, postponed => 0 },
+            'fillLoadFolder returns a skipped count for duplicate tmp files'
+        );
+        ok( !-e $file_path, 'Duplicate tmp file is discarded during staging' );
+        ok( !-e File::Spec->catfile( $load_path, 'order.xml' ), 'Duplicate tmp file is not moved to the load folder' );
+        is_deeply(
+            $msg_updater->{updates},
+            [ [ 'order.xml', 'DUPLICATE' ] ],
+            'Duplicate tmp file is marked as duplicate'
+        );
+    };
+
     subtest 'fillLoadFolder dies when a file cannot be staged for import' => sub {
         my $tmp_dir = tempdir( CLEANUP => 1 );
         my $tmp_path = File::Spec->catdir( $tmp_dir, 'tmp' );
@@ -235,10 +274,74 @@ sub _file_manager {
         is_deeply( $msg_updater->{updates}, [ [ 'order.xml', 'PROCESSING' ] ], 'fillLoadFolder keeps the current PROCESSING status update before move' );
         like( join( "\n", @{ $logger->messages } ), qr{could not be moved to}, 'fillLoadFolder logs the staging move failure' );
     };
+
+    subtest 'registerFileForImport records a valid selected file for processing' => sub {
+        my $tmp_dir = tempdir( CLEANUP => 1 );
+        my $file_path = File::Spec->catfile( $tmp_dir, 'order.xml' );
+        _write_test_file($file_path);
+
+        my ( $file_manager, undef, $msg_updater ) = _file_manager( q{}, q{} );
+
+        ok( $file_manager->registerFileForImport($file_path), 'registerFileForImport accepts valid XML' );
+        is_deeply( $msg_updater->{added}, [ [ 'order.xml', '<notice />' ] ], 'registerFileForImport stores the raw EDItX message' );
+        is_deeply( $msg_updater->{bookseller_files}, [$file_path], 'registerFileForImport resolves the vendor before processing' );
+        is_deeply( $msg_updater->{updates}, [ [ 'order.xml', 'PROCESSING' ] ], 'registerFileForImport marks the file as processing' );
+    };
+
+    subtest 'registerFileForImport postpones invalid XML before selected import parsing' => sub {
+        my $tmp_dir = tempdir( CLEANUP => 1 );
+        my $file_path = File::Spec->catfile( $tmp_dir, 'broken.xml' );
+        open my $fh, '>', $file_path or die "Could not create $file_path: $!";
+        print {$fh} '<notice>';
+        close $fh or die "Could not close $file_path: $!";
+
+        my ( $file_manager, $logger, $msg_updater ) = _file_manager( q{}, q{} );
+
+        my $ok = eval {
+            $file_manager->registerFileForImport($file_path);
+            1;
+        };
+
+        ok( !$ok, 'registerFileForImport throws on invalid XML' );
+        like( $@, qr{File: \Q$file_path\E is not valid XML}, 'registerFileForImport reports the invalid selected file' );
+        is_deeply( $msg_updater->{added}, [ [ 'broken.xml', '<notice>' ] ], 'registerFileForImport stores the raw invalid message for diagnostics' );
+        ok( !exists $msg_updater->{bookseller_files}, 'registerFileForImport does not resolve a vendor for invalid XML' );
+        is_deeply( $msg_updater->{updates}, [ [ 'broken.xml', 'POSTPONED' ] ], 'registerFileForImport marks invalid XML as postponed' );
+        like( join( "\n", @{ $logger->messages } ), qr{not valid XML, processing postponed}, 'registerFileForImport logs the postponed file' );
+    };
 }
 
 {
     no warnings qw(once redefine);
+
+    subtest 'BUILD creates missing configured import folders' => sub {
+        my $tmp_dir = tempdir( CLEANUP => 1 );
+        my $base_dir = File::Spec->catdir( $tmp_dir, 'spool', 'editx' );
+        my %settings = (
+            import_tmp_path     => File::Spec->catdir( $base_dir, 'tmp' ),
+            import_load_path    => File::Spec->catdir( $base_dir, 'load' ),
+            import_archive_path => File::Spec->catdir( $base_dir, 'archive' ),
+            import_failed_path  => File::Spec->catdir( $base_dir, 'fail' ),
+            log_directory       => File::Spec->catdir( $base_dir, 'log' ),
+        );
+
+        local *Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Config::getSettings = sub {
+            return { settings => \%settings, notifications => {} };
+        };
+        local *Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Logger::new = sub {
+            return bless {}, 'Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Logger';
+        };
+        local *Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::EdiMessage::new = sub {
+            return Editx::FileTestMsgUpdater->new;
+        };
+
+        my $file_manager = Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::File->new;
+
+        for my $path ( @settings{qw(import_tmp_path import_load_path import_archive_path import_failed_path)} ) {
+            ok( -d $path, "File manager created $path" );
+        }
+        is( $file_manager->getLoadPath, $settings{import_load_path} . '/', 'File manager keeps the normalized load path' );
+    };
 
     subtest 'filePathAlreadyImported checks the qualified procurement file table' => sub {
         my $tmp_dir = tempdir( CLEANUP => 1 );

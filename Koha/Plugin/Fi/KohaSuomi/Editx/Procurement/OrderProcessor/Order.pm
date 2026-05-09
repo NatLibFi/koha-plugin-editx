@@ -8,18 +8,20 @@ use Data::Dumper;
 
 sub createOrder {
     my $self = shift;
-    my ($copyDetail, $itemDetail, $order, $biblio, $basketNumber, $authoriser) = @_;
+    my ($copyDetail, $itemDetail, $shipment_order, $biblio, $basketNumber, $authoriser) = @_;
     my $price = $itemDetail->getPriceFixedRPExcludingTax();
     my $tax_price = $itemDetail->getPriceFixedRPExcludingTax();
-    my $budgetId = $self->getBudgetId($copyDetail->getFundNumber());
+    my $fundNumber = $copyDetail->getFundNumber();
+    my $budgetId = $self->getBudgetId($fundNumber);
+    die "No Koha budget found for EDItX FundNumber '$fundNumber'." unless $budgetId;
     
-        $order = Koha::Acquisition::Order->new(
+        my $order = Koha::Acquisition::Order->new(
             {
                 basketno           => $basketNumber,
                 biblionumber       => $biblio,
                 title              => $itemDetail->getTitle(),
                 quantity           => $copyDetail->getCopyQuantity(),
-                order_vendornote   => $order->getFileName(),
+                order_vendornote   => $shipment_order->getFileName(),
                 order_internalnote => $itemDetail->getReferenceNumber(),  
                 created_by         => $authoriser,    
                 rrp                => $price,
@@ -39,6 +41,8 @@ sub createOrder {
             }
         )->store;
 
+    die "Could not create Koha acquisition order for FundNumber '$fundNumber'." unless $order && $order->ordernumber;
+
     return $order->ordernumber;
 }
 
@@ -49,7 +53,10 @@ sub createOrderItem
    my $ordernumber = shift;
 
    my $order = Koha::Acquisition::Orders->find({ ordernumber => $ordernumber });
+   die "Could not link item $itemnumber to order $ordernumber: order not found." unless $order;
    $order->add_item( $itemnumber );
+
+   return 1;
 }
 
 sub getBudgetId {

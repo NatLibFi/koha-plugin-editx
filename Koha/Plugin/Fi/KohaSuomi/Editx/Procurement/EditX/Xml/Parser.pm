@@ -59,6 +59,11 @@ sub parseFiles{
             }
             $fullFilePath = $dirPath . $fileName;
             $object = $self->parseFile($fullFilePath);
+            if ( !$object ) {
+                my $message = "Could not parse EDItX file $fullFilePath into an order object.";
+                $self->getLogger()->logError($message);
+                die $message;
+            }
             if($object){
                 $self->getLogger()->info("The file $fileName was parsed successfully.");
                 $object->setFileName($fileName);

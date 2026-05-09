@@ -118,8 +118,27 @@ cleanup() {
     exit "$status"
 }
 
+report_sftp_failure() {
+    target_label="$1"
+    action="$2"
+    stderr_file="$3"
+    stdout_file="$4"
+
+    if test -s "$stderr_file"; then
+        sftp_error_summary="$(tr '\r\n' '  ' <"$stderr_file")"
+        runtime_log error "[$target_label] SFTP $action stderr: $sftp_error_summary"
+        cat "$stderr_file" >&2
+    fi
+
+    if test -s "$stdout_file"; then
+        sftp_output_summary="$(tr '\r\n' '  ' <"$stdout_file")"
+        runtime_log error "[$target_label] SFTP $action stdout: $sftp_output_summary"
+        cat "$stdout_file" >&2
+    fi
+}
+
 build_sftp_args() {
-    set -- -q -P "$target_port" \
+    set -- -P "$target_port" \
         -oBatchMode=yes \
         -oStrictHostKeyChecking="$target_strict_host_key_checking"
 
@@ -165,6 +184,18 @@ run_target() {
     require_target_var "$target" REMOTE_DIR "$target_remote_dir"
     require_target_var "$target" LOCAL_DIR "$target_local_dir"
 
+    if test -n "$target_identity_file" && ! test -r "$target_identity_file"; then
+        die "$target_label: SSH identity file is not readable by the current user: $target_identity_file"
+    fi
+
+    if test -n "$target_known_hosts_file" && ! test -r "$target_known_hosts_file"; then
+        die "$target_label: SSH known_hosts file is not readable by the current user: $target_known_hosts_file"
+    fi
+
+    if test -n "$target_ssh_config" && ! test -r "$target_ssh_config"; then
+        die "$target_label: SSH config file is not readable by the current user: $target_ssh_config"
+    fi
+
     case "$target_after_download" in
         archive)
             require_target_var "$target" REMOTE_ARCHIVE_DIR "$target_remote_archive_dir"
@@ -176,12 +207,15 @@ run_target() {
             ;;
     esac
 
-    mkdir -p "$target_local_dir"
-    stage_dir="$(mktemp -d "$target_local_dir/.sftp-download.XXXXXX")"
-    batch_file="$(mktemp)"
-    remote_list_file="$(mktemp)"
-    downloaded_list_file="$(mktemp)"
-    sftp_error_file="$(mktemp)"
+    mkdir -p "$target_local_dir" || die "$target_label: Could not create local SFTP directory: $target_local_dir"
+    test -d "$target_local_dir" || die "$target_label: Local SFTP path is not a directory: $target_local_dir"
+    test -w "$target_local_dir" || die "$target_label: Local SFTP directory is not writable by the current user: $target_local_dir"
+
+    stage_dir="$(mktemp -d "$target_local_dir/.sftp-download.XXXXXX")" || die "$target_label: Could not create SFTP staging directory in $target_local_dir"
+    batch_file="$(mktemp)" || die "$target_label: Could not create temporary SFTP batch file."
+    remote_list_file="$(mktemp)" || die "$target_label: Could not create temporary SFTP remote list file."
+    downloaded_list_file="$(mktemp)" || die "$target_label: Could not create temporary SFTP downloaded list file."
+    sftp_error_file="$(mktemp)" || die "$target_label: Could not create temporary SFTP error file."
     target_downloaded=0
 
     runtime_log info "[$target_label] Checking remote EDItX files in $target_remote_dir."
@@ -191,9 +225,8 @@ run_target() {
     } >"$batch_file"
 
     if ! build_sftp_args >"$remote_list_file" 2>"$sftp_error_file"; then
-        cat "$sftp_error_file" >&2
-        cat "$remote_list_file" >&2
-        die "$target_label: Failed to list remote EDItX files."
+        report_sftp_failure "$target_label" "list" "$sftp_error_file" "$remote_list_file"
+        die "$target_label: Failed to list remote EDItX files from $target_user@$target_host:$target_remote_dir."
     fi
 
     if ! test -s "$remote_list_file"; then
@@ -208,7 +241,11 @@ run_target() {
         printf 'mget %s\n' "$target_pattern"
     } >"$batch_file"
 
-    build_sftp_args || die "$target_label: Failed to download EDItX files from SFTP."
+    : >"$sftp_error_file"
+    if ! build_sftp_args 2>"$sftp_error_file"; then
+        report_sftp_failure "$target_label" "download" "$sftp_error_file" /dev/null
+        die "$target_label: Failed to download EDItX files from $target_user@$target_host:$target_remote_dir."
+    fi
 
     for file in "$stage_dir"/*.xml; do
         test -f "$file" || continue
@@ -251,7 +288,11 @@ run_target() {
                     fi
                 done <"$remote_list_file"
             } >"$batch_file"
-            build_sftp_args || die "$target_label: Downloaded files, but failed to update remote SFTP files."
+            : >"$sftp_error_file"
+            if ! build_sftp_args 2>"$sftp_error_file"; then
+                report_sftp_failure "$target_label" "remote-update" "$sftp_error_file" /dev/null
+                die "$target_label: Downloaded files, but failed to update remote SFTP files in $target_user@$target_host:$target_remote_dir."
+            fi
             ;;
     esac
 

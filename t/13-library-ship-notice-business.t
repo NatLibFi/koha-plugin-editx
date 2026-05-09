@@ -1,9 +1,11 @@
 #!/usr/bin/perl
 
 use Modern::Perl;
+use utf8;
 
 use FindBin qw($Bin);
 use File::Spec;
+use File::Temp qw(tempdir);
 use Test::More;
 
 my $plugin_root = File::Spec->catdir( $Bin, '..' );
@@ -79,5 +81,44 @@ is(
     '04',
     'MARCXML MessageType is parsed'
 );
+
+subtest 'matching seller-specific notice class is detected with an object instance' => sub {
+    my $dir = tempdir( CLEANUP => 1 );
+    my $seller_file = File::Spec->catfile( $dir, 'kirjavalitys.xml' );
+
+    open my $in, '<:encoding(UTF-8)', $fixture or die "Cannot read $fixture: $!";
+    my $xml = do { local $/; <$in> };
+    close $in or die "Cannot close $fixture: $!";
+
+    $xml =~ s{<NameLine>Alexandria Test Books</NameLine>}{<NameLine>Kirjavälitys Oy</NameLine>};
+
+    open my $out, '>:encoding(UTF-8)', $seller_file or die "Cannot write $seller_file: $!";
+    print {$out} $xml;
+    close $out or die "Cannot close $seller_file: $!";
+
+    my $matched_notice = $parser->parseFile($seller_file);
+
+    isa_ok(
+        $matched_notice,
+        'Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::EditX::LibraryShipNotice::Kirjavalitys',
+        'Kirjavalitys seller-specific notice is instantiated without class-method logger failure'
+    );
+};
+
+subtest 'parseFiles dies with context when a file cannot become an order object' => sub {
+    my $dir = tempdir( CLEANUP => 1 );
+    my $bad_file = File::Spec->catfile( $dir, 'bad.xml' );
+    open my $fh, '>', $bad_file or die "Cannot write $bad_file: $!";
+    print {$fh} '<LibraryShipNotice>';
+    close $fh or die "Cannot close $bad_file: $!";
+
+    my $ok = eval {
+        $parser->parseFiles($dir);
+        1;
+    };
+
+    ok( !$ok, 'parseFiles dies on an unparseable XML file' );
+    like( $@, qr{Could not parse EDItX file \Q$bad_file\E into an order object}, 'parseFiles reports the failing file path' );
+};
 
 done_testing();

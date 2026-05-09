@@ -14,23 +14,23 @@ sub new {
 sub begin {
     my ($self) = @_;
 
-    my $dbh = $self->dbh;
-    $dbh->begin_work or die( $dbh->errstr || 'Could not start EDItX import transaction.' );
+    my $schema = $self->schema;
+    $schema->txn_begin;
 
     return Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::TransactionManager::Transaction->new(
         {
-            dbh => $dbh,
+            schema => $schema,
         }
     );
 }
 
-sub dbh {
+sub schema {
     my ($self) = @_;
 
-    return $self->{dbh} if $self->{dbh};
+    return $self->{schema} if $self->{schema};
 
-    require C4::Context;
-    return C4::Context->dbh;
+    require Koha::Database;
+    return Koha::Database->schema;
 }
 
 package Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::TransactionManager::Transaction;
@@ -50,8 +50,8 @@ sub commit {
 
     return 1 if !$self->{active};
 
-    my $dbh = $self->{dbh};
-    $dbh->commit or die( $dbh->errstr || 'Could not commit EDItX import transaction.' );
+    my $schema = $self->{schema};
+    $schema->txn_commit;
     $self->{active} = 0;
 
     return 1;
@@ -62,8 +62,8 @@ sub rollback {
 
     return 1 if !$self->{active};
 
-    my $dbh = $self->{dbh};
-    $dbh->rollback or die( $dbh->errstr || 'Could not roll back EDItX import transaction.' );
+    my $schema = $self->{schema};
+    $schema->txn_rollback;
     $self->{active} = 0;
 
     return 1;

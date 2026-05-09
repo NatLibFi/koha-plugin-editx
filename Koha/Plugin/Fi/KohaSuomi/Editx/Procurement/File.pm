@@ -8,6 +8,8 @@ use Digest::SHA qw(sha256_base64);
 use File::Slurp;
 use File::Copy;
 use File::Basename;
+use File::Path qw(make_path);
+use File::Spec;
 use XML::LibXML;
 
 use C4::Context;
@@ -100,21 +102,26 @@ sub BUILD {
         $self->setFailPath($failPath);
     }
 
-    if(! defined $tmpPath || ! -d $tmpPath){
-        die('import_tmp_path not set. Or it is not a directory.');
+    $self->_ensure_import_directory( 'import_tmp_path',     $tmpPath );
+    $self->_ensure_import_directory( 'import_load_path',    $loadPath );
+    $self->_ensure_import_directory( 'import_archive_path', $archivePath );
+    $self->_ensure_import_directory( 'import_failed_path',  $failPath );
+}
+
+sub _ensure_import_directory {
+    my ( $self, $setting_name, $path ) = @_;
+
+    die("$setting_name not set.") if !defined $path || $path eq '';
+    die("$setting_name must be an absolute path: $path") if !File::Spec->file_name_is_absolute($path);
+
+    if ( !-e $path ) {
+        eval { make_path($path); 1 } or die "$setting_name could not be created: $@";
     }
 
-    if(! defined $loadPath || ! -d $loadPath){
-        die('import_load_path not set. Or it is not a directory.');
-    }
+    die("$setting_name is not a directory: $path") if !-d $path;
+    die("$setting_name is not writable by the Koha process: $path") if !-w $path || !-x $path;
 
-    if(! defined $archivePath || ! -d $archivePath){
-        die('import_archive_path not set. Or it is not a directory.');
-    }
-
-    if(! defined $failPath || ! -d $failPath){
-        die('import_fail_path not set. Or it is not a directory.');
-    }
+    return 1;
 }
 
 sub fileAlreadyImported {
@@ -222,6 +229,11 @@ sub fillLoadFolder {
     my $tmpPath = $self->getTmpPath();
     my $loadPath = $self->getLoadPath();
     my @tmpFiles = $self->getFileNamesInDirectory($tmpPath);
+    my %result = (
+        staged    => 0,
+        skipped   => 0,
+        postponed => 0,
+    );
 
     my ($tmpFile, $fullPath, $fullLoadPath, $fullMessage);
 
@@ -242,20 +254,43 @@ sub fillLoadFolder {
             } else {
                 $self->getMsgUpdater()->update($tmpFile, 'POSTPONED');
                 $self->getLogger()->logError("File: $fullPath is not valid XML, processing postponed.");
+                $result{postponed}++;
                 next;
             }
             if(!$self->fileAlreadyImported($tmpFile)){
                 $self->getMsgUpdater()->update($tmpFile, 'PROCESSING');
                 $self->_move_file_or_die( $fullPath, $fullLoadPath, "File: $fullPath moved to $fullLoadPath for import." );
+                $result{staged}++;
             }
             else{
                 $self->discardDuplicateFile($fullPath);
+                $result{skipped}++;
             }
         }
     }
     else{
         $self->getLogger()->log("No new files found in $tmpPath for import.");
     }
+    return \%result;
+}
+
+sub registerFileForImport {
+    my ( $self, $filePath ) = @_;
+
+    my $fileName = $self->getFilenaMeFromPath($filePath);
+    my $fullMessage = read_file($filePath);
+    $self->getMsgUpdater()->add($fileName, $fullMessage);
+
+    if ( eval { XML::LibXML->new()->parse_file($filePath) } ) {
+        $self->getMsgUpdater()->findBookseller($filePath);
+        $self->getMsgUpdater()->update($fileName, 'PROCESSING');
+        return 1;
+    }
+
+    my $error = $@ || 'unknown XML parse error';
+    $self->getMsgUpdater()->update($fileName, 'POSTPONED');
+    $self->getLogger()->logError("File: $filePath is not valid XML, processing postponed.");
+    die "File: $filePath is not valid XML: $error";
 }
 
 sub normalizePath {

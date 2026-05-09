@@ -171,6 +171,49 @@
     margin-bottom: 0;
 }
 
+.editx-section-heading {
+    align-items: flex-start;
+    display: flex;
+    gap: 1rem;
+    justify-content: space-between;
+}
+
+.editx-section-heading h2 {
+    font-size: 1.15rem;
+    margin: 0 0 0.25rem;
+}
+
+.editx-section-heading p,
+.editx-staged-workflow p {
+    color: #3f4d56;
+    margin-top: 0;
+    max-width: 68rem;
+}
+
+.editx-inline-action {
+    flex: 0 0 auto;
+}
+
+.editx-stage-form h3 {
+    font-size: 1rem;
+    margin: 1rem 0 0.45rem;
+}
+
+.editx-stage-table {
+    table-layout: auto;
+}
+
+.editx-stage-table code {
+    overflow-wrap: anywhere;
+    white-space: normal;
+}
+
+.editx-stage-table th:first-child,
+.editx-stage-table td:first-child {
+    text-align: center;
+    width: 2.5rem;
+}
+
 .editx-manual-sync-confirmation h2 {
     font-size: 1.15rem;
     margin: 0 0 0.35rem;
@@ -317,6 +360,14 @@
     }
 
     .editx-manual-sync-form .btn {
+        margin-top: 0.85rem;
+    }
+
+    .editx-section-heading {
+        display: block;
+    }
+
+    .editx-inline-action {
         margin-top: 0.85rem;
     }
 }

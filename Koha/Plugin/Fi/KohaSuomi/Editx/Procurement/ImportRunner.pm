@@ -2,6 +2,8 @@
 package Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::ImportRunner;
 
 use Modern::Perl;
+use File::Basename qw(basename dirname);
+use File::Spec;
 use Try::Tiny;
 
 sub new {
@@ -20,17 +22,21 @@ sub run {
 
     $logger->info( "Started Koha::Procurement", 1 );
     $self->_log_import_settings($settings);
+    $self->ensure_userenv( $settings, $logger );
 
     my $file_manager = $self->file_manager;
     my $parser = $self->parser;
     my $order_processor = $self->order_processor;
     my $library_ship_notice_path = $settings->{settings}->{import_load_path};
 
-    $file_manager->fillLoadFolder();
+    my $staging_result = $file_manager->fillLoadFolder();
     my %orders = $parser->parseFiles($library_ship_notice_path);
     $logger->info( "EDItX parser returned " . scalar( keys %orders ) . " order file(s)." );
 
     my $result = $self->process_orders( \%orders, $file_manager, $order_processor, $logger );
+    if ( ref $staging_result eq 'HASH' ) {
+        $result->{skipped} += $staging_result->{skipped} || 0;
+    }
 
     if ( !$result->{processed} && !$result->{failed} && !$result->{skipped} ) {
         $logger->info("No EDItX order files found for processing.");
@@ -44,6 +50,132 @@ sub run {
     return $result;
 }
 
+sub run_file_paths {
+    my ( $self, $file_paths ) = @_;
+
+    $file_paths ||= [];
+
+    my $settings = $self->settings;
+    my $logger = $self->logger;
+
+    my $echo = $self->echo_logs;
+    $logger->info( 'Started selected EDItX import', $echo );
+    $self->_log_import_settings($settings);
+    $self->ensure_userenv( $settings, $logger );
+
+    my $file_manager = $self->file_manager;
+    my $parser = $self->parser;
+    my $order_processor = $self->order_processor;
+
+    my %orders;
+    my ( $failed, @errors ) = ( 0 );
+    for my $file_path (@$file_paths) {
+        try {
+            die "Selected EDItX file does not exist: $file_path\n" if !-f $file_path;
+            $file_manager->registerFileForImport($file_path);
+
+            my $order = $parser->parseFile($file_path);
+            die "Could not parse EDItX file $file_path into an order object.\n" if !$order;
+            $order->setFileName( basename($file_path) ) if $order->can('setFileName');
+            $orders{$file_path} = $order;
+        } catch {
+            my $error = $_;
+            $self->_move_failed_file( $file_manager, $file_path, $logger );
+            $failed++;
+            push @errors, {
+                file  => $file_path,
+                error => "$error",
+            };
+            $logger->warn("Selected EDItX file $file_path could not be prepared for import.");
+            $logger->logError("Error was: $error");
+        };
+    }
+
+    my $result = $self->process_orders( \%orders, $file_manager, $order_processor, $logger );
+    $result->{failed} += $failed;
+    push @{ $result->{errors} ||= [] }, @errors if @errors;
+
+    $logger->info(
+        "Ended selected EDItX import: processed $result->{processed}, failed $result->{failed}, skipped $result->{skipped}.",
+        $echo
+    );
+
+    return $result;
+}
+
+sub ensure_userenv {
+    my ( $self, $settings, $logger ) = @_;
+
+    if ( my $initializer = $self->{userenv_initializer} ) {
+        return $initializer->( $settings, $logger, $self );
+    }
+
+    my $context_class = $self->context_class;
+    return 1 if $context_class->userenv;
+
+    $settings ||= {};
+    my $authoriser = $settings->{settings} ? $settings->{settings}->{authoriser} : undef;
+    if ( !defined $authoriser || $authoriser !~ /\A[0-9]+\z/ ) {
+        die "EDItX authoriser is not configured; cannot initialize Koha userenv for cron/manual import.\n";
+    }
+
+    my $dbh = $context_class->dbh;
+    my $patron = $dbh->selectrow_hashref(
+        q{
+            SELECT borrowernumber, userid, cardnumber, firstname, surname, branchcode, flags, email
+            FROM borrowers
+            WHERE borrowernumber = ?
+        },
+        undef,
+        $authoriser
+    );
+
+    if ( !$patron ) {
+        die "EDItX authoriser borrowernumber $authoriser does not exist; cannot initialize Koha userenv.\n";
+    }
+
+    my ($branchname) = $dbh->selectrow_array(
+        q{
+            SELECT branchname
+            FROM branches
+            WHERE branchcode = ?
+        },
+        undef,
+        $patron->{branchcode}
+    );
+
+    $context_class->set_userenv(
+        $patron->{borrowernumber},
+        $patron->{userid},
+        $patron->{cardnumber},
+        $patron->{firstname},
+        $patron->{surname},
+        $patron->{branchcode},
+        $branchname // q{},
+        $patron->{flags},
+        $patron->{email},
+        undef,
+        undef,
+        undef,
+        undef,
+        undef,
+        undef
+    );
+
+    $logger->info("Initialized Koha userenv for EDItX import using authoriser $authoriser.");
+
+    return 1;
+}
+
+sub context_class {
+    my ($self) = @_;
+
+    return $self->{context_class} if $self->{context_class};
+
+    require C4::Context;
+    return 'C4::Context';
+}
+
 sub process_orders {
     my ( $self, $orders, $file_manager, $order_processor, $logger ) = @_;
 
@@ -55,6 +187,7 @@ sub process_orders {
     my $processed = 0;
     my $failed = 0;
     my $skipped = 0;
+    my @errors;
 
     while ( my ( $file_name, $order ) = each %$orders ) {
         try {
@@ -76,6 +209,10 @@ sub process_orders {
             $self->_move_failed_file( $file_manager, $file_name, $logger );
             $failed++;
             my $fail_message = "Order processing failed for file  $file_name.";
+            push @errors, {
+                file  => $file_name,
+                error => "$error",
+            };
             $logger->warn($fail_message);
             $logger->logError($fail_message);
             $logger->logError("Error was: $error");
@@ -86,6 +223,7 @@ sub process_orders {
         processed => $processed,
         failed    => $failed,
         skipped   => $skipped,
+        @errors ? ( errors => \@errors ) : (),
     };
 }
 
@@ -107,7 +245,8 @@ sub _process_order_in_transaction {
     my $transaction = $self->transaction_manager->begin;
 
     try {
-        $order_processor->process($order);
+        my $processed = $order_processor->process($order);
+        die "EDItX order processor returned false for file $file_name.\n" if !$processed;
         $transaction->commit;
     } catch {
         my $error = $_;
@@ -208,11 +347,28 @@ sub parser {
 
     $self->{parser} = Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::EditX::Xml::Parser->new((
         objectFactory => Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::EditX::Xml::ObjectFactory::LibraryShipNotice->new((
-            schemaPath => '/var/lib/koha/plugins/Koha/Plugin/Fi/KohaSuomi/Editx/Procurement/EditX/XmlSchema/',
+            schemaPath => $self->xml_schema_path,
         )),
     ));
 
     return $self->{parser};
+}
+
+sub xml_schema_path {
+    my ($self) = @_;
+
+    return $self->{schema_path} if $self->{schema_path};
+
+    my $module_path = $INC{'Koha/Plugin/Fi/KohaSuomi/Editx/Procurement/ImportRunner.pm'};
+    die 'Could not locate EDItX ImportRunner module path.' unless $module_path;
+
+    my $procurement_path = dirname($module_path);
+    my $schema_path = File::Spec->catdir( $procurement_path, 'EditX', 'XmlSchema' );
+    die "EDItX XML schema path does not exist: $schema_path" unless -d $schema_path;
+
+    $self->{schema_path} = File::Spec->catdir($schema_path, q{});
+
+    return $self->{schema_path};
 }
 
 sub order_processor {
@@ -246,6 +402,12 @@ sub validate_editx {
 
     require Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Validator;
     return Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Validator::validateEditx($file_name);
+}
+
+sub echo_logs {
+    my ($self) = @_;
+
+    return exists $self->{echo} ? $self->{echo} ? 1 : 0 : 1;
 }
 
 sub _log_import_settings {

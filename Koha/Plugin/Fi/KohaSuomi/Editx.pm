@@ -4,16 +4,23 @@ use Modern::Perl;
 ## Required for all plugins
 use base qw(Koha::Plugins::Base);
 ## We will also need to include any Koha libraries we want to access
+use Digest::SHA qw(sha256_base64);
+use File::Basename qw(basename);
+use File::Path qw(make_path);
 use File::Spec;
-use File::Temp qw(tempfile);
+use File::Temp qw(tempfile tempdir);
+use Fcntl qw(S_ISDIR);
 use IO::Handle;
 use C4::Context;
 use Koha::DateUtils qw(dt_from_string);
 use Koha::Token;
 use Koha::Plugin::Fi::KohaSuomi::Editx::RuntimeLog;
-use Mojo::JSON qw(decode_json);
+use Mojo::JSON qw(decode_json encode_json);
 use Mojo::Util qw(url_escape);
+use Net::SFTP::Foreign;
+use POSIX qw(strftime);
 use Text::CSV_XS;
+use XML::LibXML;
 use YAML::XS qw(Load);
 use utf8;
 ## Here we set our plugin version
@@ -175,10 +182,36 @@ sub tool {
     my $manual_sync_result;
     my $manual_run_attempted;
     my $manual_run_confirmation;
+    my $manual_stage;
 
     $self->_install_or_upgrade_tables();
 
-    if ( $cgi->request_method eq 'POST' && $cgi->param('run_sync_now') ) {
+    if ( $cgi->request_method eq 'GET' && $cgi->param('manual_stage_run_id') ) {
+        my $manual_messages;
+        ( $manual_messages, $manual_stage, $manual_sync_result, $manual_run_attempted ) = $self->_manual_stage_resume($cgi);
+        push @messages, @$manual_messages;
+    } elsif ( $cgi->request_method eq 'POST' && $cgi->param('stage_check_remote') ) {
+        my $manual_messages;
+        ( $manual_messages, $manual_stage ) = $self->_manual_stage_check_remote($cgi);
+        push @messages, @$manual_messages;
+    } elsif ( $cgi->request_method eq 'POST' && $cgi->param('stage_download_selected') ) {
+        my $manual_messages;
+        ( $manual_messages, $manual_stage ) = $self->_manual_stage_download_selected($cgi);
+        if ( $manual_stage && $manual_stage->{run_id} ) {
+            print $cgi->redirect( $self->_manual_stage_url( $manual_stage->{run_id}, 'downloaded' ) );
+            return;
+        }
+        push @messages, @$manual_messages;
+    } elsif ( $cgi->request_method eq 'POST' && $cgi->param('stage_import_selected') ) {
+        $manual_run_attempted = 1;
+        my $manual_messages;
+        ( $manual_messages, $manual_stage, $manual_sync_result ) = $self->_manual_stage_import_selected($cgi);
+        if ( $manual_stage && $manual_stage->{run_id} && $manual_stage->{step} && $manual_stage->{step} eq 'imported' ) {
+            print $cgi->redirect( $self->_manual_stage_url( $manual_stage->{run_id}, 'imported' ) );
+            return;
+        }
+        push @messages, @$manual_messages;
+    } elsif ( $cgi->request_method eq 'POST' && $cgi->param('run_sync_now') ) {
         $manual_run_attempted = 1;
         my $manual_messages;
         ( $manual_messages, $manual_sync_result ) = $self->_run_manual_sync_action($cgi);
@@ -194,6 +227,7 @@ sub tool {
         manual_sync_result      => $manual_sync_result,
         manual_run_attempted    => $manual_run_attempted,
         manual_run_confirmation => $manual_run_confirmation,
+        manual_stage            => $manual_stage,
     );
 }
 
@@ -604,6 +638,628 @@ sub _manual_sync_confirmation {
     );
 }
 
+sub _manual_stage_check_remote {
+    my ( $self, $cgi ) = @_;
+
+    my @messages;
+    if ( !$self->_csrf_token_valid($cgi) ) {
+        push @messages, $self->_configure_message( error => 'Remote EDItX files were not checked because the security token was invalid. Reload the page and try again.' );
+        return ( \@messages, undef );
+    }
+
+    my ( $procurement_settings, $sources, $config_messages, $has_errors ) = $self->_manual_stage_prerequisites();
+    push @messages, @$config_messages;
+    return ( \@messages, undef ) if $has_errors;
+
+    my @files;
+    for my $source (@$sources) {
+        my $listed = eval { $self->_manual_stage_list_sftp_source( $source, $procurement_settings ) };
+        if ( my $error = $@ ) {
+            push @messages, $self->_configure_message( error => "Could not check remote files for source '$source->{id}': " . $self->_compact_message($error) );
+            next;
+        }
+        push @files, @{ $listed->{files} };
+        if ( !@{ $listed->{files} } ) {
+            my $detail = "No remote EDItX files were parsed for source '$source->{id}' in $source->{remote_dir} using pattern '$source->{pattern}'.";
+            if ( my $operation = $self->_compact_message( $listed->{sftp_operation} ) ) {
+                $detail .= " SFTP operation: $operation.";
+            }
+            if ( my $summary = $self->_compact_message( $listed->{sftp_output} ) ) {
+                $detail .= " SFTP output: $summary";
+            } else {
+                $detail .= " SFTP returned no listing details.";
+            }
+            push @messages, $self->_configure_message( warning => $detail );
+        }
+    }
+
+    push @messages, $self->_configure_message( info => @files ? 'Remote EDItX files were checked. Select the files to download.' : 'No remote EDItX files matched the configured sources.' );
+
+    return (
+        \@messages,
+        {
+            step  => 'remote',
+            title => 'Stage 1: Check remote files',
+            files => \@files,
+        }
+    );
+}
+
+sub _manual_stage_resume {
+    my ( $self, $cgi ) = @_;
+
+    my @messages;
+    my $run_id = scalar $cgi->param('manual_stage_run_id') // '';
+    if ( !$self->_manual_stage_valid_run_id($run_id) ) {
+        push @messages, $self->_configure_message( warning => 'The staged EDItX file list is no longer available. Check remote files again.' );
+        return ( \@messages, undef, undef, undef );
+    }
+
+    my $manifest = eval { $self->_manual_stage_load_manifest($run_id) };
+    if ( my $error = $@ ) {
+        push @messages, $self->_configure_message( warning => 'The staged EDItX file list could not be loaded. Check remote files again. Details: ' . $self->_compact_message($error) );
+        return ( \@messages, undef, undef, undef );
+    }
+
+    my $stage = $self->_manual_stage_manifest_for_template($manifest);
+    my $status = scalar $cgi->param('stage_status') // '';
+    if ( $status eq 'downloaded' ) {
+        push @messages, $self->_configure_message( success => 'Selected EDItX files were downloaded for preview. Remote files were not changed.' );
+    } elsif ( $status eq 'imported' && $manifest->{import_result} ) {
+        my $result = $manifest->{import_result};
+        push @messages, $self->_configure_message( success => "Selected EDItX import finished: processed $result->{processed}, failed $result->{failed}, skipped $result->{skipped}." );
+    }
+
+    my $manual_sync_result = $manifest->{manual_sync_result};
+    return ( \@messages, $stage, $manual_sync_result, $manual_sync_result ? 1 : undef );
+}
+
+sub _manual_stage_download_selected {
+    my ( $self, $cgi ) = @_;
+
+    my @messages;
+    if ( !$self->_csrf_token_valid($cgi) ) {
+        push @messages, $self->_configure_message( error => 'Selected EDItX files were not downloaded because the security token was invalid. Reload the page and try again.' );
+        return ( \@messages, undef );
+    }
+
+    my @selected = $cgi->multi_param('remote_file');
+    if ( !@selected ) {
+        push @messages, $self->_configure_message( warning => 'Select at least one remote EDItX file to download.' );
+        return ( \@messages, undef );
+    }
+
+    my ( $procurement_settings, $sources, $config_messages, $has_errors ) = $self->_manual_stage_prerequisites();
+    push @messages, @$config_messages;
+    return ( \@messages, undef ) if $has_errors;
+
+    my %sources_by_id = map { $_->{id} => $_ } @$sources;
+    my %selected_by_source;
+    for my $key (@selected) {
+        my ( $source_id, $filename ) = $self->_manual_stage_parse_remote_key($key);
+        if ( !$source_id || !$filename || !$sources_by_id{$source_id} || !$self->_manual_stage_safe_filename($filename) ) {
+            push @messages, $self->_configure_message( error => 'One selected remote EDItX file was invalid. Refresh the file list and try again.' );
+            return ( \@messages, undef );
+        }
+        push @{ $selected_by_source{$source_id} }, $filename;
+    }
+
+    my ( $run_id, $run_dir ) = $self->_manual_stage_create_run_dir($procurement_settings);
+    my @downloaded;
+
+    for my $source_id ( sort keys %selected_by_source ) {
+        my $source = $sources_by_id{$source_id};
+        my $downloaded = eval {
+            $self->_manual_stage_download_sftp_files(
+                $source,
+                $procurement_settings,
+                $run_dir,
+                $selected_by_source{$source_id}
+            );
+        };
+        if ( my $error = $@ ) {
+            push @messages, $self->_configure_message( error => "Could not download EDItX files from source '$source_id': " . $self->_compact_message($error) );
+            next;
+        }
+        push @downloaded, @$downloaded;
+    }
+
+    if ( !@downloaded ) {
+        push @messages, $self->_configure_message( error => 'No selected EDItX files were downloaded.' );
+        return ( \@messages, undef );
+    }
+
+    my @files = map { $self->_manual_stage_preview_file($_) } @downloaded;
+    my $manifest = {
+        run_id     => $run_id,
+        created_at => $self->_database_timestamp(),
+        step       => 'downloaded',
+        run_dir    => $run_dir,
+        files      => \@files,
+    };
+    $self->_manual_stage_save_manifest($manifest);
+
+    push @messages, $self->_configure_message( success => 'Selected EDItX files were downloaded for preview. Remote files were not changed.' );
+
+    return (
+        \@messages,
+        {
+            step    => 'downloaded',
+            title   => 'Stage 2: Preview downloaded files',
+            run_id  => $run_id,
+            files   => \@files,
+            summary => $self->_manual_stage_summary(\@files),
+        }
+    );
+}
+
+sub _manual_stage_import_selected {
+    my ( $self, $cgi ) = @_;
+
+    my @messages;
+    if ( !$self->_csrf_token_valid($cgi) ) {
+        push @messages, $self->_configure_message( error => 'Selected EDItX files were not imported because the security token was invalid. Reload the page and try again.' );
+        return ( \@messages, undef, undef );
+    }
+
+    my $run_id = scalar $cgi->param('manual_stage_run_id') // '';
+    my @selected_ids = $cgi->multi_param('stage_file');
+    if ( !$self->_manual_stage_valid_run_id($run_id) ) {
+        push @messages, $self->_configure_message( warning => 'The staged EDItX file list is no longer available. Check remote files again.' );
+        return ( \@messages, undef, undef );
+    }
+
+    my $manifest = eval { $self->_manual_stage_load_manifest($run_id) };
+    if ( my $error = $@ ) {
+        push @messages, $self->_configure_message( warning => 'The staged EDItX file list could not be loaded. Check remote files again. Details: ' . $self->_compact_message($error) );
+        return ( \@messages, undef, undef );
+    }
+
+    if ( !@selected_ids ) {
+        push @messages, $self->_configure_message( warning => 'Select at least one downloaded EDItX file to import.' );
+        return ( \@messages, $self->_manual_stage_manifest_for_template($manifest), undef );
+    }
+
+    my %selected = map { $_ => 1 } @selected_ids;
+    my @files = grep { $selected{ $_->{id} } } @{ $manifest->{files} || [] };
+    if ( !@files ) {
+        push @messages, $self->_configure_message( warning => 'Selected staged EDItX files were not found. Refresh the remote file list and try again.' );
+        return ( \@messages, $self->_manual_stage_manifest_for_template($manifest), undef );
+    }
+
+    my @paths = map { $_->{local_path} } @files;
+    my $run_started_at = $self->_database_timestamp();
+    my $manual_sync_result;
+
+    my $result = eval {
+        require Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::ImportRunner;
+        Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::ImportRunner->new( { echo => 0 } )->run_file_paths(\@paths);
+    };
+    my $error = $@;
+
+    if ($error) {
+        push @messages, $self->_configure_message( error => 'Selected EDItX import failed: ' . $self->_compact_message($error) );
+        return ( \@messages, $self->_manual_stage_manifest_for_template($manifest), undef );
+    }
+
+    my $summary_loaded = eval {
+        $manual_sync_result = $self->_manual_sync_result($run_started_at);
+        1;
+    };
+    if ( !$summary_loaded ) {
+        push @messages, $self->_configure_message( warning => 'Selected EDItX files were imported, but the created order summary could not be loaded: ' . $self->_compact_message($@) );
+    }
+
+    push @messages, $self->_configure_message( success => "Selected EDItX import finished: processed $result->{processed}, failed $result->{failed}, skipped $result->{skipped}." );
+    $manifest->{step} = 'imported';
+    $manifest->{files} = \@files;
+    $manifest->{import_result} = $result;
+    $manifest->{manual_sync_result} = $manual_sync_result if $manual_sync_result;
+    my $saved_import_manifest = eval { $self->_manual_stage_save_manifest($manifest); 1 };
+    if ( !$saved_import_manifest ) {
+        push @messages, $self->_configure_message( warning => 'Selected EDItX files were imported, but the staged import result could not be saved for reload-safe display: ' . $self->_compact_message($@) );
+    }
+
+    return (
+        \@messages,
+        {
+            step          => 'imported',
+            title         => 'Stage 3: Import selected files',
+            run_id        => $run_id,
+            files         => \@files,
+            import_result => $result,
+        },
+        $manual_sync_result
+    );
+}
+
+sub _manual_stage_prerequisites {
+    my ($self) = @_;
+
+    my @messages;
+    my $procurement_settings = $self->_procurement_settings();
+    my ( $procurement_messages, $has_procurement_errors ) = $self->_validate_procurement_settings( $procurement_settings, 1 );
+    push @messages, @$procurement_messages;
+
+    my ( $sources, $sftp_messages, $has_sftp_errors ) = $self->_parse_sftp_sources_yaml( $self->_sftp_sources_yaml() );
+    push @messages, @$sftp_messages;
+    if ( !@$sources ) {
+        push @messages, $self->_configure_message( error => 'No EDItX SFTP sources are configured.' );
+        $has_sftp_errors = 1;
+    }
+
+    return ( $procurement_settings, $sources, \@messages, $has_procurement_errors || $has_sftp_errors ? 1 : 0 );
+}
+
+sub _manual_stage_list_sftp_source {
+    my ( $self, $source, $procurement_settings ) = @_;
+
+    my $pattern = $source->{pattern} || '*.xml';
+    my $remote_dir = $source->{remote_dir} || '/';
+    my $sftp = $self->_manual_stage_sftp_connect($source);
+    my $entries = $sftp->ls($remote_dir);
+    if ( !$entries ) {
+        my $error = $self->_manual_stage_sftp_error($sftp);
+        $sftp->disconnect if $sftp->can('disconnect');
+        die "Failed to list remote EDItX files in $remote_dir: $error\n";
+    }
+
+    my @files;
+    for my $entry (@$entries) {
+        my $filename = $entry->{filename} // '';
+        next if !$self->_manual_stage_safe_filename($filename);
+        my $attrs = $entry->{a};
+        my $perm = eval { $attrs && $attrs->perm };
+        next if defined $perm && S_ISDIR($perm);
+        next if !$self->_manual_stage_filename_matches_pattern( $filename, $pattern );
+
+        my $size = eval { $attrs && $attrs->size };
+        $size = '' if !defined $size || $@;
+        my $mtime = eval { $attrs && $attrs->mtime };
+        my $modified = defined $mtime && !$@ ? strftime( '%Y-%m-%d %H:%M:%S', localtime($mtime) ) : '';
+        my $local_dir = $source->{local_dir} || $procurement_settings->{import_tmp_path};
+        my $local_path = $local_dir ? File::Spec->catfile( $local_dir, $filename ) : '';
+        my $local_status = $local_path && -f $local_path ? 'downloaded' : 'remote only';
+
+        push @files, {
+            key          => $self->_manual_stage_remote_key( $source->{id}, $filename ),
+            source_id    => $source->{id},
+            filename     => $filename,
+            size         => $size,
+            modified     => $modified,
+            local_status => $local_status,
+            remote_dir   => $source->{remote_dir},
+            after_action => 'manual keeps remote',
+        };
+    }
+    $sftp->disconnect if $sftp->can('disconnect');
+
+    return {
+        files          => \@files,
+        sftp_output    => @$entries ? scalar(@$entries) . ' remote entr' . ( @$entries == 1 ? 'y' : 'ies' ) . ' returned.' : 'Net::SFTP::Foreign returned an empty remote directory listing.',
+        sftp_operation => "Net::SFTP::Foreign ls($remote_dir)",
+    };
+}
+
+sub _manual_stage_download_sftp_files {
+    my ( $self, $source, $procurement_settings, $run_dir, $filenames ) = @_;
+
+    my $source_dir = File::Spec->catdir( $run_dir, $source->{id} );
+    make_path($source_dir) if !-d $source_dir;
+    my $remote_dir = $source->{remote_dir} || '';
+    $remote_dir =~ s{/+\z}{};
+    my $sftp = $self->_manual_stage_sftp_connect($source);
+
+    my @downloaded;
+    for my $filename (@$filenames) {
+        my $local_path = File::Spec->catfile( $source_dir, $filename );
+        my $remote_path = $remote_dir eq '' || $remote_dir eq '/' ? "/$filename" : "$remote_dir/$filename";
+        if ( !$sftp->get( $remote_path, $local_path ) ) {
+            my $error = $self->_manual_stage_sftp_error($sftp);
+            $sftp->disconnect if $sftp->can('disconnect');
+            die "Selected EDItX file was not downloaded: $filename: $error\n";
+        }
+        die "Selected EDItX file was not downloaded: $filename\n" if !-f $local_path;
+        push @downloaded, {
+            id          => $self->_manual_stage_file_id( $source->{id}, $filename ),
+            source_id   => $source->{id},
+            source_name => $source->{id},
+            remote_file => $filename,
+            filename    => $filename,
+            local_path  => $local_path,
+        };
+    }
+    $sftp->disconnect if $sftp->can('disconnect');
+
+    return \@downloaded;
+}
+
+sub _manual_stage_sftp_connect {
+    my ( $self, $source ) = @_;
+
+    my $stderr = '';
+    open my $stderr_fh, '>', \$stderr or die "Cannot capture SFTP stderr: $!";
+
+    my @more = ( '-o', 'BatchMode=yes' );
+    push @more, ( '-F', $source->{ssh_config} ) if $source->{ssh_config};
+    push @more, ( '-o', 'UserKnownHostsFile=' . $source->{known_hosts_file} ) if $source->{known_hosts_file};
+    push @more, ( '-o', 'StrictHostKeyChecking=' . ( $source->{strict_host_key_checking} || 'yes' ) );
+
+    my $sftp = Net::SFTP::Foreign->new(
+        host      => $source->{host},
+        port      => $source->{port} || 22,
+        user      => $source->{user},
+        timeout   => 30,
+        stderr_fh => $stderr_fh,
+        more      => \@more,
+        $source->{identity_file} ? ( key_path => $source->{identity_file} ) : (),
+    );
+    $sftp->{_editx_stderr_fh}      = $stderr_fh;
+    $sftp->{_editx_stderr_capture} = \$stderr;
+
+    die 'SFTP connection failed for ' . $source->{user} . '@' . $source->{host} . ': ' . $self->_manual_stage_sftp_error($sftp) . "\n" if $sftp->error;
+
+    return $sftp;
+}
+
+sub _manual_stage_sftp_error {
+    my ( $self, $sftp ) = @_;
+
+    my $error = eval { $sftp->error };
+    $error = '' if !defined $error || $error eq '0';
+    my $stderr_ref = eval { $sftp->{_editx_stderr_capture} };
+    my $stderr = $stderr_ref && ref $stderr_ref eq 'SCALAR' ? $$stderr_ref : '';
+    $stderr =~ s/\s+\z// if defined $stderr;
+    return join( ' ', grep { defined $_ && $_ ne '' } ( $error, $stderr ) ) || 'unknown SFTP error';
+}
+
+sub _manual_stage_preview_file {
+    my ( $self, $file ) = @_;
+
+    my %preview = %$file;
+    $preview{status} = 'valid';
+
+    my $doc = eval { XML::LibXML->new( no_network => 1 )->parse_file( $file->{local_path} ) };
+    if ( my $error = $@ ) {
+        $preview{status} = 'invalid';
+        $preview{error} = $self->_compact_message($error);
+        return \%preview;
+    }
+
+    my @items = $doc->findnodes('/LibraryShipNotice/ItemDetail');
+    my ( %product_forms, %currencies, $copy_count, $estimated_total );
+    for my $item (@items) {
+        my $product_form = $self->_manual_stage_node_value( $item, 'ItemDescription/ProductForm' );
+        $product_forms{$product_form}++ if $product_form ne '';
+
+        my $price = $self->_manual_stage_node_value( $item, 'PricingDetail/Price[PriceQualifierCode/text() = "FixedRPExcludingTax"]/MonetaryAmount' );
+        my $currency = $self->_manual_stage_node_value( $item, 'PricingDetail/Price[PriceQualifierCode/text() = "FixedRPExcludingTax"]/CurrencyCode' );
+        $currencies{$currency}++ if $currency ne '';
+
+        my $item_copy_count = 0;
+        for my $copy ( $item->findnodes('CopyDetail') ) {
+            my $quantity = $self->_manual_stage_node_value( $copy, 'CopyQuantity' );
+            $quantity = 0 if $quantity !~ /\A\d+(?:\.\d+)?\z/;
+            $item_copy_count += $quantity;
+        }
+        $copy_count += $item_copy_count;
+        $estimated_total += $price * $item_copy_count if $price =~ /\A\d+(?:\.\d+)?\z/;
+    }
+
+    my $vendor_assigned_id = $self->_manual_stage_node_value( $doc, '/LibraryShipNotice/Header/BuyerParty/PartyID[PartyIDType/text() = "VendorAssignedID"]/Identifier' );
+    my $buyer_assigned_id  = $self->_manual_stage_node_value( $doc, '/LibraryShipNotice/Header/SellerParty/PartyID[PartyIDType/text() = "BuyerAssignedID"]/Identifier' );
+    my $vendor = eval {
+        require Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::VendorEdiAccount;
+        my ( $san, $qualifier ) = Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::VendorEdiAccount->identifier_from_values( $vendor_assigned_id, $buyer_assigned_id );
+        Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::VendorEdiAccount->find_vendor(
+            {
+                san       => $san,
+                qualifier => $qualifier,
+            }
+        );
+    };
+
+    $preview{document_type}      = $doc->documentElement ? $doc->documentElement->nodeName : '';
+    $preview{ship_notice_number} = $self->_manual_stage_node_value( $doc, '/LibraryShipNotice/Header/ShipNoticeNumber' );
+    $preview{seller_name}        = $self->_manual_stage_node_value( $doc, '/LibraryShipNotice/Header/SellerParty/PartyName/NameLine' );
+    $preview{buyer_contact}      = $self->_manual_stage_node_value( $doc, '/LibraryShipNotice/Header/BuyerParty/ContactPerson/PersonName' );
+    $preview{vendor_assigned_id} = $vendor_assigned_id;
+    $preview{buyer_assigned_id}  = $buyer_assigned_id;
+    $preview{item_count}         = scalar @items;
+    $preview{copy_count}         = $copy_count || 0;
+    $preview{product_forms}      = join( ', ', sort keys %product_forms );
+    $preview{currencies}         = join( ', ', sort keys %currencies );
+    $preview{estimated_total}    = defined $estimated_total ? sprintf( '%.2f', $estimated_total ) : '';
+    $preview{duplicate_status}   = $self->_manual_stage_file_already_imported( $file->{local_path}, $file->{filename} ) ? 'already imported' : 'new';
+    $preview{vendor_status}      = $vendor && ref $vendor eq 'HASH' ? $vendor->{status} : 'error';
+    $preview{vendor_message}     = $vendor && ref $vendor eq 'HASH' ? ( $vendor->{message} // '' ) : $self->_compact_message($@);
+
+    return \%preview;
+}
+
+sub _manual_stage_node_value {
+    my ( $self, $node, $xpath ) = @_;
+
+    my $value = eval { $node->findvalue($xpath) };
+    $value = '' if !defined $value || $@;
+    $value =~ s/\A\s+|\s+\z//g;
+    $value =~ s/\s+/ /g;
+    return "$value";
+}
+
+sub _manual_stage_summary {
+    my ( $self, $files ) = @_;
+
+    my $files_count = scalar @$files;
+    my $item_count = 0;
+    my $copy_count = 0;
+    for my $file (@$files) {
+        $item_count += $file->{item_count} || 0;
+        $copy_count += $file->{copy_count} || 0;
+    }
+
+    return {
+        files => $files_count,
+        items => $item_count,
+        copies => $copy_count,
+    };
+}
+
+sub _manual_stage_create_run_dir {
+    my ( $self, $procurement_settings ) = @_;
+
+    my $base_dir = $self->_manual_stage_base_dir($procurement_settings);
+    make_path($base_dir) if !-d $base_dir;
+    my $run_dir = tempdir( 'run-XXXXXX', DIR => $base_dir, CLEANUP => 0 );
+    my $run_id = basename($run_dir);
+
+    return ( $run_id, $run_dir );
+}
+
+sub _manual_stage_base_dir {
+    my ( $self, $procurement_settings ) = @_;
+
+    $procurement_settings ||= $self->_procurement_settings();
+    my $tmp_path = $procurement_settings->{import_tmp_path};
+    die 'Temporary download folder is not configured.' if !$tmp_path;
+    return File::Spec->catdir( $tmp_path, '.manual' );
+}
+
+sub _manual_stage_manifest_path {
+    my ( $self, $run_id ) = @_;
+
+    die 'Invalid manual EDItX staging run id.' if !$self->_manual_stage_valid_run_id($run_id);
+    return File::Spec->catfile( $self->_manual_stage_base_dir(), $run_id, 'manifest.json' );
+}
+
+sub _manual_stage_valid_run_id {
+    my ( $self, $run_id ) = @_;
+
+    return $run_id && $run_id =~ /\Arun-[A-Za-z0-9_]+\z/ ? 1 : 0;
+}
+
+sub _manual_stage_save_manifest {
+    my ( $self, $manifest ) = @_;
+
+    my $path = $self->_manual_stage_manifest_path( $manifest->{run_id} );
+    open my $fh, '>:encoding(UTF-8)', $path or die "Cannot write EDItX staging manifest $path: $!";
+    print {$fh} encode_json($manifest);
+    close $fh or die "Cannot close EDItX staging manifest $path: $!";
+    return 1;
+}
+
+sub _manual_stage_load_manifest {
+    my ( $self, $run_id ) = @_;
+
+    my $path = $self->_manual_stage_manifest_path($run_id);
+    open my $fh, '<:encoding(UTF-8)', $path or die "Cannot read EDItX staging manifest $path: $!";
+    my $json = do { local $/; <$fh> };
+    close $fh;
+    return decode_json($json);
+}
+
+sub _manual_stage_load_for_template {
+    my ( $self, $run_id ) = @_;
+
+    return $self->_manual_stage_manifest_for_template( $self->_manual_stage_load_manifest($run_id) );
+}
+
+sub _manual_stage_manifest_for_template {
+    my ( $self, $manifest ) = @_;
+
+    my $files = $manifest->{files} || [];
+    if ( ( $manifest->{step} || '' ) eq 'imported' ) {
+        return {
+            step          => 'imported',
+            title         => 'Stage 3: Import selected files',
+            run_id        => $manifest->{run_id},
+            files         => $files,
+            import_result => $manifest->{import_result},
+        };
+    }
+
+    return {
+        step    => 'downloaded',
+        title   => 'Stage 2: Preview downloaded files',
+        run_id  => $manifest->{run_id},
+        files   => $files,
+        summary => $self->_manual_stage_summary($files),
+    };
+}
+
+sub _manual_stage_url {
+    my ( $self, $run_id, $status ) = @_;
+
+    return $self->plugin_method_url('tool')
+        . '&manual_stage_run_id=' . url_escape($run_id)
+        . '&stage_status=' . url_escape( $status || '' );
+}
+
+sub _manual_stage_remote_key {
+    my ( $self, $source_id, $filename ) = @_;
+
+    return $source_id . '::' . $filename;
+}
+
+sub _manual_stage_parse_remote_key {
+    my ( $self, $key ) = @_;
+
+    return split /::/, $key || '', 2;
+}
+
+sub _manual_stage_file_id {
+    my ( $self, $source_id, $filename ) = @_;
+
+    my $id = "$source_id--$filename";
+    $id =~ s/[^A-Za-z0-9_.-]/_/g;
+    return $id;
+}
+
+sub _manual_stage_safe_filename {
+    my ( $self, $filename ) = @_;
+
+    return defined $filename && $filename ne '' && $filename !~ m{[\\/\0]} && $filename !~ /\A\./;
+}
+
+sub _manual_stage_sftp_glob {
+    my ( $self, $pattern ) = @_;
+
+    $pattern //= '*.xml';
+    die "Invalid EDItX SFTP file pattern: $pattern\n" if $pattern !~ /\A[A-Za-z0-9_.?*\[\]-]+\z/;
+    return $pattern;
+}
+
+sub _manual_stage_filename_matches_pattern {
+    my ( $self, $filename, $pattern ) = @_;
+
+    return 0 if !$filename;
+    $pattern = $self->_manual_stage_sftp_glob($pattern);
+
+    my $regex = quotemeta($pattern);
+    $regex =~ s/\\\*/.*/g;
+    $regex =~ s/\\\?/./g;
+
+    return $filename =~ /\A$regex\z/ ? 1 : 0;
+}
+
+sub _manual_stage_file_already_imported {
+    my ( $self, $path, $filename ) = @_;
+
+    return 0 if !$path || !-f $path;
+    open my $fh, '<:raw', $path or return 0;
+    my $data = do { local $/; <$fh> };
+    close $fh;
+    my $hash = sha256_base64($data);
+    my $table = $self->_quote_identifier( $self->get_qualified_table_name('procurement_file') );
+    my ($count) = C4::Context->dbh->selectrow_array(
+        "SELECT COUNT(*) FROM $table WHERE file_name = ? AND file_hash = ?",
+        undef,
+        $filename,
+        $hash
+    );
+    return $count ? 1 : 0;
+}
+
 sub _tool_sftp_status {
     my ( $self, $procurement_settings ) = @_;
 
@@ -648,6 +1304,7 @@ sub _output_tool_page {
         manual_sync_result     => $params{manual_sync_result},
         manual_run_attempted   => $params{manual_run_attempted},
         manual_run_confirmation => $params{manual_run_confirmation},
+        manual_stage           => $params{manual_stage},
         nightly_sync_enabled   => $self->_nightly_sync_enabled(),
         procurement_settings   => $procurement_settings,
         sftp_sources_count     => $sftp_status->{count},
@@ -915,6 +1572,11 @@ sub _manual_sync_result {
     );
 
     my ( $order_count, $item_count ) = ( 0, 0 );
+    my $run_date = substr( $started_at, 0, 10 );
+    my $history_url = '/cgi-bin/koha/acqui/histsearch.pl?do_search=1'
+        . '&from=' . url_escape($run_date)
+        . '&to=' . url_escape($run_date);
+
     for my $basket (@$baskets) {
         $order_count += $basket->{order_count} || 0;
         $item_count += $basket->{item_count} || 0;
@@ -926,6 +1588,7 @@ sub _manual_sync_result {
     return {
         started_at  => $started_at,
         baskets     => $baskets,
+        history_url => $history_url,
         order_count => $order_count,
         item_count  => $item_count,
     };
@@ -1105,6 +1768,11 @@ sub _parse_sftp_sources_yaml {
 
         if ( defined $normalized{port} && $normalized{port} !~ /\A[0-9]+\z/ ) {
             push @messages, $self->_configure_message( error => "SFTP source $source_number port '$normalized{port}' is not numeric." );
+            $has_blocking_errors = 1;
+        }
+
+        if ( $normalized{pattern} && $normalized{pattern} !~ /\A[A-Za-z0-9_.?*\[\]-]+\z/ ) {
+            push @messages, $self->_configure_message( error => "SFTP source $source_number pattern '$normalized{pattern}' is invalid; use only filename characters and simple SFTP wildcards." );
             $has_blocking_errors = 1;
         }
 
@@ -1436,7 +2104,7 @@ sub _recommended_import_paths {
         $instance = '<instance>';
     }
 
-    my $base = "/var/lib/koha/$instance/spool/editx";
+    my $base = "/var/lib/koha/$instance/editx";
 
     return {
         base            => $base,
@@ -1654,7 +2322,7 @@ sub _compact_message {
     return '' if $message eq '';
 
     if ( length $message > 800 ) {
-        $message = substr( $message, 0, 797 ) . '...';
+        $message = substr( $message, 0, 397 ) . ' ... ' . substr( $message, -398 );
     }
 
     return $message;

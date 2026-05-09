@@ -24,6 +24,7 @@ use Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::OrderProcessor::Basket;
 use Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::EditX::LibraryShipNotice::MarcHelper;
 use Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Logger;
 use Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Config;
+use Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::VendorEdiAccount;
 
 use Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::FinnaMaterialType;
 use C4::Languages qw(getlanguage);
@@ -167,6 +168,10 @@ sub process {
     }
     
     my $arr_size = @copydetailstoadd;
+    if ( !$arr_size ) {
+        $self->getLogger()->logError('Order produced no orderable copy details.');
+        return 0;
+    }
     
     $self->getLogger()->log("Updating aqbudgets ($arr_size items)...");
         
@@ -184,7 +189,11 @@ sub process {
     #    $self->getLogger()->log("Added bibliographic record $bibliostoadd[$i] to Zebra queue.");
     #}
 
-    $basketHelper->closeBasket($basketName);
+    if ( !$basketHelper->closeBasket($basketName) ) {
+        $self->getLogger()->warn("Basket '$basketName' was not closed because it was not opened during this import.");
+    }
+
+    return 1;
 }
 
 sub getBiblioDatas {   
@@ -222,16 +231,16 @@ sub getBiblioDatas {
         $self->getLogger()->debug("createBiblioMetadata bibliometa: " . $bibmeta);
 
         my $biblio_object = Koha::Biblios->find($biblio);
-        if(! $biblio){
+        if(! $biblio_object){
            die "Getting Biblio $biblio failed.";
         }
         my $marcBiblio;
         eval { $marcBiblio = $biblio_object->metadata->record({ embed_items => 1 }); };
         if ($@) {
-            $self->getLogger()->warn("Getting metadata record for Biblio $biblio died: " . $@);
+            die "Getting metadata record for Biblio $biblio died: $@";
         }
         if (! $marcBiblio) {
-            $self->getLogger()->warn("Getting metadata record for Biblio $biblio returned empty result.");
+            die "Getting metadata record for Biblio $biblio returned empty result.";
         }
         if(! C4::Biblio::ModBiblio($marcBiblio, $biblio, '')){
            die('C4::Biblio::Modbiblio failed.');
@@ -310,13 +319,51 @@ sub generateBarcode {
     my $barcode;
     my $nextnum = $self->getBarcodeValue();
 
-    if( ($autoBarcodeType eq 'preyymmddts' && $prefix) ){
+    if( (($autoBarcodeType // '') eq 'preyymmddts' && $prefix) ){
         $barcode = $prefix.$date.$nextnum;
     } else {
         $barcode = "HANK_".$date.$nextnum;
     }
 
     return $barcode;
+}
+
+sub barcodePrefixesFromPreference {
+    my ( $self, $branchPrefixes ) = @_;
+
+    return {} unless defined $branchPrefixes && $branchPrefixes =~ /\S/;
+
+    my $yaml = eval {
+        YAML::XS::Load(
+            Encode::encode(
+                'UTF-8',
+                $branchPrefixes,
+                Encode::FB_CROAK
+            )
+        );
+    };
+    if ( my $error = $@ ) {
+        chomp $error;
+        die "BarcodePrefix system preference is invalid YAML. Expected a mapping like \"Default: HANK_\" or \"MAIN: MAIN_\". Error: $error";
+    }
+    if ( !ref $yaml ) {
+        return { Default => $yaml } if defined $yaml && $yaml ne '';
+        return {};
+    }
+    if ( ref $yaml ne 'HASH' ) {
+        die 'BarcodePrefix system preference must be a YAML mapping like "Default: HANK_" or "MAIN: MAIN_", or a single global prefix value.';
+    }
+
+    return $yaml;
+}
+
+sub getMarcFromKohaFieldCompat {
+    my ( $self, $kohafield ) = @_;
+
+    my @mapping = eval { C4::Biblio::GetMarcFromKohaField($kohafield) };
+    return @mapping if !$@ && defined $mapping[0] && defined $mapping[1];
+
+    return C4::Biblio::GetMarcFromKohaField( $kohafield, '' );
 }
 
 sub advanceBarcodeValue {  
@@ -357,12 +404,12 @@ sub getBarcodeValue {
 
 sub getItemsByIsbns {   
     my $self = shift;
-    my @isbnArray = $_[0];
+    my @isbnArray = @_;
     my $resultSet = $self->getSchema()->resultset(Koha::Biblioitem->_type());
     my $result = -1;
 
     if(@isbnArray > 0){
-        $result = $resultSet->search({'isbn' => {'in' => @isbnArray}},{ select => [qw/isbn biblionumber biblioitemnumber/] });
+        $result = $resultSet->search({'isbn' => {'in' => \@isbnArray}},{ select => [qw/isbn biblionumber biblioitemnumber/] });
     }
     return $result;
 }
@@ -596,21 +643,14 @@ sub createItem {
 
         my $autoBarcodeType = C4::Context->preference("autoBarcode");
         my (%args, $nextnum, $scr);
-        my $branchPrefixes = C4::Context->preference("BarcodePrefix");
-        my $yaml = YAML::XS::Load(
-                        Encode::encode(
-                            'UTF-8',
-                            $branchPrefixes,
-                            Encode::FB_CROAK
-                        )
-        );
-        my @prefixes = values %$yaml;
+        my $yaml = $self->barcodePrefixesFromPreference( C4::Context->preference("BarcodePrefix") );
+        my @prefixes = grep { defined $_ && $_ ne '' } values %$yaml;
 
         ($args{date}) = strftime "%y%m%d", localtime;
-        ($args{tag},$args{subfield})       =  C4::Biblio::GetMarcFromKohaField("items.barcode", '');
-        ($args{loctag},$args{locsubfield}) =  C4::Biblio::GetMarcFromKohaField("items.homebranch", '');
+        ($args{tag},$args{subfield})       =  $self->getMarcFromKohaFieldCompat("items.barcode");
+        ($args{loctag},$args{locsubfield}) =  $self->getMarcFromKohaFieldCompat("items.homebranch");
         ($args{branchcode}) = $data->{'destinationlocation'};
-        ($args{prefix}) = $yaml->{$data->{'destinationlocation'}} || $yaml->{'Default'};
+        ($args{prefix}) = $yaml->{$data->{'destinationlocation'}} // $yaml->{'Default'};
         ($args{prefixes}) = \@prefixes;
         
         $self->getLogger()->debug("createItem destinationlocation: ". $data->{'destinationlocation'});
@@ -680,37 +720,32 @@ sub updateAqbudgetLog {
     my $collectioncode = $copyDetail->getLocation();
 
     my $stmnt = $dbh->prepare(qq{INSERT INTO aqbudgets_spend_log (monetary_amount,timestamp,origin,fund,account,itemtype,copy_quantity,total_amount,location,collection,biblionumber) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)});
-    $stmnt->execute($monetaryamount,$timestamp,$tied,$fundnumber,$personname,$productform,$copyquantity,$totalAmount,$destinationlocation,$collectioncode,$biblio) or die($DBI::errstr);
+    $stmnt->execute($monetaryamount,$timestamp,$tied,$fundnumber,$personname,$productform,$copyquantity,$totalAmount,$destinationlocation,$collectioncode,$biblio)
+        or die( $dbh->errstr || 'Could not update aqbudgets_spend_log.' );
 }
 
 sub getBookseller {
     my $self = shift;
     my ($order) = @_;
-    my ($san, $qualifier, $bookseller) = (0, 91, 0);
-
-    $san = $order->getVendorAssignedId();
-    if (!$san) {
-        $san = $order->getBuyerAssignedId();
-        $qualifier = 92;
-    }
+    my ( $san, $qualifier ) = Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::VendorEdiAccount->identifier_from_values(
+        $order->getVendorAssignedId(),
+        $order->getBuyerAssignedId()
+    );
 
     my $dbh = C4::Context->dbh;
-    my $stmnt = $dbh->prepare("SELECT vendor_id FROM vendor_edi_accounts WHERE san = ? AND id_code_qualifier=? AND transport='FILE' AND orders_enabled='1'");
-    $stmnt->execute($san, $qualifier) or die($DBI::errstr);
-    $bookseller = $stmnt->fetchrow_array();
+    my $vendor = Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::VendorEdiAccount->find_vendor(
+        {
+            dbh       => $dbh,
+            san       => $san,
+            qualifier => $qualifier,
+        }
+    );
 
-    if(!$bookseller){
-        my $fail_message;
-        if ($san) {
-            $fail_message = "No vendor for SAN $san (qualifier $qualifier) in vendor_edi_accounts.";
-        }
-        else {
-            $fail_message = "No vendor in shipment notice.";
-        }
-        $self->getLogger()->warn($fail_message);
-        die "$fail_message\n";
+    if ( $vendor->{status} ne 'found' ) {
+        $self->getLogger()->warn( $vendor->{message} );
+        die $vendor->{message} . "\n";
     }
-    return $bookseller;
+    return $vendor->{vendor_id};
 }
 
 sub getProductForm {
@@ -756,7 +791,7 @@ sub _get_productform_mapping {
     my $dbh = C4::Context->dbh;
     my $map_productform_table = $self->_map_productform_table();
     my $stmnt = $dbh->prepare("SELECT productform, productform_alternative FROM $map_productform_table WHERE onix_code = ?");
-    $stmnt->execute($productForm) or die($DBI::errstr);
+    $stmnt->execute($productForm) or die( $dbh->errstr || "Could not read ProductForm mapping for '$productForm'." );
 
     my $mapping = $stmnt->fetchrow_hashref();
     die "No Koha item type mapping found for EDItX ProductForm '$productForm'." unless $mapping;
