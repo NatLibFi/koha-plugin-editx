@@ -52,47 +52,48 @@
                     </div>
                 [% END %]
 
-                <div class="page-section editx-staged-workflow">
-                    <div class="editx-section-heading">
-                        <div>
-                            <h2>Staged manual workflow</h2>
-                            <p>Check remote files, download selected shipment notices for preview, then import only the selected local files.</p>
-                        </div>
-                        [% UNLESS manual_stage %]
-                            <form method="post" class="editx-inline-action">
-                                <input type="hidden" name="class" value="[% CLASS | html %]" />
-                                <input type="hidden" name="method" value="[% METHOD | html %]" />
-                                <input type="hidden" name="op" value="cud-review-stage-check-remote" />
-                                <input type="hidden" name="review_stage_check_remote" value="1" />
-                                [% INCLUDE 'csrf-token.inc' %]
-                                [% IF manual_stage_sources.size > 1 %]
-                                    <div class="editx-source-selector">
+                [% UNLESS manual_run_confirmation %]
+                    <div class="page-section editx-staged-workflow">
+                        <div class="editx-section-heading">
+                            <div>
+                                <h2>Staged manual workflow</h2>
+                                <p>Check remote files, download selected shipment notices for preview, then import only the selected local files.</p>
+                            </div>
+                            [% UNLESS manual_stage %]
+                                <form method="post" class="editx-inline-action">
+                                    <input type="hidden" name="class" value="[% CLASS | html %]" />
+                                    <input type="hidden" name="method" value="[% METHOD | html %]" />
+                                    <input type="hidden" name="op" value="cud-review-stage-check-remote" />
+                                    <input type="hidden" name="review_stage_check_remote" value="1" />
+                                    [% INCLUDE 'csrf-token.inc' %]
+                                    [% IF manual_stage_sources.size > 1 %]
+                                        <div class="editx-source-selector">
+                                            [% FOREACH source IN manual_stage_sources %]
+                                                <label>
+                                                    <input type="checkbox" name="manual_source_id" value="[% source.id | html %]" checked="checked" />
+                                                    <span>[% source.id | html %]</span>
+                                                    <span class="editx-status-note">[% source.remote | html %]</span>
+                                                </label>
+                                            [% END %]
+                                        </div>
+                                    [% ELSIF manual_stage_sources.size == 1 %]
                                         [% FOREACH source IN manual_stage_sources %]
-                                            <label>
-                                                <input type="checkbox" name="manual_source_id" value="[% source.id | html %]" checked="checked" />
-                                                <span>[% source.id | html %]</span>
-                                                <span class="editx-status-note">[% source.remote | html %]</span>
-                                            </label>
+                                            <input type="hidden" name="manual_source_id" value="[% source.id | html %]" />
                                         [% END %]
-                                    </div>
-                                [% ELSIF manual_stage_sources.size == 1 %]
-                                    [% FOREACH source IN manual_stage_sources %]
-                                        <input type="hidden" name="manual_source_id" value="[% source.id | html %]" />
                                     [% END %]
-                                [% END %]
-                                <button type="submit"
-                                        class="btn btn-primary"
-                                        [% UNLESS manual_run_available %]disabled="disabled"[% END %]>Stage 1: Check remote files</button>
-                            </form>
-                        [% END %]
-                    </div>
+                                    <button type="submit"
+                                            class="btn btn-primary"
+                                            [% UNLESS manual_run_available %]disabled="disabled"[% END %]>Stage 1: Check remote files</button>
+                                </form>
+                            [% END %]
+                        </div>
 
-                    [% UNLESS manual_run_available %]
-                        <p class="editx-action-note">
-                            Fix SFTP configuration before using the staged workflow.
-                            <a href="[% configure_href | html %]">Open configuration</a>
-                        </p>
-                    [% END %]
+                        [% UNLESS manual_run_available %]
+                            <p class="editx-action-note">
+                                Fix SFTP configuration before using the staged workflow.
+                                <a href="[% configure_href | html %]">Open configuration</a>
+                            </p>
+                        [% END %]
 
                     [% IF manual_stage && manual_stage.step == 'remote' %]
                         <form method="post" class="editx-stage-form">
@@ -242,9 +243,11 @@
                             <button type="submit"
                                     class="btn btn-default"
                                     [% UNLESS manual_run_available %]disabled="disabled"[% END %]>Check remote files again</button>
+                            <a class="btn btn-default" href="[% tool_href | html %]">Return to start</a>
                         </form>
                     [% END %]
                 </div>
+                [% END %]
 
                 [% IF manual_run_attempted %]
                     <div class="page-section editx-manual-sync-result">
@@ -372,6 +375,9 @@
                 [% END %]
 
                 [% UNLESS manual_run_confirmation || manual_stage %]
+                <div class="editx-or-separator">
+                    <span>OR</span>
+                </div>
                 <form method="post" class="page-section editx-manual-sync-form">
                     <input type="hidden" name="class" value="[% CLASS | html %]" />
                     <input type="hidden" name="method" value="[% METHOD | html %]" />

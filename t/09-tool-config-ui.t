@@ -77,6 +77,7 @@ like( $tool, qr{active_text='Operations'\s+active_method='tool'}, 'Tool page mar
 like( $tool, qr{\[%\s+USE\s+raw\s+%\]}, 'Tool page loads Koha raw plugin before using template filters' );
 like( $tool, qr{Staged manual workflow}, 'Tool page renders staged manual workflow' );
 like( $tool, qr{Stage 1: Check remote files}, 'Tool page starts staged workflow by checking remote files' );
+like( $tool, qr{\[%\s+UNLESS\s+manual_run_confirmation\s+%\]\s*<div class="page-section editx-staged-workflow">}, 'Tool page hides first-screen staged controls while showing confirmation details' );
 like( $tool, qr{\[%\s+UNLESS\s+manual_stage\s+%\][\s\S]+name="review_stage_check_remote"\s+value="1"[\s\S]+\[%\s+END\s+%\]}, 'Tool page routes stage-one action through a review step while no staged workflow is active' );
 like( $tool, qr{name="manual_source_id"}, 'Tool page lets staged manual runs scope the SFTP sources before checking remote files' );
 like( $tool, qr{name="stage_download_selected"\s+value="1"}, 'Tool page can download selected remote files' );
@@ -86,10 +87,12 @@ like( $tool, qr{name="stage_import_selected"\s+value="1"}, 'Tool page can import
 like( $tool, qr{name="stage_file"}, 'Tool page renders staged file selection checkboxes' );
 like( $tool, qr{data-editx-check-all}, 'Tool page provides select-all checkboxes for staged tables' );
 like( $tool, qr{Check remote files again}, 'Tool page offers a restart action after a staged import result' );
+like( $tool, qr{href="\[%\s*tool_href\s*\|\s*html\s*%\]">Return to start</a>}, 'Tool page lets staff return from the staged import result to the start screen' );
 unlike( $tool, qr{name="review_sync_now"\s+value="1"}, 'Tool page does not route the full-chain manual sync through a review POST action' );
 like( $tool, qr{name="run_sync_now"\s+value="1"}, 'Tool page exposes the manual sync POST action' );
 like( $tool, qr{Run full download and import}, 'Tool page starts the full-chain manual sync directly' );
-like( $tool, qr{\[%\s+UNLESS\s+manual_run_confirmation\s+\|\|\s+manual_stage\s+%\]\s*<form method="post" class="page-section editx-manual-sync-form">}, 'Tool page hides the full-chain shortcut while a staged workflow is active' );
+like( $tool, qr{\[%\s+UNLESS\s+manual_run_confirmation\s+\|\|\s+manual_stage\s+%\][\s\S]+<form method="post" class="page-section editx-manual-sync-form">}, 'Tool page hides the full-chain shortcut while a staged workflow is active' );
+like( $tool, qr{editx-or-separator[\s\S]+OR[\s\S]+editx-manual-sync-form}, 'Tool page separates the staged and full-chain actions with an OR divider' );
 like( $tool, qr{manual_run_confirmation\.title}, 'Tool page renders manual confirmation titles from the controller' );
 like( $tool, qr{name="\[%\s*manual_run_confirmation\.input_name\s*\|\s*html\s*%\]"}, 'Tool page posts the controller-selected confirmation action' );
 like( $tool, qr{manual_run_confirmation\.button_label}, 'Tool page renders the controller-selected confirmation button' );
@@ -102,9 +105,12 @@ like( $tool, qr{href="\[%\s*configure_href\s*\|\s*html\s*%\]">Configure</a>}, 'T
 like( $tool, qr{sftp_config_messages[\s\S]+editx-manual-sync-form}, 'Tool page renders SFTP prerequisite warnings before the manual action form' );
 like( $tool, qr{editx-action-note}, 'Tool page explains disabled manual runs inside the manual action form' );
 unlike( $tool, qr{Manual download and import needs valid SFTP sources}, 'Tool page does not duplicate SFTP warnings below the manual action form' );
+like( $css, qr{\.editx-manual-sync-form\s*\{[\s\S]+display:\s*block;}, 'CSS keeps the full-chain action button left aligned below the intro text' );
+like( $css, qr{\.editx-section-heading\s*\{[\s\S]+display:\s*block;}, 'CSS keeps staged workflow actions left aligned below the intro text' );
 like( $css, qr{\.editx-manual-sync-form\s+\.editx-action-note}, 'CSS styles the manual action disabled note' );
 like( $css, qr{\.editx-confirm-actions}, 'CSS styles the manual confirmation action row' );
 like( $css, qr{\.editx-source-selector}, 'CSS styles the staged source selector' );
+like( $css, qr{\.editx-or-separator::before}, 'CSS draws the OR separator rule' );
 like( $css, qr{\.editx-stage-table}, 'CSS styles staged workflow tables' );
 
 unlike( $fetch_sftp, qr{set\s+--\s+-q\b}, 'SFTP fetch script does not hide SSH diagnostics with sftp -q' );
