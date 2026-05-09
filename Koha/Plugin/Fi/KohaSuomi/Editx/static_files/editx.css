@@ -191,7 +191,34 @@
 }
 
 .editx-inline-action {
+    align-items: flex-end;
+    display: flex;
     flex: 0 0 auto;
+    flex-direction: column;
+    gap: 0.55rem;
+}
+
+.editx-source-selector {
+    display: grid;
+    gap: 0.35rem;
+    max-width: 32rem;
+    text-align: left;
+}
+
+.editx-source-selector label {
+    align-items: start;
+    display: grid;
+    gap: 0.2rem 0.4rem;
+    grid-template-columns: auto minmax(0, 1fr);
+    margin: 0;
+}
+
+.editx-source-selector input {
+    margin-top: 0.2rem;
+}
+
+.editx-source-selector .editx-status-note {
+    grid-column: 2;
 }
 
 .editx-stage-form h3 {

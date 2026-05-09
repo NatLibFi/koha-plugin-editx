@@ -34,7 +34,9 @@ like( $plugin_pm, qr{tool_href\s*=>\s*\$self->plugin_method_url\('tool'\)}, 'Con
 like( $plugin_pm, qr{manual_run_available}, 'Tool template receives manual action availability context' );
 like( $plugin_pm, qr{manual_run_confirmation}, 'Tool template receives manual run confirmation context' );
 like( $plugin_pm, qr{manual_stage\s*=>\s*\$manual_stage}, 'Tool template receives staged workflow context' );
+like( $plugin_pm, qr{manual_stage_sources}, 'Tool template receives staged workflow source choices' );
 like( $plugin_pm, qr{sub\s+_manual_sync_confirmation\s*\{}, 'Plugin builds manual run confirmation data' );
+like( $plugin_pm, qr{sub\s+_manual_selected_sftp_sources\s*\{}, 'Plugin filters staged manual checks to selected SFTP sources' );
 like( $plugin_pm, qr{sub\s+_manual_stage_check_remote\s*\{}, 'Plugin can check remote SFTP files as stage one' );
 like( $plugin_pm, qr{sub\s+_manual_stage_resume\s*\{}, 'Plugin can resume a staged workflow after a redirect-safe GET reload' );
 like( $plugin_pm, qr{sub\s+_manual_stage_download_selected\s*\{}, 'Plugin can download selected remote files into manual staging' );
@@ -75,7 +77,8 @@ like( $tool, qr{active_text='Operations'\s+active_method='tool'}, 'Tool page mar
 like( $tool, qr{\[%\s+USE\s+raw\s+%\]}, 'Tool page loads Koha raw plugin before using template filters' );
 like( $tool, qr{Staged manual workflow}, 'Tool page renders staged manual workflow' );
 like( $tool, qr{Stage 1: Check remote files}, 'Tool page starts staged workflow by checking remote files' );
-like( $tool, qr{\[%\s+UNLESS\s+manual_stage\s+%\][\s\S]+name="stage_check_remote"\s+value="1"[\s\S]+\[%\s+END\s+%\]}, 'Tool page hides the stage-one action while a staged workflow is active' );
+like( $tool, qr{\[%\s+UNLESS\s+manual_stage\s+%\][\s\S]+name="review_stage_check_remote"\s+value="1"[\s\S]+\[%\s+END\s+%\]}, 'Tool page routes stage-one action through a review step while no staged workflow is active' );
+like( $tool, qr{name="manual_source_id"}, 'Tool page lets staged manual runs scope the SFTP sources before checking remote files' );
 like( $tool, qr{name="stage_download_selected"\s+value="1"}, 'Tool page can download selected remote files' );
 like( $tool, qr{name="remote_file"}, 'Tool page renders remote file selection checkboxes' );
 like( $tool, qr{Downloaded EDItX preview}, 'Tool page renders downloaded file preview' );
@@ -83,12 +86,13 @@ like( $tool, qr{name="stage_import_selected"\s+value="1"}, 'Tool page can import
 like( $tool, qr{name="stage_file"}, 'Tool page renders staged file selection checkboxes' );
 like( $tool, qr{data-editx-check-all}, 'Tool page provides select-all checkboxes for staged tables' );
 like( $tool, qr{Check remote files again}, 'Tool page offers a restart action after a staged import result' );
-like( $tool, qr{name="review_sync_now"\s+value="1"}, 'Tool page exposes the manual sync review POST action' );
+unlike( $tool, qr{name="review_sync_now"\s+value="1"}, 'Tool page does not route the full-chain manual sync through a review POST action' );
 like( $tool, qr{name="run_sync_now"\s+value="1"}, 'Tool page exposes the manual sync POST action' );
-like( $tool, qr{Review full download and import}, 'Tool page keeps the full-chain manual sync review button' );
+like( $tool, qr{Run full download and import}, 'Tool page starts the full-chain manual sync directly' );
 like( $tool, qr{\[%\s+UNLESS\s+manual_run_confirmation\s+\|\|\s+manual_stage\s+%\]\s*<form method="post" class="page-section editx-manual-sync-form">}, 'Tool page hides the full-chain shortcut while a staged workflow is active' );
-like( $tool, qr{Confirm manual download and import}, 'Tool page renders manual sync confirmation details' );
-like( $tool, qr{Confirm and run import}, 'Tool page has a final manual sync confirmation button' );
+like( $tool, qr{manual_run_confirmation\.title}, 'Tool page renders manual confirmation titles from the controller' );
+like( $tool, qr{name="\[%\s*manual_run_confirmation\.input_name\s*\|\s*html\s*%\]"}, 'Tool page posts the controller-selected confirmation action' );
+like( $tool, qr{manual_run_confirmation\.button_label}, 'Tool page renders the controller-selected confirmation button' );
 unlike( $tool, qr{onclick="return confirm}, 'Tool page does not rely on a browser confirm prompt for manual sync' );
 like( $tool, qr{Manual run result}, 'Tool page renders manual run results' );
 like( $tool, qr{manual_sync_result\.history_url}, 'Tool page links empty manual results to acquisition order search' );
@@ -100,6 +104,7 @@ like( $tool, qr{editx-action-note}, 'Tool page explains disabled manual runs ins
 unlike( $tool, qr{Manual download and import needs valid SFTP sources}, 'Tool page does not duplicate SFTP warnings below the manual action form' );
 like( $css, qr{\.editx-manual-sync-form\s+\.editx-action-note}, 'CSS styles the manual action disabled note' );
 like( $css, qr{\.editx-confirm-actions}, 'CSS styles the manual confirmation action row' );
+like( $css, qr{\.editx-source-selector}, 'CSS styles the staged source selector' );
 like( $css, qr{\.editx-stage-table}, 'CSS styles staged workflow tables' );
 
 unlike( $fetch_sftp, qr{set\s+--\s+-q\b}, 'SFTP fetch script does not hide SSH diagnostics with sftp -q' );

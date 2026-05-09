@@ -175,6 +175,46 @@ YAML
     }
 }
 
+subtest 'Manual staged source selection scopes remote checks without affecting default batch scope' => sub {
+    my $sources = [
+        { id => 'alpha', host => 'sftp-a.example.org' },
+        { id => 'beta',  host => 'sftp-b.example.org' },
+    ];
+
+    my ( $selected, $messages, $has_errors ) = $plugin->_manual_selected_sftp_sources(
+        t::EditXFakeCGI->new( { manual_source_id => ['beta'] } ),
+        $sources,
+        require_selection => 1
+    );
+    is_deeply( [ map { $_->{id} } @$selected ], ['beta'], 'Selected staged source limits the next remote check' );
+    is_deeply( $messages, [], 'Selected staged source has no warning messages' );
+    ok( !$has_errors, 'Selected staged source has no errors' );
+
+    ( $selected, $messages, $has_errors ) = $plugin->_manual_selected_sftp_sources(
+        t::EditXFakeCGI->new( {} ),
+        $sources,
+        require_selection => 0
+    );
+    is_deeply( [ map { $_->{id} } @$selected ], [qw(alpha beta)], 'Missing source selection keeps the default all-source scope' );
+    ok( !$has_errors, 'Default all-source scope has no errors' );
+
+    ( $selected, $messages, $has_errors ) = $plugin->_manual_selected_sftp_sources(
+        t::EditXFakeCGI->new( {} ),
+        $sources,
+        require_selection => 1
+    );
+    ok( $has_errors, 'Review step requires at least one selected source' );
+    like( _message_text($messages), qr{Select at least one SFTP source to check}, 'Review step reports missing source selection' );
+
+    ( $selected, $messages, $has_errors ) = $plugin->_manual_selected_sftp_sources(
+        t::EditXFakeCGI->new( { manual_source_id => ['missing'] } ),
+        $sources,
+        require_selection => 1
+    );
+    ok( $has_errors, 'Unknown selected source is rejected' );
+    like( _message_text($messages), qr{Selected SFTP source 'missing' is no longer configured}, 'Unknown selected source has an actionable warning' );
+};
+
 subtest 'Manual staged SFTP listing parses Net::SFTP::Foreign entries and keeps diagnostics' => sub {
     no strict 'refs';
     no warnings qw(once redefine);

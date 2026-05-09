@@ -62,9 +62,24 @@
                             <form method="post" class="editx-inline-action">
                                 <input type="hidden" name="class" value="[% CLASS | html %]" />
                                 <input type="hidden" name="method" value="[% METHOD | html %]" />
-                                <input type="hidden" name="op" value="cud-stage-check-remote" />
-                                <input type="hidden" name="stage_check_remote" value="1" />
+                                <input type="hidden" name="op" value="cud-review-stage-check-remote" />
+                                <input type="hidden" name="review_stage_check_remote" value="1" />
                                 [% INCLUDE 'csrf-token.inc' %]
+                                [% IF manual_stage_sources.size > 1 %]
+                                    <div class="editx-source-selector">
+                                        [% FOREACH source IN manual_stage_sources %]
+                                            <label>
+                                                <input type="checkbox" name="manual_source_id" value="[% source.id | html %]" checked="checked" />
+                                                <span>[% source.id | html %]</span>
+                                                <span class="editx-status-note">[% source.remote | html %]</span>
+                                            </label>
+                                        [% END %]
+                                    </div>
+                                [% ELSIF manual_stage_sources.size == 1 %]
+                                    [% FOREACH source IN manual_stage_sources %]
+                                        <input type="hidden" name="manual_source_id" value="[% source.id | html %]" />
+                                    [% END %]
+                                [% END %]
                                 <button type="submit"
                                         class="btn btn-primary"
                                         [% UNLESS manual_run_available %]disabled="disabled"[% END %]>Stage 1: Check remote files</button>
@@ -283,8 +298,8 @@
 
                 [% IF manual_run_confirmation %]
                     <div class="page-section editx-manual-sync-confirmation">
-                        <h2>Confirm manual download and import</h2>
-                        <p>Review the saved configuration that will be used for this run.</p>
+                        <h2>[% manual_run_confirmation.title | html %]</h2>
+                        <p>[% manual_run_confirmation.description | html %]</p>
 
                         <h3>SFTP intake</h3>
                         <table class="table table-striped">
@@ -342,10 +357,15 @@
                         <form method="post" class="editx-confirm-actions">
                             <input type="hidden" name="class" value="[% CLASS | html %]" />
                             <input type="hidden" name="method" value="[% METHOD | html %]" />
-                            <input type="hidden" name="op" value="cud-run-sync-now" />
-                            <input type="hidden" name="run_sync_now" value="1" />
+                            <input type="hidden" name="op" value="[% manual_run_confirmation.op | html %]" />
+                            <input type="hidden" name="[% manual_run_confirmation.input_name | html %]" value="1" />
+                            [% IF manual_run_confirmation.action == 'stage_check_remote' %]
+                                [% FOREACH source IN manual_run_confirmation.sources %]
+                                    <input type="hidden" name="manual_source_id" value="[% source.id | html %]" />
+                                [% END %]
+                            [% END %]
                             [% INCLUDE 'csrf-token.inc' %]
-                            <button type="submit" class="btn btn-primary">Confirm and run import</button>
+                            <button type="submit" class="btn btn-primary">[% manual_run_confirmation.button_label | html %]</button>
                             <a class="btn btn-default" href="[% tool_href | html %]">Cancel</a>
                         </form>
                     </div>
@@ -355,8 +375,8 @@
                 <form method="post" class="page-section editx-manual-sync-form">
                     <input type="hidden" name="class" value="[% CLASS | html %]" />
                     <input type="hidden" name="method" value="[% METHOD | html %]" />
-                    <input type="hidden" name="op" value="cud-review-sync-now" />
-                    <input type="hidden" name="review_sync_now" value="1" />
+                    <input type="hidden" name="op" value="cud-run-sync-now" />
+                    <input type="hidden" name="run_sync_now" value="1" />
                     [% INCLUDE 'csrf-token.inc' %]
                     <div>
                         <h2>Download and import</h2>
@@ -370,7 +390,7 @@
                     </div>
                     <button type="submit"
                             class="btn btn-primary"
-                            [% UNLESS manual_run_available %]disabled="disabled"[% END %]>Review full download and import</button>
+                            [% UNLESS manual_run_available %]disabled="disabled"[% END %]>Run full download and import</button>
                 </form>
                 [% END %]
             </main>

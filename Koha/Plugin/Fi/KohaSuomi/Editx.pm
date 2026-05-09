@@ -216,9 +216,9 @@ sub tool {
         my $manual_messages;
         ( $manual_messages, $manual_sync_result ) = $self->_run_manual_sync_action($cgi);
         push @messages, @$manual_messages;
-    } elsif ( $cgi->request_method eq 'POST' && $cgi->param('review_sync_now') ) {
+    } elsif ( $cgi->request_method eq 'POST' && $cgi->param('review_stage_check_remote') ) {
         my $manual_messages;
-        ( $manual_messages, $manual_run_confirmation ) = $self->_manual_sync_confirmation($cgi);
+        ( $manual_messages, $manual_run_confirmation ) = $self->_manual_sync_confirmation( $cgi, action => 'stage_check_remote' );
         push @messages, @$manual_messages;
     }
 
@@ -581,9 +581,10 @@ sub _run_manual_sync_action {
 }
 
 sub _manual_sync_confirmation {
-    my ( $self, $cgi ) = @_;
+    my ( $self, $cgi, %params ) = @_;
 
     my @messages;
+    my $action = $params{action} || 'run_sync_now';
     if ( !$self->_csrf_token_valid($cgi) ) {
         push @messages, $self->_configure_message( error => 'Manual EDItX synchronization confirmation was not prepared because the security token was invalid. Reload the page and try again.' );
         $self->_log_runtime( warn => 'Manual EDItX synchronization confirmation rejected by invalid CSRF token', { operation => 'manual_sync', interface => 'staff' } );
@@ -599,6 +600,13 @@ sub _manual_sync_confirmation {
     if ( !@$sources ) {
         push @messages, $self->_configure_message( error => 'No EDItX SFTP sources are configured.' );
         $has_sftp_errors = 1;
+    }
+    if ( $action eq 'stage_check_remote' ) {
+        my ( $selected_sources, $source_messages, $has_source_errors ) =
+            $self->_manual_selected_sftp_sources( $cgi, $sources, require_selection => 1 );
+        push @messages, @$source_messages;
+        $sources = $selected_sources if !$has_source_errors;
+        $has_sftp_errors ||= $has_source_errors;
     }
 
     return ( \@messages, undef ) if $has_procurement_errors || $has_sftp_errors;
@@ -632,8 +640,14 @@ sub _manual_sync_confirmation {
     return (
         \@messages,
         {
-            sources => \@sources,
-            folders => \@folders,
+            sources      => \@sources,
+            folders      => \@folders,
+            action       => $action,
+            title        => $action eq 'stage_check_remote' ? 'Confirm staged remote check' : 'Confirm manual download and import',
+            description  => $action eq 'stage_check_remote' ? 'Review the saved configuration before checking remote EDItX files.' : 'Review the saved configuration that will be used for this run.',
+            op           => $action eq 'stage_check_remote' ? 'cud-stage-check-remote' : 'cud-run-sync-now',
+            input_name   => $action eq 'stage_check_remote' ? 'stage_check_remote' : 'run_sync_now',
+            button_label => $action eq 'stage_check_remote' ? 'Confirm and check remote files' : 'Confirm and run import',
         }
     );
 }
@@ -647,7 +661,7 @@ sub _manual_stage_check_remote {
         return ( \@messages, undef );
     }
 
-    my ( $procurement_settings, $sources, $config_messages, $has_errors ) = $self->_manual_stage_prerequisites();
+    my ( $procurement_settings, $sources, $config_messages, $has_errors ) = $self->_manual_stage_prerequisites($cgi);
     push @messages, @$config_messages;
     return ( \@messages, undef ) if $has_errors;
 
@@ -874,7 +888,7 @@ sub _manual_stage_import_selected {
 }
 
 sub _manual_stage_prerequisites {
-    my ($self) = @_;
+    my ( $self, $cgi ) = @_;
 
     my @messages;
     my $procurement_settings = $self->_procurement_settings();
@@ -887,8 +901,63 @@ sub _manual_stage_prerequisites {
         push @messages, $self->_configure_message( error => 'No EDItX SFTP sources are configured.' );
         $has_sftp_errors = 1;
     }
+    if ($cgi) {
+        my ( $selected_sources, $source_messages, $has_source_errors ) =
+            $self->_manual_selected_sftp_sources( $cgi, $sources, require_selection => 0 );
+        push @messages, @$source_messages;
+        $sources = $selected_sources if !$has_source_errors;
+        $has_sftp_errors ||= $has_source_errors;
+    }
 
     return ( $procurement_settings, $sources, \@messages, $has_procurement_errors || $has_sftp_errors ? 1 : 0 );
+}
+
+sub _manual_selected_sftp_sources {
+    my ( $self, $cgi, $sources, %params ) = @_;
+
+    my @messages;
+    my @selected_ids = grep { defined $_ && $_ ne q{} } $cgi->multi_param('manual_source_id');
+    if ( !@selected_ids ) {
+        return ( $sources, \@messages, 0 ) if !$params{require_selection};
+
+        push @messages, $self->_configure_message( warning => 'Select at least one SFTP source to check.' );
+        return ( [], \@messages, 1 );
+    }
+
+    my %sources_by_id = map { $_->{id} => $_ } @$sources;
+    my %seen;
+    my @selected_sources;
+    my $has_errors = 0;
+    for my $source_id (@selected_ids) {
+        next if $seen{$source_id}++;
+        if ( !$sources_by_id{$source_id} ) {
+            push @messages, $self->_configure_message( error => "Selected SFTP source '$source_id' is no longer configured." );
+            $has_errors = 1;
+            next;
+        }
+        push @selected_sources, $sources_by_id{$source_id};
+    }
+
+    if ( !@selected_sources && !$has_errors ) {
+        push @messages, $self->_configure_message( warning => 'Select at least one SFTP source to check.' );
+        $has_errors = 1;
+    }
+
+    return ( \@selected_sources, \@messages, $has_errors ? 1 : 0 );
+}
+
+sub _manual_stage_source_options {
+    my ( $self, $procurement_settings ) = @_;
+
+    my ( $sources ) = $self->_parse_sftp_sources_yaml( $self->_sftp_sources_yaml() );
+    return [
+        map {
+            {
+                id     => $_->{id},
+                remote => ( $_->{user} || q{} ) . '@' . ( $_->{host} || q{} ) . ':' . ( $_->{port} || q{} ) . ' ' . ( $_->{remote_dir} || q{} ),
+            }
+        } @$sources
+    ];
 }
 
 sub _manual_stage_list_sftp_source {
@@ -1305,6 +1374,7 @@ sub _output_tool_page {
         manual_run_attempted   => $params{manual_run_attempted},
         manual_run_confirmation => $params{manual_run_confirmation},
         manual_stage           => $params{manual_stage},
+        manual_stage_sources   => $self->_manual_stage_source_options($procurement_settings),
         nightly_sync_enabled   => $self->_nightly_sync_enabled(),
         procurement_settings   => $procurement_settings,
         sftp_sources_count     => $sftp_status->{count},
