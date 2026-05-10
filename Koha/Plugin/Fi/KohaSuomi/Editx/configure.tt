@@ -452,11 +452,14 @@ DG,LYHYT,LYHYTHH</code></pre>
                                         <div class="editx-plugin-status-lines">
                                             [% IF last_configured_by %]
                                                 <p>
-                                                    Last updated by
+                                                    Configuration last saved by
                                                     [% IF last_configured_by.href %]
                                                         <a href="[% last_configured_by.href | html %]">[% last_configured_by.label | html %]</a>.
                                                     [% ELSE %]
                                                         [% last_configured_by.label | html %].
+                                                    [% END %]
+                                                    [% IF last_configured_at %]
+                                                        <span class="editx-plugin-status-date">Saved on [% last_configured_at | $KohaDates with_hours => 1 %].</span>
                                                     [% END %]
                                                 </p>
                                             [% END %]

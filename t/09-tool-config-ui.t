@@ -42,6 +42,7 @@ unlike( $plugin_pm, qr{sub\s+api_routes\s*\{}, 'Plugin does not add custom API r
 unlike( $plugin_pm, qr{static_asset_url}, 'Plugin does not build stylesheet URLs in the controller' );
 like( $plugin_pm, qr{plugin_display_version\s*=>\s*\$self->plugin_display_version\(\)}, 'Plugin still passes the display version to templates' );
 like( $plugin_pm, qr{last_configured_by\s*=>\s*scalar\s+\$self->_last_configured_by_context\(\)}, 'Optional last configured patron context is passed to templates in scalar context' );
+like( $plugin_pm, qr{last_configured_at\s*=>\s*scalar\s+\$self->retrieve_data\('last_configured_at'\)}, 'Optional last configuration timestamp is passed to templates in scalar context' );
 like( $plugin_pm, qr{last_upgraded\s*=>\s*scalar\s+\$self->retrieve_data\('last_upgraded'\)}, 'Optional last upgraded value is passed to templates in scalar context' );
 unlike( $plugin_pm, qr{\Q$unofficial_instance_env\E}, 'Plugin Perl code does not treat unofficial instance environment as a Koha instance source' );
 unlike( $plugin_pm, qr{editx_debug|_template_debug_comment|editx_debug_comment}, 'Plugin Perl code does not keep deployment debug comment hooks' );
@@ -121,7 +122,8 @@ like( $configure, qr{data-editx-collapsible-storage="editx\.configure\.runtimeLo
 like( $configure, qr{data-editx-collapsible-default="collapsed"}, 'Runtime logging section is collapsed by default' );
 like( $configure, qr{Runtime and plugin status}, 'Runtime section title includes plugin status' );
 like( $configure, qr{class="editx-runtime-status-list"[\s\S]+class="editx-runtime-field-row"[\s\S]+class="editx-runtime-field-row editx-plugin-status"}, 'Runtime section uses plugin-owned layout classes instead of raw Koha row labels' );
-like( $configure, qr{Last updated by[\s\S]+last_configured_by\.href[\s\S]+last_configured_by\.label}, 'Configure page links the last configuration editor by name when available' );
+like( $configure, qr{Configuration last saved by[\s\S]+last_configured_by\.href[\s\S]+last_configured_by\.label[\s\S]+last_configured_at\s+\|\s+\$KohaDates\s+with_hours\s+=>\s+1}, 'Configure page links the last configuration editor by name and shows the save timestamp when available' );
+like( $css, qr{\.editx-plugin-status-date\s*\{[\s\S]+display:\s*block;}, 'CSS renders the configuration save timestamp under the editor line' );
 unlike( $configure, qr{Plugin settings were last updated by borrowernumber}, 'Configure page no longer shows raw last-updated borrowernumber text' );
 like( $configure, qr{window\.localStorage}, 'Configure page persists the runtime logging collapse state in localStorage' );
 unlike( $configure, qr{hidden="hidden"}, 'Runtime logging collapsible does not rely on a hidden attribute timer' );

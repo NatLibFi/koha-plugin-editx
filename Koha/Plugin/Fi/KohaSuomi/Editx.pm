@@ -393,6 +393,7 @@ sub configure {
                     )
                 ) },
                 last_configured_by   => ( C4::Context->userenv || {} )->{'number'},
+                last_configured_at   => $self->_current_timestamp(),
             }
         );
         $self->_log_runtime(
@@ -1483,6 +1484,7 @@ sub _output_configure_page {
         locations_text         => join( ', ', @{ $self->_authorised_values('LOC') } ),
         branches_text          => join( ', ', @{ $self->_branches() } ),
         last_configured_by     => scalar $self->_last_configured_by_context(),
+        last_configured_at     => scalar $self->retrieve_data('last_configured_at'),
         last_upgraded          => scalar $self->retrieve_data('last_upgraded'),
         recommended_import_paths => $self->_recommended_import_paths(),
         recommended_sftp_paths   => $self->_recommended_sftp_paths(),
@@ -1705,10 +1707,18 @@ sub _store_last_configured_by {
     $self->store_data(
         {
             last_configured_by => ( C4::Context->userenv || {} )->{'number'},
+            last_configured_at => $self->_current_timestamp(),
         }
     );
 
     return;
+}
+
+sub _current_timestamp {
+    my ($self) = @_;
+
+    my $dt = dt_from_string();
+    return $dt->ymd('-') . ' ' . $dt->hms(':');
 }
 
 sub _last_configured_by_context {

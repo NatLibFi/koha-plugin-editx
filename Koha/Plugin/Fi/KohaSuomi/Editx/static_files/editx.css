@@ -775,6 +775,12 @@
     margin: 0 0 0.35rem;
 }
 
+.editx-plugin-status-date {
+    display: block;
+    font-size: 0.9rem;
+    margin-top: 0.12rem;
+}
+
 .editx-plugin-status-lines p:last-child {
     margin-bottom: 0;
 }
