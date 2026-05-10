@@ -50,18 +50,41 @@ my $plugin = bless {}, $plugin_class;
     }
 
     sub do {
-        my ( $self, $sql ) = @_;
+        my ( $self, $sql, $attrs, @bind ) = @_;
 
         push @{ $self->{do_calls} }, $sql;
+        push @{ $self->{do_binds} }, \@bind if @bind;
         return exists $self->{do_result} ? $self->{do_result} : 1;
     }
 
     sub selectrow_array {
-        my ( $self, $sql ) = @_;
+        my ( $self, $sql, $attrs, @bind ) = @_;
 
         push @{ $self->{select_calls} }, $sql;
+        push @{ $self->{select_binds} }, \@bind if @bind;
         return shift @{ $self->{counts} } if $self->{counts} && @{ $self->{counts} };
         return $self->{count} || 0;
+    }
+
+    sub begin_work {
+        my ($self) = @_;
+
+        push @{ $self->{txn_calls} }, 'begin_work';
+        return 1;
+    }
+
+    sub commit {
+        my ($self) = @_;
+
+        push @{ $self->{txn_calls} }, 'commit';
+        return 1;
+    }
+
+    sub rollback {
+        my ($self) = @_;
+
+        push @{ $self->{txn_calls} }, 'rollback';
+        return 1;
     }
 }
 
@@ -783,6 +806,35 @@ CSV
     like( $message_text, qr{Line 2: item type 'MISSING' does not exist; productform_alternative was stored as NULL\.}, 'Parser warns about unknown alternative itemtype' );
     like( $message_text, qr{Line 3: item type 'NOPE' does not exist; productform was stored as NULL\.}, 'Parser warns about unknown primary itemtype' );
     like( $message_text, qr{Line 4 repeats ONIX code 'AA'; the later value will win\.}, 'Parser warns about duplicate ONIX codes' );
+};
+
+subtest 'ProductForm row update does not delete before saving' => sub {
+    no strict 'refs';
+    no warnings qw(once redefine);
+
+    my $dbh = KohaSuomi::Editx::TestDbh->new( counts => [1] );
+    local *C4::Context::dbh = sub { return $dbh; };
+    local *{ $plugin_class . '::get_qualified_table_name' } = sub {
+        my ( $self, $table_name ) = @_;
+        return "koha_plugin_fi_kohasuomi_editx_$table_name";
+    };
+
+    my $messages = $plugin->_update_productform_mapping(
+        'AA',
+        {
+            onix_code               => 'AA',
+            productform             => 'BK',
+            productform_alternative => 'BK',
+        }
+    );
+    my $sql = join "\n", @{ $dbh->{select_calls} }, @{ $dbh->{do_calls} };
+
+    is( _message_text($messages), '', 'Updating an existing ProductForm row succeeds without warnings' );
+    like( $sql, qr{SELECT COUNT\(\*\) FROM `koha_plugin_fi_kohasuomi_editx_map_productform` WHERE onix_code = \?}, 'Update verifies that the original ONIX code exists' );
+    like( $sql, qr{UPDATE `koha_plugin_fi_kohasuomi_editx_map_productform`\s+SET onix_code = \?, productform = \?, productform_alternative = \?\s+WHERE onix_code = \?}s, 'Update modifies the existing row directly' );
+    unlike( $sql, qr{DELETE FROM}, 'Update does not delete the original row before saving' );
+    is_deeply( $dbh->{do_binds}->[0], [ 'AA', 'BK', 'BK', 'AA' ], 'Update binds the edited values and original ONIX code' );
+    is_deeply( $dbh->{txn_calls}, [ 'begin_work', 'commit' ], 'Update commits after the direct update' );
 };
 
 done_testing();

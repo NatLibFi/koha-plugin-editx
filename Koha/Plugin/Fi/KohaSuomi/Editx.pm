@@ -26,6 +26,9 @@ use Text::CSV_XS;
 use XML::LibXML;
 use YAML::XS qw(Load Dump);
 use utf8;
+
+use constant PRODUCTFORM_MAPPINGS_ANCHOR => 'ProductFormMappings';
+
 ## Here we set our plugin version
 our $VERSION = "0.0.2";
 ## Here is our metadata, some keys are required, some are optional
@@ -270,7 +273,6 @@ sub configure {
     my $is_update_mapping_row = $cgi->request_method eq 'POST' && $cgi->param('update_mapping_row');
     my $is_delete_mapping_row = $cgi->request_method eq 'POST' && $cgi->param('delete_mapping_row');
     my $is_mapping_action = $is_import_mapping_csv || $is_add_mapping_row || $is_update_mapping_row || $is_delete_mapping_row;
-    my $edit_mapping_onix_code = $self->_trim_csv_value( scalar $cgi->param('edit_mapping_onix_code') );
     my $flash = $cgi->request_method eq 'GET'
         ? Koha::Plugin::Fi::KohaSuomi::Editx::FlashCookie->consume(
             {
@@ -342,7 +344,6 @@ sub configure {
                 messages               => \@messages,
                 nightly_sync_enabled   => $nightly_sync_enabled,
                 runtime_log_level      => $runtime_log_level,
-                edit_mapping_onix_code => $edit_mapping_onix_code,
             );
             return;
         }
@@ -376,7 +377,6 @@ sub configure {
                 messages               => \@messages,
                 nightly_sync_enabled   => $nightly_sync_enabled,
                 runtime_log_level      => $runtime_log_level,
-                edit_mapping_onix_code => $edit_mapping_onix_code,
             );
             return;
         }
@@ -418,7 +418,6 @@ sub configure {
         nightly_sync_enabled   => $nightly_sync_enabled,
         runtime_log_level      => $runtime_log_level,
         cookies                => $flash->{cookie},
-        edit_mapping_onix_code => $edit_mapping_onix_code,
     );
 }
 
@@ -1474,7 +1473,7 @@ sub _output_configure_page {
     my $itemtypes = $self->_itemtypes();
     $template->param(
         mapping_rows           => $params{mapping_rows},
-        edit_mapping_onix_code => $params{edit_mapping_onix_code},
+        mapping_editor         => $params{mapping_editor},
         sftp_sources           => $params{sftp_sources},
         procurement_settings   => $params{procurement_settings},
         messages               => $params{messages},
@@ -1532,12 +1531,12 @@ sub _handle_productform_mapping_action {
         push @{$messages}, $self->_configure_message( error => 'ProductForm mapping was not changed because the security token was invalid. Reload the page and try again.' );
         $self->_output_configure_page(
             mapping_rows           => $self->_productform_mapping_rows(),
+            mapping_editor         => $self->_productform_mapping_editor_from_cgi($cgi),
             sftp_sources           => $params{sftp_sources},
             procurement_settings   => $params{procurement_settings},
             messages               => $messages,
             nightly_sync_enabled   => $params{nightly_sync_enabled},
             runtime_log_level      => $params{runtime_log_level},
-            edit_mapping_onix_code => scalar $cgi->param('mapping_original_onix_code'),
         );
         return 1;
     }
@@ -1563,17 +1562,19 @@ sub _handle_productform_mapping_action {
         }
 
         $self->_store_last_configured_by();
-        $self->_redirect_configure_with_flash('productform_mapping_deleted');
+        $self->_redirect_configure_with_flash( 'productform_mapping_deleted', PRODUCTFORM_MAPPINGS_ANCHOR );
         return 1;
     }
 
-    my ( $row, $edit_mapping_onix_code, $action_code );
+    my ( $row, $original_mapping_onix_code, $mapping_editor, $action_code );
     if ( $cgi->param('update_mapping_row') ) {
-        $row = $self->_productform_mapping_row_from_cgi( $cgi, 'edit_mapping', 'Mapping row' );
-        $edit_mapping_onix_code = $self->_trim_csv_value( scalar $cgi->param('mapping_original_onix_code') );
+        $row = $self->_productform_mapping_row_from_cgi( $cgi, 'add_mapping', 'Mapping row' );
+        $original_mapping_onix_code = $self->_trim_csv_value( scalar $cgi->param('mapping_original_onix_code') );
+        $mapping_editor = $self->_productform_mapping_editor_from_cgi($cgi);
         $action_code = 'productform_mapping_updated';
     } else {
         $row = $self->_productform_mapping_row_from_cgi( $cgi, 'add_mapping', 'New mapping row' );
+        $mapping_editor = $self->_productform_mapping_editor_from_cgi($cgi);
         $action_code = 'productform_mapping_added';
     }
 
@@ -1587,13 +1588,13 @@ sub _handle_productform_mapping_action {
             messages               => $messages,
             nightly_sync_enabled   => $params{nightly_sync_enabled},
             runtime_log_level      => $params{runtime_log_level},
-            edit_mapping_onix_code => $edit_mapping_onix_code,
+            mapping_editor         => $mapping_editor,
         );
         return 1;
     }
 
     my $save_messages = $cgi->param('update_mapping_row')
-        ? $self->_update_productform_mapping( $edit_mapping_onix_code, $rows->[0] )
+        ? $self->_update_productform_mapping( $original_mapping_onix_code, $rows->[0] )
         : $self->_upsert_productform_mapping( $rows->[0] );
     push @{$messages}, @{$save_messages};
     if ( @{$save_messages} ) {
@@ -1604,13 +1605,13 @@ sub _handle_productform_mapping_action {
             messages               => $messages,
             nightly_sync_enabled   => $params{nightly_sync_enabled},
             runtime_log_level      => $params{runtime_log_level},
-            edit_mapping_onix_code => $edit_mapping_onix_code,
+            mapping_editor         => $mapping_editor,
         );
         return 1;
     }
 
     $self->_store_last_configured_by();
-    $self->_redirect_configure_with_flash($action_code);
+    $self->_redirect_configure_with_flash( $action_code, PRODUCTFORM_MAPPINGS_ANCHOR );
     return 1;
 }
 
@@ -1663,17 +1664,20 @@ sub _handle_productform_mapping_csv_import {
     }
 
     $self->_store_last_configured_by();
-    $self->_redirect_configure_with_flash('productform_mapping_imported');
+    $self->_redirect_configure_with_flash( 'productform_mapping_imported', PRODUCTFORM_MAPPINGS_ANCHOR );
     return 1;
 }
 
 sub _redirect_configure_with_flash {
-    my ( $self, $code ) = @_;
+    my ( $self, $code, $anchor ) = @_;
+
+    my $uri = $self->plugin_method_url('configure');
+    $uri .= '#' . $anchor if defined $anchor && $anchor =~ /\A[A-Za-z][A-Za-z0-9_-]*\z/;
 
     Koha::Plugin::Fi::KohaSuomi::Editx::FlashCookie->redirect_with_flash(
         {
             cgi       => $self->{'cgi'},
-            uri       => $self->plugin_method_url('configure'),
+            uri       => $uri,
             namespace => 'editx_configure',
             code      => $code,
             cookies   => $self->{_auth_cookies},
@@ -2186,6 +2190,27 @@ sub _productform_mapping_row_from_cgi {
     };
 }
 
+sub _productform_mapping_editor_from_cgi {
+    my ( $self, $cgi ) = @_;
+
+    return unless $cgi && ( $cgi->param('add_mapping_row') || $cgi->param('update_mapping_row') );
+
+    my $is_editing = $cgi->param('update_mapping_row') ? 1 : 0;
+    my $row = $self->_productform_mapping_row_from_cgi(
+        $cgi,
+        'add_mapping',
+        $is_editing ? 'Mapping row' : 'New mapping row',
+    );
+
+    return {
+        mode                    => $is_editing ? 'edit' : 'add',
+        original_onix_code      => $self->_trim_csv_value( scalar $cgi->param('mapping_original_onix_code') ),
+        onix_code               => $row->{onix_code},
+        productform             => $row->{productform},
+        productform_alternative => $row->{productform_alternative},
+    };
+}
+
 sub _productform_mapping_rows_from_cgi {
     my ( $self, $cgi ) = @_;
 
@@ -2449,17 +2474,25 @@ sub _update_productform_mapping {
 
     my $saved = eval {
         $dbh->begin_work;
-        if ( $original_onix_code ne $row->{onix_code} ) {
-            $dbh->do( "DELETE FROM $map_productform_table WHERE onix_code = ?", undef, $original_onix_code ) or die $dbh->errstr;
-        }
-        my $sth = $dbh->prepare( "
-            INSERT INTO $map_productform_table (onix_code, productform, productform_alternative)
-            VALUES (?, ?, ?)
-            ON DUPLICATE KEY UPDATE
-                productform = VALUES(productform),
-                productform_alternative = VALUES(productform_alternative)
-        " );
-        $sth->execute( $row->{onix_code}, $row->{productform}, $row->{productform_alternative} ) or die $dbh->errstr;
+        my ($exists) = $dbh->selectrow_array(
+            "SELECT COUNT(*) FROM $map_productform_table WHERE onix_code = ?",
+            undef,
+            $original_onix_code
+        );
+        die "original ONIX code '$original_onix_code' was not found" unless $exists;
+
+        $dbh->do(
+            "
+            UPDATE $map_productform_table
+            SET onix_code = ?, productform = ?, productform_alternative = ?
+            WHERE onix_code = ?
+            ",
+            undef,
+            $row->{onix_code},
+            $row->{productform},
+            $row->{productform_alternative},
+            $original_onix_code
+        ) or die $dbh->errstr;
         $dbh->commit;
         1;
     };

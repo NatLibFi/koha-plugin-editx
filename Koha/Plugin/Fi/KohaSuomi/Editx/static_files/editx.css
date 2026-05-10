@@ -377,9 +377,17 @@
     z-index: 2;
 }
 
+.editx-productform-table tfoot tr.is-editing td {
+    background: #fff8e6;
+}
+
 .editx-productform-table tfoot input,
 .editx-productform-table tfoot select {
     margin-bottom: 0;
+}
+
+.editx-productform-edit-cancel.is-hidden {
+    display: none;
 }
 
 .editx-table-expander {

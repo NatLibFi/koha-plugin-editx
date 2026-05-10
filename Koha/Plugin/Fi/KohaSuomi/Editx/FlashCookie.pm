@@ -123,9 +123,13 @@ sub uri_with_flash_id {
     return $uri unless defined $uri && length $uri && $class->_valid_flash_id($id);
 
     $param ||= FLASH_ID_PARAM;
+    my $fragment = q{};
+    if ( $uri =~ s/(#[^#]*)\z// ) {
+        $fragment = $1;
+    }
     my $separator = $uri =~ /\?/ ? '&' : '?';
 
-    return $uri . $separator . $param . '=' . $id;
+    return $uri . $separator . $param . '=' . $id . $fragment;
 }
 
 sub merge_cookies {

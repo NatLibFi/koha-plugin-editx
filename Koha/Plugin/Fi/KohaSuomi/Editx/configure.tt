@@ -262,7 +262,7 @@
                         </ol>
                     </fieldset>
 
-                    <fieldset class="rows">
+                    <fieldset id="ProductFormMappings" class="rows">
                         <legend>Product form mappings</legend>
                         <div class="hint">Mappings are saved row by row. CSV import replaces the whole mapping table.</div>
                         <div class="editx-table-wrap editx-partial-table-wrap" data-editx-partial-table="1">
@@ -278,50 +278,23 @@
                                 <tbody>
                                     [% IF mapping_rows.size %]
                                         [% FOREACH mapping IN mapping_rows %]
-                                            [% IF edit_mapping_onix_code == mapping.onix_code %]
-                                                <tr class="editx-productform-row-editor">
-                                                    <td>
-                                                        <input name="mapping_original_onix_code" type="hidden" value="[% mapping.onix_code | html %]" />
-                                                        <input name="edit_mapping_onix_code" type="text" value="[% mapping.onix_code | html %]" />
-                                                    </td>
-                                                    <td>
-                                                        <select name="edit_mapping_productform">
-                                                            <option value=""></option>
-                                                            [% FOREACH itemtype IN itemtypes %]
-                                                                <option value="[% itemtype | html %]" [% IF mapping.productform == itemtype %]selected="selected"[% END %]>[% itemtype | html %]</option>
-                                                            [% END %]
-                                                        </select>
-                                                    </td>
-                                                    <td>
-                                                        <select name="edit_mapping_productform_alternative">
-                                                            <option value=""></option>
-                                                            [% FOREACH itemtype IN itemtypes %]
-                                                                <option value="[% itemtype | html %]" [% IF mapping.productform_alternative == itemtype %]selected="selected"[% END %]>[% itemtype | html %]</option>
-                                                            [% END %]
-                                                        </select>
-                                                    </td>
-                                                    <td class="editx-row-actions">
-                                                        <button type="submit" class="btn btn-primary btn-sm" name="update_mapping_row" value="1">Save</button>
-                                                        <a class="btn btn-default btn-sm" href="[% configure_href | html %]">Cancel</a>
-                                                    </td>
-                                                </tr>
-                                            [% ELSE %]
-                                                <tr>
-                                                    <td><code class="editx-config-value">[% mapping.onix_code | html %]</code></td>
-                                                    <td>[% IF mapping.productform %][% mapping.productform | html %][% ELSE %]<span class="text-muted">empty</span>[% END %]</td>
-                                                    <td>[% IF mapping.productform_alternative %][% mapping.productform_alternative | html %][% ELSE %]<span class="text-muted">empty</span>[% END %]</td>
-                                                    <td class="editx-row-actions">
-                                                        <button type="submit"
-                                                                class="btn btn-default btn-sm"
-                                                                name="edit_mapping_onix_code"
-                                                                value="[% mapping.onix_code | html %]">Edit</button>
-                                                        <button type="submit"
-                                                                class="btn btn-default btn-sm"
-                                                                name="delete_mapping_row"
-                                                                value="[% mapping.onix_code | html %]">Delete</button>
-                                                    </td>
-                                                </tr>
-                                            [% END %]
+                                            <tr>
+                                                <td><code class="editx-config-value">[% mapping.onix_code | html %]</code></td>
+                                                <td>[% IF mapping.productform %][% mapping.productform | html %][% ELSE %]<span class="text-muted">empty</span>[% END %]</td>
+                                                <td>[% IF mapping.productform_alternative %][% mapping.productform_alternative | html %][% ELSE %]<span class="text-muted">empty</span>[% END %]</td>
+                                                <td class="editx-row-actions">
+                                                    <button type="button"
+                                                            class="btn btn-default btn-sm js-editx-edit-mapping"
+                                                            data-onix-code="[% mapping.onix_code | html %]"
+                                                            data-productform="[% mapping.productform | html %]"
+                                                            data-productform-alternative="[% mapping.productform_alternative | html %]">Edit</button>
+                                                    <button type="submit"
+                                                            class="btn btn-default btn-sm"
+                                                            formaction="[% configure_href | html %]#ProductFormMappings"
+                                                            name="delete_mapping_row"
+                                                            value="[% mapping.onix_code | html %]">Delete</button>
+                                                </td>
+                                            </tr>
                                         [% END %]
                                     [% ELSE %]
                                         <tr>
@@ -330,11 +303,16 @@
                                     [% END %]
                                 </tbody>
                                 <tfoot>
-                                    <tr class="editx-productform-add-row">
+                                    <tr class="editx-productform-add-row[% IF mapping_editor && mapping_editor.mode == 'edit' %] is-editing[% END %]">
                                         <td>
+                                            <input id="mapping_original_onix_code"
+                                                   name="mapping_original_onix_code"
+                                                   type="hidden"
+                                                   value="[% mapping_editor.original_onix_code | html %]" />
                                             <input id="add_mapping_onix_code"
                                                    name="add_mapping_onix_code"
                                                    type="text"
+                                                   value="[% mapping_editor.onix_code | html %]"
                                                    aria-label="ONIX code" />
                                         </td>
                                         <td>
@@ -343,7 +321,7 @@
                                                     aria-label="ProductForm item type">
                                                 <option value=""></option>
                                                 [% FOREACH itemtype IN itemtypes %]
-                                                    <option value="[% itemtype | html %]">[% itemtype | html %]</option>
+                                                    <option value="[% itemtype | html %]" [% IF mapping_editor.productform == itemtype %]selected="selected"[% END %]>[% itemtype | html %]</option>
                                                 [% END %]
                                             </select>
                                         </td>
@@ -353,12 +331,20 @@
                                                     aria-label="Alternative item type">
                                                 <option value=""></option>
                                                 [% FOREACH itemtype IN itemtypes %]
-                                                    <option value="[% itemtype | html %]">[% itemtype | html %]</option>
+                                                    <option value="[% itemtype | html %]" [% IF mapping_editor.productform_alternative == itemtype %]selected="selected"[% END %]>[% itemtype | html %]</option>
                                                 [% END %]
                                             </select>
                                         </td>
                                         <td class="editx-row-actions">
-                                            <button type="submit" class="btn btn-default btn-sm" name="add_mapping_row" value="1">Add</button>
+                                            <button type="submit"
+                                                    class="btn btn-default btn-sm"
+                                                    id="editx-productform-save-row"
+                                                    formaction="[% configure_href | html %]#ProductFormMappings"
+                                                    name="[% IF mapping_editor && mapping_editor.mode == 'edit' %]update_mapping_row[% ELSE %]add_mapping_row[% END %]"
+                                                    value="1">[% IF mapping_editor && mapping_editor.mode == 'edit' %]Save[% ELSE %]Add[% END %]</button>
+                                            <button type="button"
+                                                    class="btn btn-default btn-sm editx-productform-edit-cancel[% UNLESS mapping_editor && mapping_editor.mode == 'edit' %] is-hidden[% END %]"
+                                                    id="editx-productform-cancel-edit">Cancel</button>
                                         </td>
                                     </tr>
                                 </tfoot>
@@ -382,6 +368,7 @@
                             <div class="hint">Import replaces the current ProductForm mapping table.</div>
                             <button type="submit"
                                     class="btn btn-default btn-sm"
+                                    formaction="[% configure_href | html %]#ProductFormMappings"
                                     name="import_mapping_csv"
                                     value="1">Import CSV</button>
                             <button type="submit"
@@ -528,6 +515,7 @@ DG,LYHYT,LYHYTHH</code></pre>
             const collapsibleSections = document.querySelectorAll("[data-editx-collapsible]");
             const sftpTable = document.getElementById("editx-sftp-sources-table");
             const addSftpSourceButton = document.getElementById("editx-add-sftp-source");
+            const productformTable = document.getElementById("editx-productform-table");
 
             function localStorageGet(key) {
                 try {
@@ -723,6 +711,75 @@ DG,LYHYT,LYHYTHH</code></pre>
                     }, 0);
                 });
                 validateSftpSourceNames();
+            }
+
+            if (productformTable) {
+                const productformOriginalOnixCode = document.getElementById("mapping_original_onix_code");
+                const productformOnixCode = document.getElementById("add_mapping_onix_code");
+                const productformItemType = document.getElementById("add_mapping_productform");
+                const productformAlternativeItemType = document.getElementById("add_mapping_productform_alternative");
+                const productformSaveButton = document.getElementById("editx-productform-save-row");
+                const productformCancelButton = document.getElementById("editx-productform-cancel-edit");
+                const productformEditorRow = productformSaveButton ? productformSaveButton.closest(".editx-productform-add-row") : null;
+
+                function setProductformEditorMode(mode, values) {
+                    const editing = mode === "edit";
+                    values = values || {};
+
+                    if (productformOriginalOnixCode) {
+                        productformOriginalOnixCode.value = editing ? values.originalOnixCode || values.onixCode || "" : "";
+                    }
+                    if (productformOnixCode) {
+                        productformOnixCode.value = values.onixCode || "";
+                    }
+                    if (productformItemType) {
+                        productformItemType.value = values.productform || "";
+                    }
+                    if (productformAlternativeItemType) {
+                        productformAlternativeItemType.value = values.productformAlternative || "";
+                    }
+                    if (productformSaveButton) {
+                        productformSaveButton.name = editing ? "update_mapping_row" : "add_mapping_row";
+                        productformSaveButton.textContent = editing ? "Save" : "Add";
+                    }
+                    if (productformCancelButton) {
+                        productformCancelButton.classList.toggle("is-hidden", !editing);
+                    }
+                    if (productformEditorRow) {
+                        productformEditorRow.classList.toggle("is-editing", editing);
+                    }
+                }
+
+                productformTable.addEventListener("click", function (event) {
+                    const editButton = event.target.closest(".js-editx-edit-mapping");
+                    if (!editButton) {
+                        return;
+                    }
+
+                    event.preventDefault();
+                    setProductformEditorMode("edit", {
+                        originalOnixCode: editButton.dataset.onixCode || "",
+                        onixCode: editButton.dataset.onixCode || "",
+                        productform: editButton.dataset.productform || "",
+                        productformAlternative: editButton.dataset.productformAlternative || ""
+                    });
+                    if (productformOnixCode) {
+                        productformOnixCode.focus();
+                    }
+                });
+
+                if (productformCancelButton) {
+                    productformCancelButton.addEventListener("click", function () {
+                        setProductformEditorMode("add", {
+                            onixCode: "",
+                            productform: "",
+                            productformAlternative: ""
+                        });
+                        if (productformOnixCode) {
+                            productformOnixCode.focus();
+                        }
+                    });
+                }
             }
 
             document.querySelectorAll(".editx-partial-table-toggle").forEach(function (button) {

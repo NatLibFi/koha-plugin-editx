@@ -46,6 +46,12 @@ my $redirect_uri = Koha::Plugin::Fi::KohaSuomi::Editx::FlashCookie->uri_with_fla
 );
 like( $redirect_uri, qr/[&]flash_id=\Q$flash->{id}\E\z/, 'flash id is appended to existing query string' );
 
+my $redirect_uri_with_fragment = Koha::Plugin::Fi::KohaSuomi::Editx::FlashCookie->uri_with_flash_id(
+    '/cgi-bin/koha/plugins/run.pl?class=Plugin&method=configure#ProductFormMappings',
+    $flash->{id}
+);
+like( $redirect_uri_with_fragment, qr/[&]flash_id=\Q$flash->{id}\E#ProductFormMappings\z/, 'flash id is inserted before a redirect fragment' );
+
 {
     local %ENV = (
         REQUEST_METHOD => 'GET',
