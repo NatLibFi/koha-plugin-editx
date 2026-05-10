@@ -113,10 +113,13 @@ like( $configure, qr{data-editx-collapsible-storage="editx\.configure\.legacyEma
 like( $configure, qr{Runtime and plugin status[\s\S]+data-editx-collapsible-storage="editx\.configure\.legacyEmailNotifications\.v1"}, 'Configure page places legacy email settings below runtime and plugin status' );
 unlike( $configure, qr{<legend>Failure notifications</legend>}, 'Configure page does not show failure notifications as a primary librarian-facing section' );
 like( $configure, qr{<fieldset id="ProductFormMappings" class="rows">}, 'ProductForm mappings section has a stable page anchor' );
+like( $configure, qr{data-editx-productform-row="1"\s+data-onix-code="\[%\s*mapping\.onix_code\s+\|\s+html\s+%\]"}, 'ProductForm mapping rows carry stable ONIX-code focus markers' );
 like( $configure, qr{id="editx-productform-table"[\s\S]+js-editx-edit-mapping[\s\S]+data-onix-code="\[%\s*mapping\.onix_code\s*\|\s*html\s*%\]"[\s\S]+name="delete_mapping_row"}, 'Configure page renders ProductForm mappings with row-level client edit and delete actions' );
 like( $configure, qr{<tfoot>[\s\S]+id="mapping_original_onix_code"[\s\S]+id="add_mapping_onix_code"[\s\S]+name="\[%\s*IF\s+mapping_editor\s+&&\s+mapping_editor\.mode\s+==\s+'edit'\s*%\]update_mapping_row\[%\s*ELSE\s*%\]add_mapping_row}, 'Configure page adds and edits ProductForm mapping rows through the table footer editor' );
 like( $configure, qr{formaction="\[%\s*configure_href\s*\|\s*html\s*%\]#ProductFormMappings"[\s\S]+name="delete_mapping_row"[\s\S]+formaction="\[%\s*configure_href\s*\|\s*html\s*%\]#ProductFormMappings"[\s\S]+name="\[%\s*IF\s+mapping_editor}, 'ProductForm mapping row actions post back to the section anchor' );
 like( $configure, qr{function\s+setProductformEditorMode[\s\S]+update_mapping_row[\s\S]+add_mapping_row[\s\S]+js-editx-edit-mapping}, 'Configure JavaScript moves ProductForm rows into the footer editor for updates' );
+like( $configure, qr{URLSearchParams[\s\S]+productform_focus[\s\S]+function\s+scrollProductformFocusRow[\s\S]+is-productform-focus-row}, 'Configure JavaScript scrolls the ProductForm table to the saved row focus' );
+like( $plugin_pm, qr{productform_focus\s*=>\s*\$rows->\[0\]->\{onix_code\}}, 'ProductForm row saves redirect with the edited ONIX code as table focus' );
 like( $configure, qr{enctype="multipart/form-data"}, 'Configure form can upload ProductForm mapping CSV files' );
 like( $configure, qr{id="mapping_csv_file"[\s\S]+name="import_mapping_csv"[\s\S]+name="export_mapping_csv"}, 'Configure page imports ProductForm mappings from a CSV file and exports them by POST' );
 unlike( $configure, qr{id="mapping_csv_export"}, 'Configure page does not render the ProductForm mapping CSV in the HTML body' );
@@ -152,6 +155,9 @@ like( $css, qr{\.editx-sftp-sources-table thead th\.is-active-sftp-header\s*\{[\
 like( $css, qr{\.editx-code-example-watermark::before\s*\{[\s\S]+content:\s*attr\(data-editx-watermark\);[\s\S]+text-transform:\s*uppercase;}, 'CSS renders CSV examples with a quiet background watermark' );
 like( $css, qr{\.editx-config-form fieldset\.rows \.editx-inline-check\s*\{[\s\S]+display:\s*inline-flex;}, 'CSS keeps inline checkbox helpers out of Koha row-label layout' );
 like( $css, qr{\.editx-productform-table\s*\{[\s\S]+width:\s*auto;}, 'CSS keeps the ProductForm mapping editor compact' );
+like( $css, qr{\.editx-productform-table \.editx-row-actions \.btn\s*\{[\s\S]+background:\s*#fff;}, 'CSS gives ProductForm row action buttons an explicit background' );
+like( $css, qr{\.editx-productform-table tbody td\s*\{[\s\S]+vertical-align:\s*middle;}, 'CSS vertically centers ProductForm row values against row action buttons' );
+like( $css, qr{\.editx-productform-table tbody tr\.is-productform-focus-row > td\s*\{[\s\S]+box-shadow:\s*inset 0 2px 0 #d6a420}, 'CSS highlights the ProductForm row restored after save' );
 unlike( $css, qr{editx-upgrade-status}, 'CSS does not keep the old standalone plugin status block styles' );
 unlike( $css, qr{editx-folder-flow}, 'CSS does not keep unused folder flow badge styles' );
 unlike( $css, qr{editx-example-grid}, 'CSS does not keep unused example grid styles' );

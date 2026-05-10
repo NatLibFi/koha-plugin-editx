@@ -278,7 +278,7 @@
                                 <tbody>
                                     [% IF mapping_rows.size %]
                                         [% FOREACH mapping IN mapping_rows %]
-                                            <tr>
+                                            <tr data-editx-productform-row="1" data-onix-code="[% mapping.onix_code | html %]">
                                                 <td><code class="editx-config-value">[% mapping.onix_code | html %]</code></td>
                                                 <td>[% IF mapping.productform %][% mapping.productform | html %][% ELSE %]<span class="text-muted">empty</span>[% END %]</td>
                                                 <td>[% IF mapping.productform_alternative %][% mapping.productform_alternative | html %][% ELSE %]<span class="text-muted">empty</span>[% END %]</td>
@@ -750,6 +750,39 @@ DG,LYHYT,LYHYTHH</code></pre>
                     }
                 }
 
+                function productformFocusValue() {
+                    try {
+                        const params = new URLSearchParams(window.location.search || "");
+                        return params.get("productform_focus") || "";
+                    } catch (error) {
+                        return "";
+                    }
+                }
+
+                function productformRowForOnixCode(onixCode) {
+                    const rows = productformTable.querySelectorAll("[data-editx-productform-row]");
+                    return Array.prototype.find.call(rows, function (row) {
+                        return row.dataset.onixCode === onixCode;
+                    }) || null;
+                }
+
+                function scrollProductformFocusRow() {
+                    const focusOnixCode = productformFocusValue();
+                    const focusRow = focusOnixCode ? productformRowForOnixCode(focusOnixCode) : null;
+                    if (!focusRow) {
+                        return;
+                    }
+
+                    const wrap = focusRow.closest("[data-editx-partial-table]");
+                    focusRow.classList.add("is-productform-focus-row");
+                    if (wrap && !wrap.classList.contains("is-expanded")) {
+                        wrap.scrollTop = Math.max(0, focusRow.offsetTop - (wrap.clientHeight / 2) + (focusRow.offsetHeight / 2));
+                        return;
+                    }
+
+                    focusRow.scrollIntoView({ block: "center", inline: "nearest" });
+                }
+
                 productformTable.addEventListener("click", function (event) {
                     const editButton = event.target.closest(".js-editx-edit-mapping");
                     if (!editButton) {
@@ -780,6 +813,7 @@ DG,LYHYT,LYHYTHH</code></pre>
                         }
                     });
                 }
+                window.setTimeout(scrollProductformFocusRow, 0);
             }
 
             document.querySelectorAll(".editx-partial-table-toggle").forEach(function (button) {

@@ -1594,7 +1594,11 @@ sub _handle_productform_mapping_action {
     }
 
     $self->_store_last_configured_by();
-    $self->_redirect_configure_with_flash( $action_code, PRODUCTFORM_MAPPINGS_ANCHOR );
+    $self->_redirect_configure_with_flash(
+        $action_code,
+        PRODUCTFORM_MAPPINGS_ANCHOR,
+        { productform_focus => $rows->[0]->{onix_code} }
+    );
     return 1;
 }
 
@@ -1652,15 +1656,12 @@ sub _handle_productform_mapping_csv_import {
 }
 
 sub _redirect_configure_with_flash {
-    my ( $self, $code, $anchor ) = @_;
-
-    my $uri = $self->plugin_method_url('configure');
-    $uri .= '#' . $anchor if defined $anchor && $anchor =~ /\A[A-Za-z][A-Za-z0-9_-]*\z/;
+    my ( $self, $code, $anchor, $query ) = @_;
 
     Koha::Plugin::Fi::KohaSuomi::Editx::FlashCookie->redirect_with_flash(
         {
             cgi       => $self->{'cgi'},
-            uri       => $uri,
+            uri       => $self->_configure_uri( anchor => $anchor, query => $query ),
             namespace => 'editx_configure',
             code      => $code,
             cookies   => $self->{_auth_cookies},
@@ -1668,6 +1669,25 @@ sub _redirect_configure_with_flash {
     );
 
     return;
+}
+
+sub _configure_uri {
+    my ( $self, %params ) = @_;
+
+    my $uri = $self->plugin_method_url('configure');
+    if ( my $query = $params{query} ) {
+        for my $name ( sort keys %{$query} ) {
+            next unless $name =~ /\A[A-Za-z][A-Za-z0-9_]*\z/;
+            my $value = $query->{$name};
+            next unless defined $value && length $value;
+            $uri .= ( $uri =~ /\?/ ? '&' : '?' ) . url_escape($name) . '=' . url_escape($value);
+        }
+    }
+
+    my $anchor = $params{anchor};
+    $uri .= '#' . $anchor if defined $anchor && $anchor =~ /\A[A-Za-z][A-Za-z0-9_-]*\z/;
+
+    return $uri;
 }
 
 sub _configure_flash_message {

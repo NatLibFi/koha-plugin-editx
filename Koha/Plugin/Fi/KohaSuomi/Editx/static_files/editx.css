@@ -345,6 +345,10 @@
     width: 7rem;
 }
 
+.editx-productform-table tbody td {
+    vertical-align: middle;
+}
+
 .editx-productform-table th:nth-child(2),
 .editx-productform-table td:nth-child(2),
 .editx-productform-table th:nth-child(3),
@@ -366,6 +370,7 @@
 }
 
 .editx-productform-table .editx-row-actions .btn {
+    background: #fff;
     margin: 0 0.25rem 0.25rem 0;
 }
 
@@ -381,9 +386,15 @@
     background: #fff8e6;
 }
 
+.editx-productform-table tbody tr.is-productform-focus-row > td {
+    background: #fff8e6;
+    box-shadow: inset 0 2px 0 #d6a420, inset 0 -2px 0 #d6a420;
+}
+
 .editx-productform-table tfoot input,
 .editx-productform-table tfoot select {
     margin-bottom: 0;
+    margin-top: 0.2rem;
 }
 
 .editx-productform-edit-cancel.is-hidden {

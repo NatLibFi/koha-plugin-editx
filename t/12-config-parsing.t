@@ -861,4 +861,22 @@ subtest 'ProductForm row update does not delete before saving' => sub {
     is_deeply( $dbh->{txn_calls}, [ 'begin_work', 'commit' ], 'Update commits after the direct update' );
 };
 
+subtest 'Configure URI keeps ProductForm focus before anchor' => sub {
+    no strict 'refs';
+    no warnings qw(once redefine);
+
+    local *{ $plugin_class . '::plugin_method_url' } = sub {
+        return '/cgi-bin/koha/plugins/run.pl?class=Plugin&method=configure';
+    };
+
+    is(
+        $plugin->_configure_uri(
+            anchor => 'ProductFormMappings',
+            query  => { productform_focus => 'AA' },
+        ),
+        '/cgi-bin/koha/plugins/run.pl?class=Plugin&method=configure&productform_focus=AA#ProductFormMappings',
+        'Configure URI appends ProductForm focus before the section fragment'
+    );
+};
+
 done_testing();
