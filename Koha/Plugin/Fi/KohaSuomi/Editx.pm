@@ -4,7 +4,6 @@ use Modern::Perl;
 ## Required for all plugins
 use base qw(Koha::Plugins::Base);
 ## We will also need to include any Koha libraries we want to access
-use Digest::SHA qw(sha256_base64);
 use File::Basename qw(basename);
 use File::Path qw(make_path);
 use File::Spec;
@@ -83,20 +82,17 @@ sub _install_or_upgrade_tables {
     my $migrate_legacy = $args{migrate_legacy} ? 1 : 0;
     my $sequences_table_name = $self->get_qualified_table_name('sequences');
     my $map_productform_table_name = $self->get_qualified_table_name('map_productform');
-    my $procurement_file_table_name = $self->get_qualified_table_name('procurement_file');
     my %table_existed_before_upgrade;
 
     if ($migrate_legacy) {
         %table_existed_before_upgrade = (
-            sequences        => $self->_table_exists($sequences_table_name),
-            map_productform  => $self->_table_exists($map_productform_table_name),
-            procurement_file => $self->_table_exists($procurement_file_table_name),
+            sequences       => $self->_table_exists($sequences_table_name),
+            map_productform => $self->_table_exists($map_productform_table_name),
         );
     }
 
     my $sequences_table = $self->_quote_identifier($sequences_table_name);
     my $map_productform_table = $self->_quote_identifier($map_productform_table_name);
-    my $procurement_file_table = $self->_quote_identifier($procurement_file_table_name);
 
     my $success = $dbh->do( "
         CREATE TABLE IF NOT EXISTS $sequences_table (
@@ -128,24 +124,6 @@ sub _install_or_upgrade_tables {
         warn $message;
     }
 
-    $success &&= $dbh->do( "
-        CREATE TABLE IF NOT EXISTS $procurement_file_table (
-          `file_id` int(11) NOT NULL AUTO_INCREMENT,
-          `file_name` varchar(255) NOT NULL,
-          `file_hash` varchar(255) NOT NULL,
-          `imported_on` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-          PRIMARY KEY (`file_id`),
-          UNIQUE KEY `file_name_hash` (`file_name`, `file_hash`),
-          KEY `file_hash` (`file_hash`)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-    " );
-
-    if ( !$success ) {
-        my $message = "Failed to create procurement_file table: " . $dbh->errstr;
-        $self->_log_runtime( error => $message, { operation => 'install_or_upgrade' } );
-        warn $message;
-    }
-
     $success &&= $self->_drop_map_productform_foreign_keys();
     $success &&= $self->_allow_nullable_map_productform_columns();
     if ($migrate_legacy) {
@@ -153,8 +131,6 @@ sub _install_or_upgrade_tables {
             unless $table_existed_before_upgrade{sequences};
         $success &&= $self->_migrate_legacy_map_productform_table()
             unless $table_existed_before_upgrade{map_productform};
-        $success &&= $self->_migrate_legacy_procurement_file_table()
-            unless $table_existed_before_upgrade{procurement_file};
     }
     $success &&= $self->_ensure_sequences_row();
 
@@ -520,37 +496,6 @@ sub _migrate_legacy_map_productform_table {
         : 1;
 }
 
-sub _migrate_legacy_procurement_file_table {
-    my ($self) = @_;
-
-    my $dbh = C4::Context->dbh;
-    my $target = $self->get_qualified_table_name('procurement_file');
-    my $quoted_target = $self->_quote_identifier($target);
-    my ($target_count) = $dbh->selectrow_array("SELECT COUNT(*) FROM $quoted_target");
-    my $has_legacy;
-
-    for my $source ( 'editx_procurement_file', 'procurement_file' ) {
-        next if $source eq $target;
-        next unless $self->_table_exists($source);
-
-        $has_legacy = 1;
-        next if $target_count;
-
-        my $quoted_source = $self->_quote_identifier($source);
-        $dbh->do( "
-            INSERT IGNORE INTO $quoted_target (file_name, file_hash)
-            SELECT file_name, file_hash FROM $quoted_source
-            WHERE file_name IS NOT NULL AND file_hash IS NOT NULL
-        " ) or return;
-
-        ($target_count) = $dbh->selectrow_array("SELECT COUNT(*) FROM $quoted_target");
-    }
-
-    return $has_legacy
-        ? $self->_drop_tables_if_exist(qw(editx_procurement_file procurement_file))
-        : 1;
-}
-
 sub _drop_tables_if_exist {
     my ( $self, @table_names ) = @_;
 
@@ -870,6 +815,7 @@ sub _manual_stage_download_selected {
     }
 
     my @files = map { $self->_manual_stage_preview_file($_) } @downloaded;
+    $self->_manual_stage_mark_batch_duplicates(\@files);
     my $manifest = {
         run_id     => $run_id,
         created_at => $self->_database_timestamp(),
@@ -1225,7 +1171,16 @@ sub _manual_stage_preview_file {
     $preview{product_forms}      = join( ', ', sort keys %product_forms );
     $preview{currencies}         = join( ', ', sort keys %currencies );
     $preview{estimated_total}    = defined $estimated_total ? sprintf( '%.2f', $estimated_total ) : '';
-    $preview{duplicate_status}   = $self->_manual_stage_file_already_imported( $file->{local_path}, $file->{filename} ) ? 'already imported' : 'new';
+    my $existing_basket = $self->_manual_stage_existing_basket( $preview{ship_notice_number} );
+    if ($existing_basket) {
+        $preview{duplicate_status} = 'duplicate basket';
+        $preview{duplicate_message} = 'Basket ' . $existing_basket->{basketno} . ' already exists for this ShipNoticeNumber.';
+        $preview{duplicate_import_blocked} = 1;
+        $preview{existing_basketno} = $existing_basket->{basketno};
+    } else {
+        $preview{duplicate_status} = 'new';
+        $preview{duplicate_import_blocked} = 0;
+    }
     $preview{vendor_status}      = $vendor && ref $vendor eq 'HASH' ? $vendor->{status} : 'error';
     $preview{vendor_message}     = $vendor && ref $vendor eq 'HASH' ? ( $vendor->{message} // '' ) : $self->_compact_message($@);
 
@@ -1258,6 +1213,34 @@ sub _manual_stage_summary {
         items => $item_count,
         copies => $copy_count,
     };
+}
+
+sub _manual_stage_mark_batch_duplicates {
+    my ( $self, $files ) = @_;
+
+    my %seen_notice;
+    for my $file (@$files) {
+        next if ( $file->{status} || '' ) ne 'valid';
+        my $ship_notice_number = $file->{ship_notice_number} // '';
+        next if $ship_notice_number eq '';
+
+        if ( $file->{duplicate_import_blocked} ) {
+            $seen_notice{$ship_notice_number} ||= $file;
+            next;
+        }
+
+        if ( my $first = $seen_notice{$ship_notice_number} ) {
+            $file->{duplicate_status} = 'duplicate in preview';
+            $file->{duplicate_message} = 'Another downloaded file in this preview has the same ShipNoticeNumber';
+            $file->{duplicate_message} .= ': ' . ( $first->{filename} // 'unknown file' ) . '.';
+            $file->{duplicate_import_blocked} = 1;
+            next;
+        }
+
+        $seen_notice{$ship_notice_number} = $file;
+    }
+
+    return $files;
 }
 
 sub _manual_stage_create_run_dir {
@@ -1397,22 +1380,22 @@ sub _manual_stage_filename_matches_pattern {
     return $filename =~ /\A$regex\z/ ? 1 : 0;
 }
 
-sub _manual_stage_file_already_imported {
-    my ( $self, $path, $filename ) = @_;
+sub _manual_stage_existing_basket {
+    my ( $self, $basket_name ) = @_;
 
-    return 0 if !$path || !-f $path;
-    open my $fh, '<:raw', $path or return 0;
-    my $data = do { local $/; <$fh> };
-    close $fh;
-    my $hash = sha256_base64($data);
-    my $table = $self->_quote_identifier( $self->get_qualified_table_name('procurement_file') );
-    my ($count) = C4::Context->dbh->selectrow_array(
-        "SELECT COUNT(*) FROM $table WHERE file_name = ? AND file_hash = ?",
+    return if !defined $basket_name || $basket_name eq '';
+
+    return C4::Context->dbh->selectrow_hashref(
+        q{
+            SELECT basketno, basketname, booksellerid
+            FROM aqbasket
+            WHERE basketname = ?
+            ORDER BY basketno DESC
+            LIMIT 1
+        },
         undef,
-        $filename,
-        $hash
+        $basket_name
     );
-    return $count ? 1 : 0;
 }
 
 sub _tool_sftp_status {

@@ -595,6 +595,37 @@
     width: 2.5rem;
 }
 
+.editx-stage-row-duplicate {
+    color: #5d6972;
+}
+
+.editx-stage-row-duplicate > td {
+    background: #eef1f3 !important;
+}
+
+.editx-stage-row-duplicate code,
+.editx-stage-row-duplicate .editx-notice-id {
+    color: #4a555d;
+}
+
+.editx-notice-id {
+    background: #eef1f3;
+    border: 1px solid var(--bs-border-color, #d9dee3);
+    border-radius: 0.25rem;
+    display: inline-block;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    line-height: 1.25;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    padding: 0.12rem 0.35rem;
+}
+
+.editx-duplicate-note {
+    color: #5d4300;
+    font-weight: 700;
+    white-space: normal;
+}
+
 .editx-manual-sync-confirmation h2 {
     font-size: 1.15rem;
     margin: 0 0 0.35rem;

@@ -182,20 +182,21 @@
                                 </thead>
                                 <tbody>
                                     [% FOREACH file IN manual_stage.files %]
-                                        <tr>
+                                        [% SET file_importable = file.status == 'valid' && file.duplicate_import_blocked != 1 %]
+                                        <tr[% IF file.duplicate_import_blocked %] class="editx-stage-row-duplicate"[% END %]>
                                             <td>
                                                 <input type="checkbox"
                                                        name="stage_file"
                                                        value="[% file.id | html %]"
-                                                       [% IF file.status == 'valid' && file.duplicate_status != 'already imported' %]checked="checked"[% END %]
-                                                       [% IF file.status != 'valid' %]disabled="disabled"[% END %] />
+                                                       [% IF file_importable %]checked="checked"[% END %]
+                                                       [% UNLESS file_importable %]disabled="disabled"[% END %] />
                                             </td>
                                             <td>
                                                 <code>[% file.filename | html %]</code>
                                                 <div class="editx-status-note">[% file.source_id | html %]</div>
                                             </td>
                                             <td>
-                                                [% file.ship_notice_number | html %]
+                                                <span class="editx-notice-id">[% file.ship_notice_number | html %]</span>
                                                 <div class="editx-status-note">[% file.document_type | html %]</div>
                                                 <div>
                                                     [% file.estimated_total | html %]
@@ -220,6 +221,7 @@
                                                 [% END %]
                                                 <span class="editx-status-note">Vendor: [% file.vendor_status | html %]</span>
                                                 <span class="editx-status-note">Duplicate: [% file.duplicate_status | html %]</span>
+                                                [% IF file.duplicate_message %]<span class="editx-status-note editx-duplicate-note">[% file.duplicate_message | html %]</span>[% END %]
                                                 [% IF file.error %]<span class="editx-status-note">[% file.error | html %]</span>[% END %]
                                                 [% IF file.vendor_message %]<span class="editx-status-note">[% file.vendor_message | html %]</span>[% END %]
                                             </td>

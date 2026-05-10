@@ -4,7 +4,6 @@ package Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::File;
 use Modern::Perl;
 use Moose;
 use Data::Dumper;
-use Digest::SHA qw(sha256_base64);
 use File::Slurp;
 use File::Copy;
 use File::Basename;
@@ -16,9 +15,6 @@ use C4::Context;
 use Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Logger;
 use Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::EdiMessage;
 use Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Config;
-
-my $editx_plugin_class = 'Koha::Plugin::Fi::KohaSuomi::Editx';
-my $procurement_file_table = _quote_identifier( _plugin_table_name('procurement_file') );
 
 has 'objectFactory' => (
     is      => 'rw',
@@ -135,34 +131,9 @@ sub fileAlreadyImported {
 sub filePathAlreadyImported {
     my $self = shift;
     my $filePath = $_[0];
-    my $fileName = $_[1] || $self->getFilenaMeFromPath($filePath);
-    my ($fileData, $fileDbHashCount);
-    my $hash = 0;
-    my $result = 0;
 
-    if(-f $filePath ){
-        eval {$fileData = read_file($filePath)};
-        if($fileData){
-            $hash = $self->hashFile($fileData);
-        }
-        if($hash){
-            $fileDbHashCount = $self->loadFileHash($fileName, $hash);
-            if($fileDbHashCount >= 1){
-                $result = 1;
-            }
-        }
-    }
-    return $result;
-}
-
-sub hashFile {
-    my $self = shift;
-    my $fileData = $_[0];
-    my $hash = 0;
-    if($fileData){
-        $hash = sha256_base64($fileData);;
-    }
-    return $hash;
+    my $basketName = $self->basketNameFromFile($filePath);
+    return $self->basketNameAlreadyImported($basketName);
 }
 
 sub archiveFile {
@@ -171,7 +142,6 @@ sub archiveFile {
     my $fileName = $self->getFilenaMeFromPath($filePath);
     my $archivePath = $self->getArchivePath() . $fileName;
 
-    $self->saveFileHash($filePath, $fileName);
     $self->getMsgUpdater()->update($fileName, 'OK');
     $self->_move_file_or_die( $filePath, $archivePath, "File: $filePath moved to $archivePath for archive." );
 }
@@ -335,64 +305,42 @@ sub filterFile{
     return $result;
 }
 
-sub loadFileHash{
-    my $self = shift;
-    my $fileName = $_[0];
-    my $fileHash = $_[1];
-    my $result;
-
-    if($fileName && $fileHash){
-        my $dbh = C4::Context->dbh;
-        my $procurement_file_table = _procurement_file_table();
-        ($result) = $dbh->selectrow_array(
-            "SELECT COUNT(*) FROM $procurement_file_table WHERE file_name = ? AND file_hash = ?",
-            undef,
-            $fileName,
-            $fileHash
-        );
-    }
-    return $result || 0;
-}
-
-sub saveFileHash{
+sub basketNameFromFile {
     my $self = shift;
     my $filePath = $_[0];
-    my $fileName = $_[1];
-    my $hash;
 
-    if(-f $filePath ){
-        my $fileData = read_file($filePath);
-        if($fileData){
-            $hash = $self->hashFile($fileData);
-            if($hash){
-                my $dbh = C4::Context->dbh;
-                my $procurement_file_table = _procurement_file_table();
-                my $stmnt = $dbh->prepare("INSERT IGNORE INTO $procurement_file_table (file_name, file_hash) VALUES (?,?)");
-                if(!$stmnt->execute($fileName, $hash)){
-                    my $failMessage = "Saving file hash failed! Error was: " . ( $dbh->errstr || 'unknown error' );
-                    $self->getLogger()->logError($failMessage);
-                    die $failMessage;
-                }
-            }
-        }
+    return '' if !$filePath || !-f $filePath;
+
+    my $doc = eval { XML::LibXML->new( no_network => 1 )->parse_file($filePath) };
+    if (!$doc) {
+        my $error = $@ || 'unknown XML parse error';
+        $self->getLogger()->logError("Could not read ShipNoticeNumber from $filePath: $error");
+        return '';
     }
+
+    my $basketName = $doc->findvalue('/LibraryShipNotice/Header/ShipNoticeNumber');
+    $basketName =~ s/\A\s+|\s+\z//g if defined $basketName;
+
+    return $basketName || '';
 }
 
-sub _plugin_table_name {
-    my ($table_name) = @_;
+sub basketNameAlreadyImported {
+    my $self = shift;
+    my $basketName = $_[0];
 
-    return lc( join( '_', split( '::', $editx_plugin_class ), $table_name ) );
-}
+    return 0 if !defined $basketName || $basketName eq '';
 
-sub _quote_identifier {
-    my ($identifier) = @_;
+    my ($count) = C4::Context->dbh->selectrow_array(
+        q{
+            SELECT COUNT(*)
+            FROM aqbasket
+            WHERE basketname = ?
+        },
+        undef,
+        $basketName
+    );
 
-    $identifier =~ s/`/``/g;
-    return "`$identifier`";
-}
-
-sub _procurement_file_table {
-    return $procurement_file_table;
+    return $count ? 1 : 0;
 }
 
 1;

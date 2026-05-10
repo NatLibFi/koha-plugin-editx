@@ -127,7 +127,6 @@ subtest 'Install table setup does not touch legacy tables' => sub {
     local *{ $plugin_class . '::_ensure_sequences_row' } = sub { $called{ensure_sequences}++; return 1; };
     local *{ $plugin_class . '::_migrate_legacy_sequences_table' } = sub { die 'install must not migrate legacy sequences'; };
     local *{ $plugin_class . '::_migrate_legacy_map_productform_table' } = sub { die 'install must not migrate legacy ProductForm mappings'; };
-    local *{ $plugin_class . '::_migrate_legacy_procurement_file_table' } = sub { die 'install must not migrate legacy procurement files'; };
 
     ok( $plugin->_install_or_upgrade_tables( migrate_legacy => 0 ), 'Install table setup succeeds without legacy migration' );
     is( $called{ensure_sequences}, 1, 'Install still ensures the qualified sequences row' );
@@ -151,12 +150,10 @@ subtest 'Upgrade table setup enables legacy migration' => sub {
     local *{ $plugin_class . '::_table_exists' } = sub { return 0; };
     local *{ $plugin_class . '::_migrate_legacy_sequences_table' } = sub { $called{migrate_sequences}++; return 1; };
     local *{ $plugin_class . '::_migrate_legacy_map_productform_table' } = sub { $called{migrate_productform}++; return 1; };
-    local *{ $plugin_class . '::_migrate_legacy_procurement_file_table' } = sub { $called{migrate_procurement_file}++; return 1; };
 
     ok( $plugin->_install_or_upgrade_tables( migrate_legacy => 1 ), 'Upgrade table setup succeeds with legacy migration enabled' );
     is( $called{migrate_sequences}, 1, 'Upgrade migrates legacy sequences' );
     is( $called{migrate_productform}, 1, 'Upgrade migrates legacy ProductForm mappings' );
-    is( $called{migrate_procurement_file}, 1, 'Upgrade migrates legacy procurement files' );
 };
 
 subtest 'Upgrade ignores legacy when qualified tables already exist' => sub {
@@ -176,7 +173,6 @@ subtest 'Upgrade ignores legacy when qualified tables already exist' => sub {
     local *{ $plugin_class . '::_table_exists' } = sub { return 1; };
     local *{ $plugin_class . '::_migrate_legacy_sequences_table' } = sub { die 'upgrade must not inspect legacy sequences when the qualified table already exists'; };
     local *{ $plugin_class . '::_migrate_legacy_map_productform_table' } = sub { die 'upgrade must not inspect legacy ProductForm mappings when the qualified table already exists'; };
-    local *{ $plugin_class . '::_migrate_legacy_procurement_file_table' } = sub { die 'upgrade must not inspect legacy procurement files when the qualified table already exists'; };
 
     ok( $plugin->_install_or_upgrade_tables( migrate_legacy => 1 ), 'Upgrade table setup succeeds without legacy migration when qualified tables exist' );
     is( $called{ensure_sequences}, 1, 'Upgrade still runs normal qualified-table maintenance' );
@@ -567,6 +563,34 @@ subtest 'Manual staged workflow resumes manifests after redirect-safe GET reload
     is( $sync_result->{order_count}, 1, 'Imported staged state keeps the acquisition summary for links' );
     ok( $attempted, 'Imported staged state renders the import summary section' );
     like( _message_text($messages), qr{Selected EDItX import finished: processed 1, failed 0, skipped 0}, 'Imported redirect shows the staff success message' );
+};
+
+subtest 'Manual staged preview blocks duplicate ShipNoticeNumber rows in the same download batch' => sub {
+    my @files = (
+        {
+            status             => 'valid',
+            filename           => 'LibraryShipNotice_22886798_a.xml',
+            ship_notice_number => '22886798',
+        },
+        {
+            status             => 'valid',
+            filename           => 'LibraryShipNotice_22886798_b.xml',
+            ship_notice_number => '22886798',
+        },
+        {
+            status             => 'valid',
+            filename           => 'LibraryShipNotice_22901735.xml',
+            ship_notice_number => '22901735',
+        },
+    );
+
+    $plugin->_manual_stage_mark_batch_duplicates(\@files);
+
+    ok( !$files[0]->{duplicate_import_blocked}, 'First downloaded notice remains importable' );
+    is( $files[1]->{duplicate_status}, 'duplicate in preview', 'Second downloaded notice with the same ShipNoticeNumber is marked duplicate' );
+    ok( $files[1]->{duplicate_import_blocked}, 'Second downloaded notice is blocked from selection' );
+    like( $files[1]->{duplicate_message}, qr{LibraryShipNotice_22886798_a\.xml}, 'Duplicate message points to the first matching downloaded file' );
+    ok( !$files[2]->{duplicate_import_blocked}, 'Different ShipNoticeNumber remains importable' );
 };
 
 subtest 'Manual staged import reports stale run ids without a 500' => sub {

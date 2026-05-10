@@ -143,7 +143,6 @@ sub _file_manager {
 
 {
     no warnings qw(once redefine);
-    local *Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::File::saveFileHash = sub { return 1; };
 
     subtest 'archiveFile dies when the archive move fails' => sub {
         my $tmp_dir = tempdir( CLEANUP => 1 );
@@ -343,44 +342,37 @@ sub _file_manager {
         is( $file_manager->getLoadPath, $settings{import_load_path} . '/', 'File manager keeps the normalized load path' );
     };
 
-    subtest 'filePathAlreadyImported checks the qualified procurement file table' => sub {
+    subtest 'filePathAlreadyImported checks existing Koha acquisition baskets' => sub {
         my $tmp_dir = tempdir( CLEANUP => 1 );
         my $file_path = File::Spec->catfile( $tmp_dir, 'order.xml' );
-        _write_test_file($file_path);
+        open my $fh, '>', $file_path or die "Could not create $file_path: $!";
+        print {$fh} '<LibraryShipNotice><Header><ShipNoticeNumber>ASN-TEST</ShipNoticeNumber></Header></LibraryShipNotice>';
+        close $fh or die "Could not close $file_path: $!";
 
         my ( $file_manager ) = _file_manager( q{}, q{} );
         my $dbh = Editx::FileTestDbh->new( { count => 1 } );
 
         local *C4::Context::dbh = sub { return $dbh; };
 
-        is( $file_manager->filePathAlreadyImported($file_path), 1, 'filePathAlreadyImported returns true when a matching hash exists' );
+        is( $file_manager->filePathAlreadyImported($file_path), 1, 'filePathAlreadyImported returns true when a matching basket exists' );
         like(
             $dbh->{queries}->[0]->[0],
-            qr{`koha_plugin_fi_kohasuomi_editx_procurement_file`},
-            'filePathAlreadyImported reads from the qualified procurement file table'
+            qr{FROM aqbasket\s+WHERE basketname = \?}s,
+            'filePathAlreadyImported reads from Koha acquisition baskets'
         );
-        is( $dbh->{queries}->[0]->[1], 'order.xml', 'filePathAlreadyImported binds the basename' );
+        is( $dbh->{queries}->[0]->[1], 'ASN-TEST', 'filePathAlreadyImported binds the EDItX ShipNoticeNumber as the basket name' );
     };
 
-    subtest 'saveFileHash writes to the qualified procurement file table' => sub {
+    subtest 'basketNameFromFile extracts the EDItX ShipNoticeNumber' => sub {
         my $tmp_dir = tempdir( CLEANUP => 1 );
         my $file_path = File::Spec->catfile( $tmp_dir, 'order.xml' );
-        _write_test_file($file_path);
+        open my $fh, '>', $file_path or die "Could not create $file_path: $!";
+        print {$fh} '<LibraryShipNotice><Header><ShipNoticeNumber>  22886798  </ShipNoticeNumber></Header></LibraryShipNotice>';
+        close $fh or die "Could not close $file_path: $!";
 
         my ( $file_manager ) = _file_manager( q{}, q{} );
-        my $dbh = Editx::FileTestDbh->new;
 
-        local *C4::Context::dbh = sub { return $dbh; };
-
-        $file_manager->saveFileHash( $file_path, 'order.xml' );
-
-        like(
-            $dbh->{prepared}->[0],
-            qr{INSERT IGNORE INTO `koha_plugin_fi_kohasuomi_editx_procurement_file`},
-            'saveFileHash inserts into the qualified procurement file table'
-        );
-        is( $dbh->{executed}->[0]->[0], 'order.xml', 'saveFileHash binds the file name' );
-        ok( $dbh->{executed}->[0]->[1], 'saveFileHash binds the file hash' );
+        is( $file_manager->basketNameFromFile($file_path), '22886798', 'ShipNoticeNumber whitespace is trimmed before basket lookup' );
     };
 }
 

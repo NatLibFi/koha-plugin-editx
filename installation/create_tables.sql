@@ -1,7 +1,6 @@
 
 RENAME TABLE IF EXISTS `sequences` TO `koha_plugin_fi_kohasuomi_editx_sequences`;
 RENAME TABLE IF EXISTS `map_productform` TO `koha_plugin_fi_kohasuomi_editx_map_productform`;
-RENAME TABLE IF EXISTS `procurement_file` TO `koha_plugin_fi_kohasuomi_editx_procurement_file`;
 
 CREATE TABLE IF NOT EXISTS `koha_plugin_fi_kohasuomi_editx_sequences` (
   `invoicenumber` int(11) NOT NULL,
@@ -21,14 +20,4 @@ CREATE TABLE IF NOT EXISTS `koha_plugin_fi_kohasuomi_editx_map_productform` (
   PRIMARY KEY (`onix_code`),
   KEY `fk_productform_itemtypes` (`productform`),
   KEY `fk_productformalt_itemtypes` (`productform_alternative`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS `koha_plugin_fi_kohasuomi_editx_procurement_file` (
-  `file_id` int(11) NOT NULL AUTO_INCREMENT,
-  `file_name` varchar(255) NOT NULL,
-  `file_hash` varchar(255) NOT NULL,
-  `imported_on` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (`file_id`),
-  UNIQUE KEY `file_name_hash` (`file_name`, `file_hash`),
-  KEY `file_hash` (`file_hash`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

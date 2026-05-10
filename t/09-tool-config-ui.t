@@ -46,6 +46,7 @@ like( $plugin_pm, qr{last_configured_at\s*=>\s*scalar\s+\$self->retrieve_data\('
 like( $plugin_pm, qr{last_upgraded\s*=>\s*scalar\s+\$self->retrieve_data\('last_upgraded'\)}, 'Optional last upgraded value is passed to templates in scalar context' );
 unlike( $plugin_pm, qr{\Q$unofficial_instance_env\E}, 'Plugin Perl code does not treat unofficial instance environment as a Koha instance source' );
 unlike( $plugin_pm, qr{editx_debug|_template_debug_comment|editx_debug_comment}, 'Plugin Perl code does not keep deployment debug comment hooks' );
+unlike( $plugin_pm, qr{sha256_base64|file_hash|file_name_hash|_manual_stage_file_already_imported}, 'Plugin Perl code no longer uses file hashes for duplicate detection' );
 like( $plugin_pm, qr{export_mapping_csv}, 'Configure controller handles ProductForm mapping CSV export as an explicit POST action' );
 like( $plugin_pm, qr{sub\s+_uploaded_productform_mapping_csv\s*\{}, 'Configure controller reads ProductForm mapping CSV imports from uploaded files' );
 like( $plugin_pm, qr{sub\s+_output_productform_mapping_csv\s*\{}, 'Configure controller can return ProductForm mapping CSV as a download' );
@@ -67,12 +68,12 @@ like( $plugin_pm, qr{print\s+\$cgi->redirect\(\s*\$self->_manual_stage_url\(\s*\
 like( $plugin_pm, qr{recommended_import_paths}, 'Configure template receives recommended import path examples' );
 like( $plugin_pm, qr{substr\( \$message, 0, 397 \).*substr\( \$message, -398 \)}s, 'Long manual sync diagnostics preserve both beginning and end of captured output' );
 like( $plugin_pm, qr{output_html\(\s*\$template->output\(\),\s*undef,\s*undef,\s*undef,\s*Koha::Plugin::Fi::KohaSuomi::Editx::FlashCookie->merge_cookies}s, 'Configure page passes flash cookies as output_html cookies, not extra options' );
-like( $plugin_pm, qr{get_qualified_table_name\('procurement_file'\)}, 'Plugin install uses a qualified procurement_file table' );
 like( $plugin_pm, qr{sub\s+install\(\)[\s\S]+_install_or_upgrade_tables\( migrate_legacy => 0 \)}, 'Plugin install creates qualified tables without legacy migration' );
 like( $plugin_pm, qr{sub\s+upgrade[\s\S]+_install_or_upgrade_tables\( migrate_legacy => 1 \)}, 'Plugin upgrade enables legacy table migration' );
-like( $plugin_pm, qr{_migrate_legacy_procurement_file_table}, 'Plugin upgrade can migrate legacy procurement_file data' );
+unlike( $plugin_pm, qr{_migrate_legacy_procurement_file_table}, 'Plugin upgrade no longer migrates the obsolete file-hash import ledger' );
 like( $plugin_pm, qr{sub\s+uninstall\(\)[\s\S]+editx_map_productform map_productform}, 'Plugin uninstall cleans legacy ProductForm table names as leftover plugin data' );
 like( $install_sql, qr{CREATE TABLE IF NOT EXISTS `koha_plugin_fi_kohasuomi_editx_map_productform`}, 'Install SQL still creates the ProductForm mapping table' );
+unlike( $install_sql, qr{procurement_file|file_hash|file_name_hash}, 'Install SQL no longer creates the obsolete file-hash import ledger' );
 unlike( $install_sql, qr{INSERT INTO\s+koha_plugin_fi_kohasuomi_editx_map_productform}i, 'Install SQL does not seed ProductForm mappings' );
 unlike( $install_sql, qr{28VRK|28VRKLN|14VRK|EILAINATA}, 'Install SQL does not contain KohaSuomi-local itemtype seeds' );
 
@@ -175,7 +176,9 @@ like( $tool, qr{Downloaded EDItX preview}, 'Tool page renders downloaded file pr
 like( $tool, qr{name="stage_import_selected"\s+value="1"}, 'Tool page can import selected staged files' );
 like( $tool, qr{Import selected</button>\s*<a class="btn btn-default" href="\[%\s*tool_href\s*\|\s*html\s*%\]">Cancel</a>}, 'Downloaded-preview stage offers a cancel link beside the import action' );
 like( $tool, qr{name="stage_file"}, 'Tool page renders staged file selection checkboxes' );
-like( $tool, qr{file\.status\s+==\s+'valid'\s+&&\s+file\.duplicate_status\s+!=\s+'already imported'}, 'Tool page preselects only valid non-duplicate staged files for import' );
+like( $tool, qr{file_importable\s+=\s+file\.status\s+==\s+'valid'\s+&&\s+file\.duplicate_import_blocked\s+!=\s+1}, 'Tool page computes importability from XML validity and basket duplicate status' );
+like( $tool, qr{editx-stage-row-duplicate}, 'Tool page marks duplicate staged preview rows with a dedicated class' );
+like( $tool, qr{\[%\s+UNLESS\s+file_importable\s+%\]disabled="disabled"\[%\s+END\s+%\]}, 'Tool page disables staged import checkboxes for invalid or duplicate files' );
 like( $tool, qr{Notice / Total}, 'Tool page combines notice and total preview columns' );
 like( $tool, qr{Seller / Vendor IDs}, 'Tool page combines seller and vendor id preview columns' );
 like( $tool, qr{Lines / Copies}, 'Tool page combines line and copy preview columns' );
@@ -208,6 +211,8 @@ like( $css, qr{\.editx-confirm-actions}, 'CSS styles the manual confirmation act
 like( $css, qr{\.editx-source-selector}, 'CSS styles the staged source selector' );
 like( $css, qr{\.editx-or-separator::before}, 'CSS draws the OR separator rule' );
 like( $css, qr{\.editx-stage-table}, 'CSS styles staged workflow tables' );
+like( $css, qr{\.editx-stage-row-duplicate\s*\{[\s\S]+color:\s*#5d6972;}, 'CSS quiets duplicate staged preview rows' );
+like( $css, qr{\.editx-notice-id\s*\{[\s\S]+background:\s*#eef1f3;}, 'CSS renders EDItX notice ids as quiet gray fields' );
 
 unlike( $fetch_sftp, qr{set\s+--\s+-q\b}, 'SFTP fetch script does not hide SSH diagnostics with sftp -q' );
 unlike( $fetch_sftp, qr{\Q$unofficial_instance_env\E}, 'SFTP fetch script does not depend on unofficial instance environment' );
