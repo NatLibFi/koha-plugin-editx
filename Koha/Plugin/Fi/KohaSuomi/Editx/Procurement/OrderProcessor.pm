@@ -29,6 +29,8 @@ use Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::VendorEdiAccount;
 use Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::FinnaMaterialType;
 use C4::Languages qw(getlanguage);
 
+use constant KOHA_SUOMI_SPEND_LOG_TABLE => 'aqbudgets_spend_log';
+
 my $editx_plugin_class = 'Koha::Plugin::Fi::KohaSuomi::Editx';
 my $sequences_table = _quote_identifier( _plugin_table_name('sequences') );
 my $map_productform_table = _quote_identifier( _plugin_table_name('map_productform') );
@@ -701,10 +703,7 @@ sub updateAqbudgetLog {
     my ($copyDetail, $itemDetail, $order, $biblio) = @_;
 
     my $dbh = C4::Context->dbh;
-    if ( !$self->_table_exists( $dbh, 'aqbudgets_spend_log' ) ) {
-        $self->getLogger()->log('Skipping aqbudgets_spend_log update because the table does not exist.');
-        return 1;
-    }
+    return 1 if !$self->_koha_suomi_spend_log_available($dbh);
 
     my $copyQty = $copyDetail->getCopyQuantity();
     my $totalAmount = $copyDetail->getFundMonetaryAmount() * $copyQty;
@@ -719,9 +718,27 @@ sub updateAqbudgetLog {
     my $destinationlocation = $copyDetail->getBranchCode();
     my $collectioncode = $copyDetail->getLocation();
 
-    my $stmnt = $dbh->prepare(qq{INSERT INTO aqbudgets_spend_log (monetary_amount,timestamp,origin,fund,account,itemtype,copy_quantity,total_amount,location,collection,biblionumber) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)});
+    my $spend_log_table = KOHA_SUOMI_SPEND_LOG_TABLE;
+    my $stmnt = $dbh->prepare(qq{INSERT INTO $spend_log_table (monetary_amount,timestamp,origin,fund,account,itemtype,copy_quantity,total_amount,location,collection,biblionumber) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)});
     $stmnt->execute($monetaryamount,$timestamp,$tied,$fundnumber,$personname,$productform,$copyquantity,$totalAmount,$destinationlocation,$collectioncode,$biblio)
         or die( $dbh->errstr || 'Could not update aqbudgets_spend_log.' );
+
+    return 1;
+}
+
+sub _koha_suomi_spend_log_available {
+    my ( $self, $dbh ) = @_;
+
+    return $self->{_koha_suomi_spend_log_available}
+        if exists $self->{_koha_suomi_spend_log_available};
+
+    my $available = $self->_table_exists( $dbh, KOHA_SUOMI_SPEND_LOG_TABLE ) ? 1 : 0;
+    if ( !$available ) {
+        $self->getLogger()->log('Skipping KohaSuomi aqbudgets_spend_log integration because the local table does not exist.');
+    }
+
+    $self->{_koha_suomi_spend_log_available} = $available;
+    return $available;
 }
 
 sub getBookseller {
