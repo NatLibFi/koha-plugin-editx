@@ -75,6 +75,8 @@ like( $plugin_pm, qr{substr\( \$message, 0, 397 \).*substr\( \$message, -398 \)}
 like( $plugin_pm, qr{output_html\(\s*\$template->output\(\),\s*undef,\s*undef,\s*undef,\s*Koha::Plugin::Fi::KohaSuomi::Editx::FlashCookie->merge_cookies}s, 'Configure page passes flash cookies as output_html cookies, not extra options' );
 like( $plugin_pm, qr{sub\s+install\(\)[\s\S]+_install_or_upgrade_tables\( migrate_legacy => 0 \)}, 'Plugin install creates qualified tables without legacy migration' );
 like( $plugin_pm, qr{sub\s+upgrade[\s\S]+_install_or_upgrade_tables\( migrate_legacy => 1 \)}, 'Plugin upgrade enables legacy table migration' );
+unlike( $plugin_pm, qr{sub\s+tool\s*\{[\s\S]+?_install_or_upgrade_tables\(\)[\s\S]+?\n\}}, 'Tool page does not run plugin table setup outside lifecycle hooks' );
+unlike( $plugin_pm, qr{sub\s+configure\s*\{[\s\S]+?_install_or_upgrade_tables\(\)[\s\S]+?\n\}}, 'Configure page does not run plugin table setup outside lifecycle hooks' );
 unlike( $plugin_pm, qr{_migrate_legacy_procurement_file_table}, 'Plugin upgrade no longer migrates the obsolete file-hash import ledger' );
 like( $uninstall_pm, qr{get_qualified_table_name\('sequences'\)[\s\S]+get_qualified_table_name\('map_productform'\)}, 'Plugin uninstall removes current qualified plugin tables' );
 unlike( $uninstall_pm, qr{editx_sequences|editx_map_productform|editx_procurement_file|procurement_file|qw\(|'procurement_file'}, 'Plugin uninstall does not remove legacy or obsolete table names' );

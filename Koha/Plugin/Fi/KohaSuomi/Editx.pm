@@ -212,8 +212,6 @@ sub tool {
     my $manual_run_confirmation;
     my $manual_stage;
 
-    $self->_install_or_upgrade_tables();
-
     if ( $cgi->request_method eq 'GET' && $cgi->param('manual_stage_run_id') ) {
         my $manual_messages;
         ( $manual_messages, $manual_stage, $manual_sync_result, $manual_run_attempted ) = $self->_manual_stage_resume($cgi);
@@ -298,8 +296,6 @@ sub configure {
           $is_save
         ? $self->_procurement_settings_from_cgi($cgi)
         : $self->_procurement_settings();
-
-    $self->_install_or_upgrade_tables();
 
     if ($is_mapping_action) {
         my $handled = $self->_handle_productform_mapping_action(
