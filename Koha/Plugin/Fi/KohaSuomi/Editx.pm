@@ -174,6 +174,7 @@ sub upgrade {
 
     $self->_log_runtime( info => 'EDItX plugin upgrade started', { operation => 'upgrade' } );
     my $success = $self->_install_or_upgrade_tables( migrate_legacy => 1 );
+    $success &&= $self->_drop_obsolete_procurement_file_table();
     $self->_log_runtime(
         $success ? 'info' : 'error',
         $success ? 'EDItX plugin upgrade finished' : 'EDItX plugin upgrade failed',
@@ -618,6 +619,61 @@ sub _drop_legacy_tables_after_migration {
             }
         );
     }
+
+    return 1;
+}
+
+sub _drop_obsolete_procurement_file_table {
+    my ($self) = @_;
+
+    my $table_name = 'procurement_file';
+    if ( !$self->_table_exists($table_name) ) {
+        $self->_log_runtime(
+            info => 'Obsolete EDItX file-hash ledger table not found; cleanup skipped',
+            {
+                operation => 'upgrade_table_migration',
+                table     => $table_name,
+            }
+        );
+        return 1;
+    }
+
+    my $dbh = C4::Context->dbh;
+    my $quoted_table_name = $self->_quote_identifier($table_name);
+    my ($rows) = $dbh->selectrow_array("SELECT COUNT(*) FROM $quoted_table_name");
+    return $self->_log_table_migration_db_error(
+        $dbh,
+        'Obsolete EDItX file-hash ledger row count failed',
+        { table => $table_name }
+    ) if !defined $rows;
+
+    $self->_log_runtime(
+        info => 'Obsolete EDItX file-hash ledger table found for cleanup',
+        {
+            operation => 'upgrade_table_migration',
+            table     => $table_name,
+            rows      => 0 + $rows,
+            reason    => 'Duplicate protection now uses ShipNoticeNumber via aqbasket.basketname',
+        }
+    );
+
+    $dbh->do("DROP TABLE IF EXISTS $quoted_table_name") or return $self->_log_table_migration_db_error(
+        $dbh,
+        'Obsolete EDItX file-hash ledger cleanup failed',
+        {
+            table => $table_name,
+            rows  => 0 + $rows,
+        }
+    );
+
+    $self->_log_runtime(
+        info => 'Obsolete EDItX file-hash ledger table dropped after upgrade cleanup',
+        {
+            operation => 'upgrade_table_migration',
+            table     => $table_name,
+            rows      => 0 + $rows,
+        }
+    );
 
     return 1;
 }

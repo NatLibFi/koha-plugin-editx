@@ -153,6 +153,7 @@ subtest 'Install calls table setup without legacy migration' => sub {
 
     my @logs;
     local *{ $plugin_class . '::_log_runtime' } = _capture_runtime_log(\@logs);
+    local *{ $plugin_class . '::_drop_obsolete_procurement_file_table' } = sub { die 'install must not clean obsolete procurement_file'; };
     local *{ $plugin_class . '::_install_or_upgrade_tables' } = sub {
         my ( $self, %args ) = @_;
         is_deeply( \%args, { migrate_legacy => 0 }, 'Install disables legacy migration in table setup' );
@@ -165,6 +166,31 @@ subtest 'Install calls table setup without legacy migration' => sub {
         qr{qualified tables without legacy migration},
         'Install logs that qualified tables are created without legacy migration'
     );
+};
+
+subtest 'Upgrade cleans obsolete procurement_file ledger after table setup' => sub {
+    no strict 'refs';
+    no warnings qw(once redefine);
+
+    my %called;
+    my @logs;
+    local *{ $plugin_class . '::_log_runtime' } = _capture_runtime_log(\@logs);
+    local *{ $plugin_class . '::store_data' } = sub { $called{store_data}++; return 1; };
+    local *{ $plugin_class . '::_install_or_upgrade_tables' } = sub {
+        my ( $self, %args ) = @_;
+        is_deeply( \%args, { migrate_legacy => 1 }, 'Upgrade enables legacy migration in table setup' );
+        $called{table_setup}++;
+        return 1;
+    };
+    local *{ $plugin_class . '::_drop_obsolete_procurement_file_table' } = sub {
+        $called{drop_obsolete_procurement_file}++;
+        return 1;
+    };
+
+    ok( $plugin->upgrade, 'Upgrade succeeds after obsolete procurement_file cleanup' );
+    is( $called{table_setup}, 1, 'Upgrade runs table setup once' );
+    is( $called{drop_obsolete_procurement_file}, 1, 'Upgrade runs obsolete procurement_file cleanup once' );
+    like( join( "\n", map { $_->{message} } @logs ), qr{upgrade finished}, 'Upgrade logs success after cleanup' );
 };
 
 subtest 'Install table setup does not touch legacy tables' => sub {
@@ -343,6 +369,66 @@ subtest 'ProductForm legacy migration logs DB errors and keeps the old table' =>
     ok( !$plugin->_migrate_legacy_map_productform_table, 'ProductForm migration fails when the DB copy fails' );
     like( join( "\n", map { $_->{message} } @logs ), qr{migration failed: copy failed}, 'ProductForm migration logs the DB error' );
     unlike( join( "\n", @{ $dbh->{do_calls} } ), qr{DROP TABLE}, 'Failed ProductForm migration does not drop the legacy source table' );
+};
+
+subtest 'Obsolete procurement_file cleanup drops only the known KohaSuomi file-hash ledger' => sub {
+    no strict 'refs';
+    no warnings qw(once redefine);
+
+    my $dbh = KohaSuomi::Editx::TestDbh->new( counts => [42] );
+    my @checked_tables;
+    my @logs;
+    local *C4::Context::dbh = sub { return $dbh; };
+    local *{ $plugin_class . '::_log_runtime' } = _capture_runtime_log(\@logs);
+    local *{ $plugin_class . '::_table_exists' } = sub {
+        my ( $self, $table_name ) = @_;
+        push @checked_tables, $table_name;
+        return $table_name eq 'procurement_file';
+    };
+
+    ok( $plugin->_drop_obsolete_procurement_file_table, 'Obsolete procurement_file cleanup succeeds' );
+    is_deeply( \@checked_tables, ['procurement_file'], 'Cleanup checks only the supported KohaSuomi procurement_file table' );
+    like( join( "\n", @{ $dbh->{select_calls} } ), qr{SELECT COUNT\(\*\) FROM `procurement_file`}, 'Cleanup counts existing file-hash ledger rows' );
+    like( join( "\n", @{ $dbh->{do_calls} } ), qr{DROP TABLE IF EXISTS `procurement_file`}, 'Cleanup drops the obsolete file-hash ledger' );
+    unlike( join( "\n", @{ $dbh->{do_calls} } ), qr{editx_procurement_file}, 'Cleanup does not walk unsupported prefixed procurement_file names' );
+    my $log_text = join "\n", map { $_->{message} . ' ' . ( $_->{context}->{rows} // '' ) } @logs;
+    like( $log_text, qr{file-hash ledger table found for cleanup 42}, 'Cleanup logs the old ledger row count' );
+    like( $log_text, qr{file-hash ledger table dropped}, 'Cleanup logs the ledger drop' );
+};
+
+subtest 'Obsolete procurement_file cleanup skips missing KohaSuomi file-hash ledger' => sub {
+    no strict 'refs';
+    no warnings qw(once redefine);
+
+    my @checked_tables;
+    my @logs;
+    local *{ $plugin_class . '::_log_runtime' } = _capture_runtime_log(\@logs);
+    local *{ $plugin_class . '::_table_exists' } = sub {
+        my ( $self, $table_name ) = @_;
+        push @checked_tables, $table_name;
+        return 0;
+    };
+
+    ok( $plugin->_drop_obsolete_procurement_file_table, 'Missing obsolete procurement_file table is skipped' );
+    is_deeply( \@checked_tables, ['procurement_file'], 'Missing cleanup checks only the supported KohaSuomi procurement_file table' );
+    like( join( "\n", map { $_->{message} } @logs ), qr{not found; cleanup skipped}, 'Missing cleanup decision is logged' );
+};
+
+subtest 'Obsolete procurement_file cleanup logs DB errors and keeps upgrade failed' => sub {
+    no strict 'refs';
+    no warnings qw(once redefine);
+
+    my $dbh = KohaSuomi::Editx::TestDbh->new( counts => [7], do_result => 0, errstr => 'drop failed' );
+    my @logs;
+    local *C4::Context::dbh = sub { return $dbh; };
+    local *{ $plugin_class . '::_log_runtime' } = _capture_runtime_log(\@logs);
+    local *{ $plugin_class . '::_table_exists' } = sub {
+        my ( $self, $table_name ) = @_;
+        return $table_name eq 'procurement_file';
+    };
+
+    ok( !$plugin->_drop_obsolete_procurement_file_table, 'Obsolete procurement_file cleanup fails when the drop fails' );
+    like( join( "\n", map { $_->{message} } @logs ), qr{cleanup failed: drop failed}, 'Cleanup logs the DB error' );
 };
 
 subtest 'Uninstall drops only current qualified table names' => sub {
