@@ -65,6 +65,7 @@ sub install() {
     my ( $self, $args ) = @_;
 
     $self->_log_runtime( info => 'EDItX plugin install started', { operation => 'install' } );
+    $self->_log_runtime( info => 'EDItX plugin install creates qualified tables without legacy migration', { operation => 'install' } );
     my $success = $self->_install_or_upgrade_tables( migrate_legacy => 0 );
     $self->_log_runtime(
         $success ? 'info' : 'error',
@@ -88,6 +89,13 @@ sub _install_or_upgrade_tables {
         %table_existed_before_upgrade = (
             sequences       => $self->_table_exists($sequences_table_name),
             map_productform => $self->_table_exists($map_productform_table_name),
+        );
+        $self->_log_runtime(
+            info => 'EDItX plugin upgrade table migration started',
+            {
+                operation => 'upgrade_table_migration',
+                tables    => [ sort keys %table_existed_before_upgrade ],
+            }
         );
     }
 
@@ -127,10 +135,29 @@ sub _install_or_upgrade_tables {
     $success &&= $self->_drop_map_productform_foreign_keys();
     $success &&= $self->_allow_nullable_map_productform_columns();
     if ($migrate_legacy) {
-        $success &&= $self->_migrate_legacy_sequences_table()
-            unless $table_existed_before_upgrade{sequences};
-        $success &&= $self->_migrate_legacy_map_productform_table()
-            unless $table_existed_before_upgrade{map_productform};
+        if ( $table_existed_before_upgrade{sequences} ) {
+            $self->_log_runtime(
+                info => 'Qualified EDItX table already existed before upgrade; legacy migration skipped',
+                {
+                    operation => 'upgrade_table_migration',
+                    table     => $sequences_table_name,
+                }
+            );
+        } else {
+            $success &&= $self->_migrate_legacy_sequences_table();
+        }
+
+        if ( $table_existed_before_upgrade{map_productform} ) {
+            $self->_log_runtime(
+                info => 'Qualified EDItX table already existed before upgrade; legacy migration skipped',
+                {
+                    operation => 'upgrade_table_migration',
+                    table     => $map_productform_table_name,
+                }
+            );
+        } else {
+            $success &&= $self->_migrate_legacy_map_productform_table();
+        }
     }
     $success &&= $self->_ensure_sequences_row();
 
@@ -164,13 +191,7 @@ sub uninstall() {
     my $success = 1;
     $success &&= $self->_drop_tables_if_exist(
         $self->get_qualified_table_name('sequences'),
-        $self->get_qualified_table_name('map_productform'),
-        $self->get_qualified_table_name('procurement_file'),
-        qw(
-            editx_sequences sequences
-            editx_map_productform map_productform
-            editx_procurement_file procurement_file
-        )
+        $self->get_qualified_table_name('map_productform')
     );
 
     $self->_log_runtime(
@@ -444,23 +465,60 @@ sub _migrate_legacy_sequences_table {
     my $target = $self->get_qualified_table_name('sequences');
     my $quoted_target = $self->_quote_identifier($target);
 
-    for my $source ( 'editx_sequences', 'sequences' ) {
+    my @legacy_sources;
+    for my $source ( $self->_legacy_table_names('sequences') ) {
         next if $source eq $target;
         next unless $self->_table_exists($source);
+
+        push @legacy_sources, $source;
+        $self->_log_runtime(
+            info => 'Legacy EDItX source table found for migration',
+            {
+                operation    => 'upgrade_table_migration',
+                table        => $target,
+                source_table => $source,
+            }
+        );
 
         my $quoted_source = $self->_quote_identifier($source);
         my ($target_count) = $dbh->selectrow_array("SELECT COUNT(*) FROM $quoted_target");
         if ( !$target_count ) {
-            $dbh->do( "
+            my $rows = $dbh->do( "
                 INSERT INTO $quoted_target (invoicenumber, item_barcode_nextval)
                 SELECT invoicenumber, item_barcode_nextval FROM $quoted_source LIMIT 1
-            " ) or return;
+            " ) or return $self->_log_table_migration_db_error(
+                $dbh,
+                'Legacy EDItX sequences table migration failed',
+                {
+                    table        => $target,
+                    source_table => $source,
+                }
+            );
+            $self->_log_runtime(
+                info => 'Legacy EDItX rows copied into qualified table',
+                {
+                    operation    => 'upgrade_table_migration',
+                    table        => $target,
+                    source_table => $source,
+                    rows         => 0 + $rows,
+                }
+            );
+        } else {
+            $self->_log_runtime(
+                info => 'Qualified EDItX table already had rows; legacy source copy skipped',
+                {
+                    operation    => 'upgrade_table_migration',
+                    table        => $target,
+                    source_table => $source,
+                    rows         => $target_count,
+                }
+            );
         }
-
-        $dbh->do("DROP TABLE IF EXISTS $quoted_source") or return;
     }
 
-    return 1;
+    return @legacy_sources
+        ? $self->_drop_legacy_tables_after_migration( $target, @legacy_sources )
+        : 1;
 }
 
 sub _migrate_legacy_map_productform_table {
@@ -469,31 +527,119 @@ sub _migrate_legacy_map_productform_table {
     my $dbh = C4::Context->dbh;
     my $target = $self->get_qualified_table_name('map_productform');
     my $quoted_target = $self->_quote_identifier($target);
-    my ($target_count) = $dbh->selectrow_array("SELECT COUNT(*) FROM $quoted_target");
 
-    my $has_legacy;
-    for my $source ( 'editx_map_productform', 'map_productform' ) {
+    my @legacy_sources;
+    for my $source ( $self->_legacy_table_names('map_productform') ) {
         next if $source eq $target;
         next unless $self->_table_exists($source);
 
-        $has_legacy = 1;
-        next if $target_count;
+        push @legacy_sources, $source;
+        $self->_log_runtime(
+            info => 'Legacy EDItX source table found for migration',
+            {
+                operation    => 'upgrade_table_migration',
+                table        => $target,
+                source_table => $source,
+            }
+        );
+
+        my ($target_count) = $dbh->selectrow_array("SELECT COUNT(*) FROM $quoted_target");
+        if ($target_count) {
+            $self->_log_runtime(
+                info => 'Qualified EDItX table already had rows; legacy source copy skipped',
+                {
+                    operation    => 'upgrade_table_migration',
+                    table        => $target,
+                    source_table => $source,
+                    rows         => $target_count,
+                }
+            );
+            next;
+        }
 
         my $quoted_source = $self->_quote_identifier($source);
-        $dbh->do( "
+        my $rows = $dbh->do( "
             INSERT INTO $quoted_target (onix_code, productform, productform_alternative)
             SELECT onix_code, productform, productform_alternative FROM $quoted_source
             ON DUPLICATE KEY UPDATE
                 productform = VALUES(productform),
                 productform_alternative = VALUES(productform_alternative)
-        " ) or return;
-
-        ($target_count) = $dbh->selectrow_array("SELECT COUNT(*) FROM $quoted_target");
+        " ) or return $self->_log_table_migration_db_error(
+            $dbh,
+            'Legacy EDItX ProductForm table migration failed',
+            {
+                table        => $target,
+                source_table => $source,
+            }
+        );
+        $self->_log_runtime(
+            info => 'Legacy EDItX rows copied into qualified table',
+            {
+                operation    => 'upgrade_table_migration',
+                table        => $target,
+                source_table => $source,
+                rows         => 0 + $rows,
+            }
+        );
     }
 
-    return $has_legacy
-        ? $self->_drop_tables_if_exist(qw(editx_map_productform map_productform))
+    return @legacy_sources
+        ? $self->_drop_legacy_tables_after_migration( $target, @legacy_sources )
         : 1;
+}
+
+sub _legacy_table_names {
+    my ( $self, $table_name ) = @_;
+
+    my %legacy_table_names = (
+        sequences       => ['sequences'],
+        map_productform => ['map_productform'],
+    );
+
+    return @{ $legacy_table_names{$table_name} || [] };
+}
+
+sub _drop_legacy_tables_after_migration {
+    my ( $self, $table_name, @legacy_sources ) = @_;
+
+    my $dbh = C4::Context->dbh;
+    for my $source (@legacy_sources) {
+        my $quoted_source = $self->_quote_identifier($source);
+        $dbh->do("DROP TABLE IF EXISTS $quoted_source") or return $self->_log_table_migration_db_error(
+            $dbh,
+            'Legacy EDItX table cleanup failed after migration',
+            {
+                table        => $table_name,
+                source_table => $source,
+            }
+        );
+        $self->_log_runtime(
+            info => 'Legacy EDItX table dropped after migration',
+            {
+                operation    => 'upgrade_table_migration',
+                table        => $table_name,
+                source_table => $source,
+            }
+        );
+    }
+
+    return 1;
+}
+
+sub _log_table_migration_db_error {
+    my ( $self, $dbh, $message, $context ) = @_;
+
+    my $error = $self->_compact_message( $dbh->errstr ) || 'unknown database error';
+    $self->_log_runtime(
+        error => "$message: $error",
+        {
+            operation => 'upgrade_table_migration',
+            error     => $error,
+            %{ $context || {} },
+        }
+    );
+
+    return;
 }
 
 sub _drop_tables_if_exist {

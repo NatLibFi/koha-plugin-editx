@@ -26,9 +26,11 @@ my $breadcrumbs = read_file('Koha/Plugin/Fi/KohaSuomi/Editx/includes/editx_bread
 my $css = read_file('Koha/Plugin/Fi/KohaSuomi/Editx/static_files/editx.css');
 my $local_build = read_file('local_build.sh');
 my $install_sql = read_file('installation/create_tables.sql');
+my $update_sql = read_file('installation/update_tables.sql');
 my $fetch_sftp = read_file('Koha/Plugin/Fi/KohaSuomi/Editx/cronjobs/fetch_editx_sftp.sh');
 my $order_processor = read_file('Koha/Plugin/Fi/KohaSuomi/Editx/Procurement/OrderProcessor.pm');
 my $unofficial_instance_env = 'KOHA' . '_INSTANCE';
+my ($uninstall_pm) = $plugin_pm =~ /(sub\s+uninstall\(\)\s*\{[\s\S]+?\n\})\n\nsub\s+tool/;
 
 like( $plugin_pm, qr{our\s+\$VERSION\s*=\s*"0\.0\.2";}, 'Plugin version is hardcoded in source instead of kept as a release placeholder' );
 unlike( $plugin_pm, qr{\{VERSION\}}, 'Plugin source does not expose a raw version placeholder' );
@@ -71,11 +73,15 @@ like( $plugin_pm, qr{output_html\(\s*\$template->output\(\),\s*undef,\s*undef,\s
 like( $plugin_pm, qr{sub\s+install\(\)[\s\S]+_install_or_upgrade_tables\( migrate_legacy => 0 \)}, 'Plugin install creates qualified tables without legacy migration' );
 like( $plugin_pm, qr{sub\s+upgrade[\s\S]+_install_or_upgrade_tables\( migrate_legacy => 1 \)}, 'Plugin upgrade enables legacy table migration' );
 unlike( $plugin_pm, qr{_migrate_legacy_procurement_file_table}, 'Plugin upgrade no longer migrates the obsolete file-hash import ledger' );
-like( $plugin_pm, qr{sub\s+uninstall\(\)[\s\S]+editx_map_productform map_productform}, 'Plugin uninstall cleans legacy ProductForm table names as leftover plugin data' );
+like( $uninstall_pm, qr{get_qualified_table_name\('sequences'\)[\s\S]+get_qualified_table_name\('map_productform'\)}, 'Plugin uninstall removes current qualified plugin tables' );
+unlike( $uninstall_pm, qr{editx_sequences|editx_map_productform|editx_procurement_file|procurement_file|qw\(|'procurement_file'}, 'Plugin uninstall does not remove legacy or obsolete table names' );
 like( $install_sql, qr{CREATE TABLE IF NOT EXISTS `koha_plugin_fi_kohasuomi_editx_map_productform`}, 'Install SQL still creates the ProductForm mapping table' );
+unlike( $install_sql, qr{RENAME\s+TABLE}i, 'Install SQL does not rename tables' );
+unlike( $install_sql, qr{`(?:sequences|editx_sequences|map_productform|editx_map_productform|procurement_file|editx_procurement_file)`}, 'Install SQL does not reference legacy table names' );
 unlike( $install_sql, qr{procurement_file|file_hash|file_name_hash}, 'Install SQL no longer creates the obsolete file-hash import ledger' );
 unlike( $install_sql, qr{INSERT INTO\s+koha_plugin_fi_kohasuomi_editx_map_productform}i, 'Install SQL does not seed ProductForm mappings' );
 unlike( $install_sql, qr{28VRK|28VRKLN|14VRK|EILAINATA}, 'Install SQL does not contain KohaSuomi-local itemtype seeds' );
+unlike( $update_sql, qr{RENAME\s+TABLE\s+IF\s+EXISTS}i, 'Update SQL does not use MariaDB-only RENAME TABLE IF EXISTS' );
 
 like( $breadcrumbs, qr{href="\[%\s*tool_href\s*\|\s*html\s*%\]">EDItX plugin</a>}, 'Breadcrumb plugin root points to the tool page' );
 like( $breadcrumbs, qr{active_method\s*!=\s*'configure'}, 'Breadcrumb configure shortcut is hidden on the configure page' );

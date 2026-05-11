@@ -57,6 +57,13 @@ my $plugin = bless {}, $plugin_class;
         return exists $self->{do_result} ? $self->{do_result} : 1;
     }
 
+    sub prepare {
+        my ( $self, $sql ) = @_;
+
+        push @{ $self->{prepared} }, $sql;
+        return bless { dbh => $self, sql => $sql }, 'KohaSuomi::Editx::TestSth';
+    }
+
     sub selectrow_array {
         my ( $self, $sql, $attrs, @bind ) = @_;
 
@@ -86,12 +93,41 @@ my $plugin = bless {}, $plugin_class;
         push @{ $self->{txn_calls} }, 'rollback';
         return 1;
     }
+
+    sub errstr {
+        return shift->{errstr};
+    }
+}
+
+{
+    package KohaSuomi::Editx::TestSth;
+
+    sub execute {
+        my ( $self, @bind ) = @_;
+
+        push @{ $self->{dbh}->{executed} }, [ $self->{sql}, @bind ];
+        return exists $self->{dbh}->{execute_result} ? $self->{dbh}->{execute_result} : 1;
+    }
 }
 
 sub _message_text {
     my ($messages) = @_;
 
     return join "\n", map { $_->{text} } @$messages;
+}
+
+sub _capture_runtime_log {
+    my ($logs) = @_;
+
+    return sub {
+        my ( $self, $level, $message, $context ) = @_;
+        push @{$logs}, {
+            level   => $level,
+            message => $message,
+            context => $context,
+        };
+        return 1;
+    };
 }
 
 sub _valid_procurement_settings {
@@ -111,13 +147,35 @@ sub _valid_procurement_settings {
     };
 }
 
+subtest 'Install calls table setup without legacy migration' => sub {
+    no strict 'refs';
+    no warnings qw(once redefine);
+
+    my @logs;
+    local *{ $plugin_class . '::_log_runtime' } = _capture_runtime_log(\@logs);
+    local *{ $plugin_class . '::_install_or_upgrade_tables' } = sub {
+        my ( $self, %args ) = @_;
+        is_deeply( \%args, { migrate_legacy => 0 }, 'Install disables legacy migration in table setup' );
+        return 1;
+    };
+
+    ok( $plugin->install, 'Install succeeds with legacy migration disabled' );
+    like(
+        join( "\n", map { $_->{message} } @logs ),
+        qr{qualified tables without legacy migration},
+        'Install logs that qualified tables are created without legacy migration'
+    );
+};
+
 subtest 'Install table setup does not touch legacy tables' => sub {
     no strict 'refs';
     no warnings qw(once redefine);
 
     my $dbh = KohaSuomi::Editx::TestDbh->new;
     my %called;
+    my @logs;
     local *C4::Context::dbh = sub { return $dbh; };
+    local *{ $plugin_class . '::_log_runtime' } = _capture_runtime_log(\@logs);
     local *{ $plugin_class . '::get_qualified_table_name' } = sub {
         my ( $self, $table_name ) = @_;
         return "koha_plugin_fi_kohasuomi_editx_$table_name";
@@ -125,6 +183,7 @@ subtest 'Install table setup does not touch legacy tables' => sub {
     local *{ $plugin_class . '::_drop_map_productform_foreign_keys' } = sub { $called{drop_foreign_keys}++; return 1; };
     local *{ $plugin_class . '::_allow_nullable_map_productform_columns' } = sub { $called{allow_nullable}++; return 1; };
     local *{ $plugin_class . '::_ensure_sequences_row' } = sub { $called{ensure_sequences}++; return 1; };
+    local *{ $plugin_class . '::_table_exists' } = sub { die 'install must not inspect legacy or qualified table existence'; };
     local *{ $plugin_class . '::_migrate_legacy_sequences_table' } = sub { die 'install must not migrate legacy sequences'; };
     local *{ $plugin_class . '::_migrate_legacy_map_productform_table' } = sub { die 'install must not migrate legacy ProductForm mappings'; };
 
@@ -139,7 +198,10 @@ subtest 'Upgrade table setup enables legacy migration' => sub {
 
     my $dbh = KohaSuomi::Editx::TestDbh->new;
     my %called;
+    my @checked_tables;
+    my @logs;
     local *C4::Context::dbh = sub { return $dbh; };
+    local *{ $plugin_class . '::_log_runtime' } = _capture_runtime_log(\@logs);
     local *{ $plugin_class . '::get_qualified_table_name' } = sub {
         my ( $self, $table_name ) = @_;
         return "koha_plugin_fi_kohasuomi_editx_$table_name";
@@ -147,13 +209,26 @@ subtest 'Upgrade table setup enables legacy migration' => sub {
     local *{ $plugin_class . '::_drop_map_productform_foreign_keys' } = sub { $called{drop_foreign_keys}++; return 1; };
     local *{ $plugin_class . '::_allow_nullable_map_productform_columns' } = sub { $called{allow_nullable}++; return 1; };
     local *{ $plugin_class . '::_ensure_sequences_row' } = sub { $called{ensure_sequences}++; return 1; };
-    local *{ $plugin_class . '::_table_exists' } = sub { return 0; };
+    local *{ $plugin_class . '::_table_exists' } = sub {
+        my ( $self, $table_name ) = @_;
+        push @checked_tables, $table_name;
+        return 0;
+    };
     local *{ $plugin_class . '::_migrate_legacy_sequences_table' } = sub { $called{migrate_sequences}++; return 1; };
     local *{ $plugin_class . '::_migrate_legacy_map_productform_table' } = sub { $called{migrate_productform}++; return 1; };
 
     ok( $plugin->_install_or_upgrade_tables( migrate_legacy => 1 ), 'Upgrade table setup succeeds with legacy migration enabled' );
+    is_deeply(
+        \@checked_tables,
+        [
+            'koha_plugin_fi_kohasuomi_editx_sequences',
+            'koha_plugin_fi_kohasuomi_editx_map_productform',
+        ],
+        'Upgrade captures qualified table existence before creating tables'
+    );
     is( $called{migrate_sequences}, 1, 'Upgrade migrates legacy sequences' );
     is( $called{migrate_productform}, 1, 'Upgrade migrates legacy ProductForm mappings' );
+    like( join( "\n", map { $_->{message} } @logs ), qr{upgrade table migration started}, 'Upgrade logs the migration start' );
 };
 
 subtest 'Upgrade ignores legacy when qualified tables already exist' => sub {
@@ -162,7 +237,9 @@ subtest 'Upgrade ignores legacy when qualified tables already exist' => sub {
 
     my $dbh = KohaSuomi::Editx::TestDbh->new;
     my %called;
+    my @logs;
     local *C4::Context::dbh = sub { return $dbh; };
+    local *{ $plugin_class . '::_log_runtime' } = _capture_runtime_log(\@logs);
     local *{ $plugin_class . '::get_qualified_table_name' } = sub {
         my ( $self, $table_name ) = @_;
         return "koha_plugin_fi_kohasuomi_editx_$table_name";
@@ -176,14 +253,84 @@ subtest 'Upgrade ignores legacy when qualified tables already exist' => sub {
 
     ok( $plugin->_install_or_upgrade_tables( migrate_legacy => 1 ), 'Upgrade table setup succeeds without legacy migration when qualified tables exist' );
     is( $called{ensure_sequences}, 1, 'Upgrade still runs normal qualified-table maintenance' );
+    is(
+        scalar( grep { $_->{message} =~ /legacy migration skipped/ } @logs ),
+        2,
+        'Upgrade logs a skip for each qualified table that existed before upgrade'
+    );
 };
 
-subtest 'ProductForm legacy migration imports into a newly created target and removes old tables' => sub {
+subtest 'Upgrade migrates only qualified tables missing before upgrade' => sub {
+    no strict 'refs';
+    no warnings qw(once redefine);
+
+    my $dbh = KohaSuomi::Editx::TestDbh->new;
+    my %called;
+    my @logs;
+    local *C4::Context::dbh = sub { return $dbh; };
+    local *{ $plugin_class . '::_log_runtime' } = _capture_runtime_log(\@logs);
+    local *{ $plugin_class . '::get_qualified_table_name' } = sub {
+        my ( $self, $table_name ) = @_;
+        return "koha_plugin_fi_kohasuomi_editx_$table_name";
+    };
+    local *{ $plugin_class . '::_drop_map_productform_foreign_keys' } = sub { $called{drop_foreign_keys}++; return 1; };
+    local *{ $plugin_class . '::_allow_nullable_map_productform_columns' } = sub { $called{allow_nullable}++; return 1; };
+    local *{ $plugin_class . '::_ensure_sequences_row' } = sub { $called{ensure_sequences}++; return 1; };
+    local *{ $plugin_class . '::_table_exists' } = sub {
+        my ( $self, $table_name ) = @_;
+        return $table_name eq 'koha_plugin_fi_kohasuomi_editx_sequences' ? 1 : 0;
+    };
+    local *{ $plugin_class . '::_migrate_legacy_sequences_table' } = sub { die 'upgrade must skip legacy sequences when the qualified table existed'; };
+    local *{ $plugin_class . '::_migrate_legacy_map_productform_table' } = sub { $called{migrate_productform}++; return 1; };
+
+    ok( $plugin->_install_or_upgrade_tables( migrate_legacy => 1 ), 'Upgrade table setup succeeds with mixed pre-existing qualified tables' );
+    is( $called{migrate_productform}, 1, 'Upgrade migrates only the missing qualified ProductForm table' );
+    is(
+        scalar( grep { $_->{message} =~ /legacy migration skipped/ && $_->{context}->{table} eq 'koha_plugin_fi_kohasuomi_editx_sequences' } @logs ),
+        1,
+        'Upgrade logs that legacy sequence migration was skipped'
+    );
+};
+
+subtest 'ProductForm legacy migration imports supported Koha Suomi source and removes that old table' => sub {
     no strict 'refs';
     no warnings qw(once redefine);
 
     my $dbh = KohaSuomi::Editx::TestDbh->new( counts => [ 0, 3 ] );
+    my @checked_tables;
+    my @logs;
     local *C4::Context::dbh = sub { return $dbh; };
+    local *{ $plugin_class . '::_log_runtime' } = _capture_runtime_log(\@logs);
+    local *{ $plugin_class . '::get_qualified_table_name' } = sub {
+        my ( $self, $table_name ) = @_;
+        return "koha_plugin_fi_kohasuomi_editx_$table_name";
+    };
+    local *{ $plugin_class . '::_table_exists' } = sub {
+        my ( $self, $table_name ) = @_;
+        push @checked_tables, $table_name;
+        return $table_name eq 'map_productform';
+    };
+
+    ok( $plugin->_migrate_legacy_map_productform_table, 'ProductForm migration succeeds from the legacy unqualified table' );
+    my $sql = join "\n", @{ $dbh->{do_calls} };
+    is_deeply( \@checked_tables, ['map_productform'], 'ProductForm migration checks only the supported Koha Suomi legacy source table' );
+    like( $sql, qr{INSERT INTO `koha_plugin_fi_kohasuomi_editx_map_productform`.*FROM `map_productform`}s, 'Legacy ProductForm rows are copied for a newly created target table' );
+    like( $sql, qr{DROP TABLE IF EXISTS `map_productform`}, 'Unqualified ProductForm legacy table is removed after upgrade migration' );
+    unlike( $sql, qr{`editx_map_productform`}, 'ProductForm migration does not walk or drop unsupported prefixed legacy table names' );
+    my $log_text = join "\n", map { $_->{message} } @logs;
+    like( $log_text, qr{source table found}, 'ProductForm migration logs that a legacy source table was found' );
+    like( $log_text, qr{rows copied}, 'ProductForm migration logs copied rows' );
+    like( $log_text, qr{table dropped}, 'ProductForm migration logs legacy cleanup' );
+};
+
+subtest 'ProductForm legacy migration logs DB errors and keeps the old table' => sub {
+    no strict 'refs';
+    no warnings qw(once redefine);
+
+    my $dbh = KohaSuomi::Editx::TestDbh->new( counts => [0], do_result => 0, errstr => 'copy failed' );
+    my @logs;
+    local *C4::Context::dbh = sub { return $dbh; };
+    local *{ $plugin_class . '::_log_runtime' } = _capture_runtime_log(\@logs);
     local *{ $plugin_class . '::get_qualified_table_name' } = sub {
         my ( $self, $table_name ) = @_;
         return "koha_plugin_fi_kohasuomi_editx_$table_name";
@@ -193,11 +340,37 @@ subtest 'ProductForm legacy migration imports into a newly created target and re
         return $table_name eq 'map_productform';
     };
 
-    ok( $plugin->_migrate_legacy_map_productform_table, 'ProductForm migration succeeds from the legacy unqualified table' );
-    my $sql = join "\n", @{ $dbh->{do_calls} };
-    like( $sql, qr{INSERT INTO `koha_plugin_fi_kohasuomi_editx_map_productform`.*FROM `map_productform`}s, 'Legacy ProductForm rows are copied for a newly created target table' );
-    like( $sql, qr{DROP TABLE IF EXISTS `map_productform`}, 'Unqualified ProductForm legacy table is removed after upgrade migration' );
-    like( $sql, qr{DROP TABLE IF EXISTS `editx_map_productform`}, 'Older prefixed ProductForm legacy table name is also cleaned' );
+    ok( !$plugin->_migrate_legacy_map_productform_table, 'ProductForm migration fails when the DB copy fails' );
+    like( join( "\n", map { $_->{message} } @logs ), qr{migration failed: copy failed}, 'ProductForm migration logs the DB error' );
+    unlike( join( "\n", @{ $dbh->{do_calls} } ), qr{DROP TABLE}, 'Failed ProductForm migration does not drop the legacy source table' );
+};
+
+subtest 'Uninstall drops only current qualified table names' => sub {
+    no strict 'refs';
+    no warnings qw(once redefine);
+
+    my @dropped_tables;
+    my @logs;
+    local *{ $plugin_class . '::_log_runtime' } = _capture_runtime_log(\@logs);
+    local *{ $plugin_class . '::get_qualified_table_name' } = sub {
+        my ( $self, $table_name ) = @_;
+        return "koha_plugin_fi_kohasuomi_editx_$table_name";
+    };
+    local *{ $plugin_class . '::_drop_tables_if_exist' } = sub {
+        my ( $self, @table_names ) = @_;
+        @dropped_tables = @table_names;
+        return 1;
+    };
+
+    ok( $plugin->uninstall, 'Uninstall succeeds' );
+    is_deeply(
+        \@dropped_tables,
+        [
+            'koha_plugin_fi_kohasuomi_editx_sequences',
+            'koha_plugin_fi_kohasuomi_editx_map_productform',
+        ],
+        'Uninstall drops only current qualified plugin tables'
+    );
 };
 
 subtest 'Structured config model stores stable settings and preserves scalar runtime-style keys outside the blob' => sub {

@@ -1,7 +1,3 @@
-
-RENAME TABLE IF EXISTS `sequences` TO `koha_plugin_fi_kohasuomi_editx_sequences`;
-RENAME TABLE IF EXISTS `map_productform` TO `koha_plugin_fi_kohasuomi_editx_map_productform`;
-
 CREATE TABLE IF NOT EXISTS `koha_plugin_fi_kohasuomi_editx_sequences` (
   `invoicenumber` int(11) NOT NULL,
   `item_barcode_nextval` int(11) NOT NULL
