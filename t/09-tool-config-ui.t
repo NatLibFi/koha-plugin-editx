@@ -62,6 +62,9 @@ like( $plugin_pm, qr{sub\s+_manual_stage_check_remote\s*\{}, 'Plugin can check r
 like( $plugin_pm, qr{sub\s+_manual_stage_resume\s*\{}, 'Plugin can resume a staged workflow after a redirect-safe GET reload' );
 like( $plugin_pm, qr{sub\s+_manual_stage_download_selected\s*\{}, 'Plugin can download selected remote files into manual staging' );
 like( $plugin_pm, qr{sub\s+_manual_stage_import_selected\s*\{}, 'Plugin can import selected staged files' );
+like( $plugin_pm, qr{can_override_duplicate_stage_files\s*=>\s*\$self->_current_user_is_superlibrarian\(\)}, 'Tool template receives superlibrarian duplicate override capability' );
+like( $plugin_pm, qr{override_duplicate_stage_files[\s\S]+Only superlibrarians can override duplicate EDItX file blocking}, 'Staged import duplicate override is enforced server-side for superlibrarians' );
+like( $plugin_pm, qr{Selected EDItX files include duplicate notices[\s\S]+duplicate override checkbox}, 'Staged import blocks duplicate files unless override is submitted' );
 like( $plugin_pm, qr{ImportRunner->new\(\s*\{\s*echo\s*=>\s*0\s*\}\s*\)->run_file_paths}, 'Manual staged web import suppresses runner console echo before rendering the Koha response' );
 like( $plugin_pm, qr{sub\s+_manual_stage_preview_file\s*\{}, 'Plugin builds EDItX previews for staged files' );
 like( $plugin_pm, qr{manual keeps remote}, 'Manual staged downloads do not archive or delete remote files' );
@@ -174,6 +177,7 @@ unlike( $css, qr{editx-known-hosts-helper}, 'CSS does not keep unused known-host
 
 like( $tool, qr{active_text='Operations'\s+active_method='tool'}, 'Tool page marks the Operations breadcrumb active' );
 like( $tool, qr{\[%\s*SET\s+footerjs\s*=\s*1\s*%\]}, 'Tool page enables Koha footer JavaScript before using jsinclude' );
+like( $tool, qr{\[%\s+INCLUDE\s+'datatables\.inc'\s+%\]}, 'Tool page loads Koha DataTables helpers for staged file tables' );
 like( $tool, qr{EDItX plugin v\[%\s*plugin_display_version\s*\|\s*html\s*%\]}, 'Tool page renders the controller-supplied display version' );
 like( $tool, qr{<link rel="stylesheet" href="/api/v1/contrib/editx/static/static_files/editx\.css" />}, 'Tool page hardcodes the stable Koha plugin static CSS URL' );
 unlike( $tool, qr{editx_debug|editx_debug_comment|EDItX debug}, 'Tool page does not keep deployment debug comments in source' );
@@ -187,17 +191,28 @@ like( $tool, qr{Fix SFTP configuration before using the staged workflow[\s\S]+St
 like( $tool, qr{name="stage_download_selected"\s+value="1"}, 'Tool page can download selected remote files' );
 like( $tool, qr{Download selected</button>\s*<a class="btn btn-default" href="\[%\s*tool_href\s*\|\s*html\s*%\]">Cancel</a>}, 'Remote-file stage offers a cancel link beside the download action' );
 like( $tool, qr{name="remote_file"}, 'Tool page renders remote file selection checkboxes' );
+like( $tool, qr{id="editx-remote-files-table"[\s\S]+data-editx-stage-selection-table="remote_file"[\s\S]+data-editx-check-all="remote_file"}, 'Remote-file stage uses a Koha DataTable-ready selection table' );
 like( $tool, qr{Downloaded EDItX preview}, 'Tool page renders downloaded file preview' );
 like( $tool, qr{name="stage_import_selected"\s+value="1"}, 'Tool page can import selected staged files' );
-like( $tool, qr{Import selected</button>\s*<a class="btn btn-default" href="\[%\s*tool_href\s*\|\s*html\s*%\]">Cancel</a>}, 'Downloaded-preview stage offers a cancel link beside the import action' );
+like( $tool, qr{Import selected</button>[\s\S]+<a class="btn btn-default" href="\[%\s*tool_href\s*\|\s*html\s*%\]">Cancel</a>}, 'Downloaded-preview stage offers a cancel link beside the import action' );
 like( $tool, qr{name="stage_file"}, 'Tool page renders staged file selection checkboxes' );
-like( $tool, qr{file_importable\s+=\s+file\.status\s+==\s+'valid'\s+&&\s+file\.duplicate_import_blocked\s+!=\s+1}, 'Tool page computes importability from XML validity and basket duplicate status' );
+like( $tool, qr{id="editx-downloaded-files-table"[\s\S]+data-editx-stage-selection-table="stage_file"[\s\S]+data-editx-check-all="stage_file"}, 'Downloaded-preview stage uses a Koha DataTable-ready selection table' );
+like( $tool, qr{file_duplicate_blocked\s+=\s+file\.duplicate_import_blocked\s+==\s+1[\s\S]+file_importable\s+=\s+file\.status\s+==\s+'valid'\s+&&\s+file_duplicate_blocked\s+!=\s+1}, 'Tool page computes importability from XML validity and basket duplicate status' );
 like( $tool, qr{editx-stage-row-duplicate}, 'Tool page marks duplicate staged preview rows with a dedicated class' );
 like( $tool, qr{\[%\s+UNLESS\s+file_importable\s+%\]disabled="disabled"\[%\s+END\s+%\]}, 'Tool page disables staged import checkboxes for invalid or duplicate files' );
+like( $tool, qr{can_override_duplicate_stage_files && has_duplicate_stage_files[\s\S]+name="override_duplicate_stage_files"[\s\S]+data-editx-duplicate-override="stage_file"}, 'Tool page offers a superlibrarian duplicate override beside the import action' );
+like( $tool, qr{class="editx-stage-duplicate-checkbox" data-editx-duplicate-blocked="1"}, 'Duplicate staged file checkboxes are marked for override styling and enablement' );
 like( $tool, qr{Notice / Total}, 'Tool page combines notice and total preview columns' );
 like( $tool, qr{Seller / Vendor IDs}, 'Tool page combines seller and vendor id preview columns' );
 like( $tool, qr{Lines / Copies}, 'Tool page combines line and copy preview columns' );
 like( $tool, qr{data-editx-check-all}, 'Tool page provides select-all checkboxes for staged tables' );
+like( $tool, qr{jQuery\(table\)\.kohaTable\(\{[\s\S]+columnDefs:[\s\S]+targets:\s*\[0\][\s\S]+orderable:\s*false[\s\S]+pageLength:\s*25}, 'Tool page initializes staged file tables as static Koha DataTables' );
+like( $tool, qr{rows\(\{\s*search:\s*"applied"\s*\}\)\.nodes\(\)\.toArray\(\)}, 'Staged file selection can operate on filtered DataTable rows' );
+like( $tool, qr{const selected = new Set\(\)[\s\S]+addHiddenSelections\(form, name, selected\)}, 'Staged file selection survives DataTables paging through hidden submit inputs' );
+like( $tool, qr{const checked = toggle\.checked;[\s\S]+setCheckboxSelection\(table, name, selected, checkbox, checked\)}, 'Staged file select-all keeps the intended checked state while updating header indeterminate state' );
+like( $tool, qr{function\s+applyDuplicateOverride[\s\S]+getAttribute\("data-editx-duplicate-blocked"\) === "1"[\s\S]+checkbox\.disabled = !allowDuplicates}, 'Staged file duplicate override enables duplicate checkboxes client-side' );
+like( $tool, qr{function\s+allCheckboxes[\s\S]+dataTable\.rows\(\)\.nodes\(\)\.toArray\(\)[\s\S]+allCheckboxes\(table, name\)\.forEach}, 'Staged file submit handling covers DataTables rows beyond the visible page' );
+like( $tool, qr{dragState[\s\S]+mousedown[\s\S]+mouseover[\s\S]+is-editx-selection-drag-active}, 'Staged file tables support mouse-drag checkbox selection' );
 like( $tool, qr{Check remote files again}, 'Tool page offers a restart action after a staged import result' );
 like( $tool, qr{href="\[%\s*tool_href\s*\|\s*html\s*%\]">Return to start</a>}, 'Tool page lets staff return from the staged import result to the start screen' );
 like( $tool, qr{No remote EDItX files matched the configured SFTP sources[\s\S]+Check remote files again[\s\S]+Return to start}, 'Tool page gives explicit actions when no remote staged files match' );
@@ -226,6 +241,14 @@ like( $css, qr{\.editx-confirm-actions}, 'CSS styles the manual confirmation act
 like( $css, qr{\.editx-source-selector}, 'CSS styles the staged source selector' );
 like( $css, qr{\.editx-or-separator::before}, 'CSS draws the OR separator rule' );
 like( $css, qr{\.editx-stage-table}, 'CSS styles staged workflow tables' );
+like( $css, qr{\.editx-stage-table \.editx-stage-modified-cell\s*\{[\s\S]+white-space:\s*nowrap;}, 'CSS keeps staged remote modified timestamps on one line' );
+like( $css, qr{\.editx-stage-selection-cell\s*\{[\s\S]+cursor:\s*pointer;[\s\S]+user-select:\s*none;}, 'CSS marks staged table selection cells as draggable controls' );
+like( $css, qr{\.editx-stage-selection-cell\.is-editx-selection-drag-active\s*\{[\s\S]+background:\s*#fff3cd\s*!important;}, 'CSS highlights staged checkbox cells during drag selection' );
+unlike( $css, qr{accent-color:\s*#b42318;}, 'CSS does not color the duplicate checkbox control itself' );
+like( $css, qr{td\.editx-stage-duplicate-selection-cell:has\(\.editx-stage-duplicate-checkbox:checked:not\(:disabled\)\)\s*\{[\s\S]+--editx-stage-duplicate-selected-bg:\s*#f2b3bb;[\s\S]+--bs-table-bg-type:\s*var\(--editx-stage-duplicate-selected-bg\);}, 'CSS marks checked duplicate checkbox cells through Koha table stripe variables' );
+like( $css, qr{tr\.editx-stage-row-duplicate\.even[\s\S]+tr\.editx-stage-row-duplicate:nth-of-type\(even\)[\s\S]+--editx-stage-duplicate-selected-bg:\s*#f6c8ce;}, 'CSS keeps checked duplicate checkbox cells distinct on striped DataTable rows' );
+like( $css, qr{tr\.editx-stage-row-duplicate:hover[\s\S]+--editx-stage-duplicate-selected-bg:\s*#e99aa5;[\s\S]+--bs-table-bg-state:\s*var\(--editx-stage-duplicate-selected-bg\);}, 'CSS keeps checked duplicate checkbox cells visible on DataTable hover rows' );
+unlike( $css, qr{9999px #fff1f0}, 'CSS does not use box-shadow overlays for duplicate override cells' );
 like( $css, qr{\.editx-stage-row-duplicate\s*\{[\s\S]+color:\s*#5d6972;}, 'CSS quiets duplicate staged preview rows' );
 like( $css, qr{\.editx-notice-id\s*\{[\s\S]+background:\s*#eef1f3;}, 'CSS renders EDItX notice ids as quiet gray fields' );
 

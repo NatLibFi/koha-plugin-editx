@@ -104,13 +104,15 @@
                                 <input type="hidden" name="op" value="cud-stage-download-selected" />
                                 <input type="hidden" name="stage_download_selected" value="1" />
                                 [% INCLUDE 'csrf-token.inc' %]
-                                <table class="table table-striped editx-stage-table">
+                                <table id="editx-remote-files-table"
+                                       class="table table-striped editx-stage-table"
+                                       data-editx-stage-selection-table="remote_file">
                                     <thead>
                                         <tr>
-                                            <th><input type="checkbox" data-editx-check-all="remote_file" aria-label="Select all remote files" /></th>
+                                            <th class="NoSort editx-stage-selection-cell"><input type="checkbox" data-editx-check-all="remote_file" aria-label="Select all filtered remote files" /></th>
                                             <th>Source</th>
                                             <th>Filename</th>
-                                            <th>Modified</th>
+                                            <th class="editx-stage-modified-cell">Modified</th>
                                             <th>Size</th>
                                             <th>Local status</th>
                                             <th>Manual action</th>
@@ -119,10 +121,10 @@
                                     <tbody>
                                         [% FOREACH file IN manual_stage.files %]
                                             <tr>
-                                                <td><input type="checkbox" name="remote_file" value="[% file.key | html %]" /></td>
+                                                <td class="editx-stage-selection-cell"><input type="checkbox" name="remote_file" value="[% file.key | html %]" /></td>
                                                 <td>[% file.source_id | html %]</td>
                                                 <td><code>[% file.filename | html %]</code></td>
-                                                <td>[% file.modified | html %]</td>
+                                                <td class="editx-stage-modified-cell">[% file.modified | html %]</td>
                                                 <td>[% file.size | html %]</td>
                                                 <td>[% file.local_status | html %]</td>
                                                 <td>[% file.after_action | html %]</td>
@@ -168,10 +170,16 @@
                                     <strong>[% manual_stage.summary.copies | html %]</strong> copy/copies.
                                 </p>
                             [% END %]
-                            <table class="table table-striped editx-stage-table">
+                            [% SET has_duplicate_stage_files = 0 %]
+                            [% FOREACH file IN manual_stage.files %]
+                                [% IF file.duplicate_import_blocked %][% SET has_duplicate_stage_files = 1 %][% END %]
+                            [% END %]
+                            <table id="editx-downloaded-files-table"
+                                   class="table table-striped editx-stage-table"
+                                   data-editx-stage-selection-table="stage_file">
                                 <thead>
                                     <tr>
-                                        <th><input type="checkbox" data-editx-check-all="stage_file" aria-label="Select all importable downloaded files" /></th>
+                                        <th class="NoSort editx-stage-selection-cell"><input type="checkbox" data-editx-check-all="stage_file" aria-label="Select all filtered importable downloaded files" /></th>
                                         <th>Filename</th>
                                         <th>Notice / Total</th>
                                         <th>Seller / Vendor IDs</th>
@@ -182,12 +190,14 @@
                                 </thead>
                                 <tbody>
                                     [% FOREACH file IN manual_stage.files %]
-                                        [% SET file_importable = file.status == 'valid' && file.duplicate_import_blocked != 1 %]
+                                        [% SET file_duplicate_blocked = file.duplicate_import_blocked == 1 %]
+                                        [% SET file_importable = file.status == 'valid' && file_duplicate_blocked != 1 %]
                                         <tr[% IF file.duplicate_import_blocked %] class="editx-stage-row-duplicate"[% END %]>
-                                            <td>
+                                            <td class="editx-stage-selection-cell[% IF file_duplicate_blocked %] editx-stage-duplicate-selection-cell[% END %]">
                                                 <input type="checkbox"
                                                        name="stage_file"
                                                        value="[% file.id | html %]"
+                                                       [% IF file_duplicate_blocked %]class="editx-stage-duplicate-checkbox" data-editx-duplicate-blocked="1"[% END %]
                                                        [% IF file_importable %]checked="checked"[% END %]
                                                        [% UNLESS file_importable %]disabled="disabled"[% END %] />
                                             </td>
@@ -231,6 +241,15 @@
                             </table>
                             <div class="editx-confirm-actions">
                                 <button type="submit" class="btn btn-primary">Import selected</button>
+                                [% IF can_override_duplicate_stage_files && has_duplicate_stage_files %]
+                                    <label class="editx-duplicate-override">
+                                        <input type="checkbox"
+                                               name="override_duplicate_stage_files"
+                                               value="1"
+                                               data-editx-duplicate-override="stage_file" />
+                                        <span>Allow duplicate EDItX files</span>
+                                    </label>
+                                [% END %]
                                 <a class="btn btn-default" href="[% tool_href | html %]">Cancel</a>
                             </div>
                         </form>
@@ -413,15 +432,265 @@
     </div>
 </div>
 
-<script>
-document.querySelectorAll('[data-editx-check-all]').forEach(function (toggle) {
-    toggle.addEventListener('change', function () {
-        var name = toggle.getAttribute('data-editx-check-all');
-        document.querySelectorAll('input[name="' + name + '"]:not(:disabled)').forEach(function (checkbox) {
-            checkbox.checked = toggle.checked;
-        });
-    });
-});
-</script>
+[% MACRO jsinclude BLOCK %]
+    [% INCLUDE 'datatables.inc' %]
+    <script>
+        (function () {
+            const stageSelectionTables = document.querySelectorAll("[data-editx-stage-selection-table]");
+            const dragState = {
+                active: false,
+                checked: false,
+                name: "",
+                table: null,
+            };
+
+            function checkboxSelector(name) {
+                return 'input[type="checkbox"][name="' + name + '"]';
+            }
+
+            function dataTableFor(table) {
+                if (!window.jQuery || !jQuery.fn.DataTable || !jQuery.fn.dataTable.isDataTable(table)) {
+                    return null;
+                }
+                return jQuery(table).DataTable();
+            }
+
+            function selectableCheckboxes(table, name) {
+                const dataTable = dataTableFor(table);
+                const nodes = dataTable
+                    ? dataTable.rows({ search: "applied" }).nodes().toArray()
+                    : Array.from(table.querySelectorAll("tbody tr"));
+
+                return nodes
+                    .map(function (row) {
+                        return row.querySelector(checkboxSelector(name));
+                    })
+                    .filter(function (checkbox) {
+                        return checkbox && !checkbox.disabled;
+                    });
+            }
+
+            function visibleCheckboxes(table, name) {
+                return Array.from(table.querySelectorAll("tbody " + checkboxSelector(name))).filter(function (checkbox) {
+                    return !checkbox.disabled;
+                });
+            }
+
+            function allCheckboxes(table, name) {
+                const dataTable = dataTableFor(table);
+                const nodes = dataTable
+                    ? dataTable.rows().nodes().toArray()
+                    : Array.from(table.querySelectorAll("tbody tr"));
+
+                return nodes
+                    .map(function (row) {
+                        return row.querySelector(checkboxSelector(name));
+                    })
+                    .filter(Boolean);
+            }
+
+            function duplicateOverrideFor(table, name) {
+                const form = table.closest("form");
+                return form ? form.querySelector('[data-editx-duplicate-override="' + name + '"]') : null;
+            }
+
+            function applyDuplicateOverride(table, name, selected) {
+                const override = duplicateOverrideFor(table, name);
+                const allowDuplicates = override && override.checked;
+
+                allCheckboxes(table, name).filter(function (checkbox) {
+                    return checkbox.getAttribute("data-editx-duplicate-blocked") === "1";
+                }).forEach(function (checkbox) {
+                    checkbox.disabled = !allowDuplicates;
+                    if (!allowDuplicates) {
+                        checkbox.checked = false;
+                        selected.delete(checkbox.value);
+                    }
+                });
+            }
+
+            function updateSelectAll(table, name, selected) {
+                const toggle = table.querySelector('[data-editx-check-all="' + name + '"]');
+                if (!toggle) {
+                    return;
+                }
+
+                const checkboxes = selectableCheckboxes(table, name);
+                const selectedCount = checkboxes.filter(function (checkbox) {
+                    return selected.has(checkbox.value);
+                }).length;
+
+                toggle.checked = checkboxes.length > 0 && selectedCount === checkboxes.length;
+                toggle.indeterminate = selectedCount > 0 && selectedCount < checkboxes.length;
+            }
+
+            function setCheckboxSelection(table, name, selected, checkbox, checked) {
+                if (!checkbox || checkbox.disabled) {
+                    return;
+                }
+
+                checkbox.checked = checked;
+                if (checked) {
+                    selected.add(checkbox.value);
+                } else {
+                    selected.delete(checkbox.value);
+                }
+                updateSelectAll(table, name, selected);
+            }
+
+            function syncVisibleCheckboxes(table, name, selected) {
+                visibleCheckboxes(table, name).forEach(function (checkbox) {
+                    checkbox.checked = selected.has(checkbox.value);
+                });
+                updateSelectAll(table, name, selected);
+            }
+
+            function selectionCellFromEvent(table, event) {
+                const cell = event.target.closest("td.editx-stage-selection-cell");
+                if (!cell || !table.contains(cell)) {
+                    return null;
+                }
+                return cell;
+            }
+
+            function clearDragHighlights() {
+                document.querySelectorAll(".editx-stage-selection-cell.is-editx-selection-drag-active").forEach(function (cell) {
+                    cell.classList.remove("is-editx-selection-drag-active");
+                });
+            }
+
+            function addHiddenSelections(form, name, selected) {
+                form.querySelectorAll('input.editx-stage-selection-hidden[name="' + name + '"]').forEach(function (input) {
+                    input.remove();
+                });
+
+                selected.forEach(function (value) {
+                    const input = document.createElement("input");
+                    input.type = "hidden";
+                    input.name = name;
+                    input.value = value;
+                    input.className = "editx-stage-selection-hidden";
+                    form.appendChild(input);
+                });
+            }
+
+            function initializeStageSelectionTable(table) {
+                const name = table.getAttribute("data-editx-stage-selection-table");
+                const form = table.closest("form");
+                const selected = new Set();
+
+                table.querySelectorAll(checkboxSelector(name)).forEach(function (checkbox) {
+                    if (checkbox.checked && !checkbox.disabled) {
+                        selected.add(checkbox.value);
+                    }
+                });
+
+                if (window.jQuery && jQuery.fn.kohaTable) {
+                    jQuery(table).kohaTable({
+                        columnDefs: [
+                            { targets: [0], orderable: false, searchable: false },
+                        ],
+                        order: [],
+                        pageLength: 25,
+                        paginationType: "full",
+                        drawCallback: function () {
+                            syncVisibleCheckboxes(table, name, selected);
+                        },
+                    });
+                }
+
+                table.addEventListener("change", function (event) {
+                    const checkbox = event.target.closest(checkboxSelector(name));
+                    if (!checkbox) {
+                        return;
+                    }
+                    setCheckboxSelection(table, name, selected, checkbox, checkbox.checked);
+                });
+
+                table.addEventListener("change", function (event) {
+                    const toggle = event.target.closest('[data-editx-check-all="' + name + '"]');
+                    if (!toggle) {
+                        return;
+                    }
+
+                    const checked = toggle.checked;
+                    selectableCheckboxes(table, name).forEach(function (checkbox) {
+                        setCheckboxSelection(table, name, selected, checkbox, checked);
+                    });
+                    syncVisibleCheckboxes(table, name, selected);
+                });
+
+                table.addEventListener("mousedown", function (event) {
+                    if (event.button !== 0 || event.target.closest("input")) {
+                        return;
+                    }
+
+                    const cell = selectionCellFromEvent(table, event);
+                    if (!cell) {
+                        return;
+                    }
+
+                    const checkbox = cell.querySelector(checkboxSelector(name));
+                    if (!checkbox || checkbox.disabled) {
+                        return;
+                    }
+
+                    dragState.active = true;
+                    dragState.checked = !checkbox.checked;
+                    dragState.name = name;
+                    dragState.table = table;
+                    cell.classList.add("is-editx-selection-drag-active");
+                    setCheckboxSelection(table, name, selected, checkbox, dragState.checked);
+                    event.preventDefault();
+                });
+
+                table.addEventListener("mouseover", function (event) {
+                    if (!dragState.active || dragState.table !== table || dragState.name !== name) {
+                        return;
+                    }
+
+                    const cell = selectionCellFromEvent(table, event);
+                    if (!cell) {
+                        return;
+                    }
+
+                    const checkbox = cell.querySelector(checkboxSelector(name));
+                    cell.classList.add("is-editx-selection-drag-active");
+                    setCheckboxSelection(table, name, selected, checkbox, dragState.checked);
+                });
+
+                if (form) {
+                    const duplicateOverride = duplicateOverrideFor(table, name);
+                    if (duplicateOverride) {
+                        duplicateOverride.addEventListener("change", function () {
+                            applyDuplicateOverride(table, name, selected);
+                            syncVisibleCheckboxes(table, name, selected);
+                        });
+                    }
+
+                    form.addEventListener("submit", function () {
+                        allCheckboxes(table, name).forEach(function (checkbox) {
+                            checkbox.disabled = true;
+                        });
+                        addHiddenSelections(form, name, selected);
+                    });
+                }
+
+                applyDuplicateOverride(table, name, selected);
+                syncVisibleCheckboxes(table, name, selected);
+            }
+
+            document.addEventListener("mouseup", function () {
+                dragState.active = false;
+                dragState.checked = false;
+                dragState.name = "";
+                dragState.table = null;
+                clearDragHighlights();
+            });
+
+            stageSelectionTables.forEach(initializeStageSelectionTable);
+        })();
+    </script>
+[% END %]
 
 [% INCLUDE 'intranet-bottom.inc' %]

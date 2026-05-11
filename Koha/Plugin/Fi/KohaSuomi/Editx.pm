@@ -996,6 +996,7 @@ sub _manual_stage_import_selected {
 
     my $run_id = scalar $cgi->param('manual_stage_run_id') // '';
     my @selected_ids = $cgi->multi_param('stage_file');
+    my $override_duplicate_stage_files = $cgi->param('override_duplicate_stage_files') ? 1 : 0;
     if ( !$self->_manual_stage_valid_run_id($run_id) ) {
         push @messages, $self->_configure_message( warning => 'The staged EDItX file list is no longer available. Check remote files again.' );
         return ( \@messages, undef, undef );
@@ -1012,10 +1013,27 @@ sub _manual_stage_import_selected {
         return ( \@messages, $self->_manual_stage_manifest_for_template($manifest), undef );
     }
 
+    if ( $override_duplicate_stage_files && !$self->_current_user_is_superlibrarian ) {
+        push @messages, $self->_configure_message( error => 'Only superlibrarians can override duplicate EDItX file blocking.' );
+        return ( \@messages, $self->_manual_stage_manifest_for_template($manifest), undef );
+    }
+
     my %selected = map { $_ => 1 } @selected_ids;
     my @files = grep { $selected{ $_->{id} } } @{ $manifest->{files} || [] };
     if ( !@files ) {
         push @messages, $self->_configure_message( warning => 'Selected staged EDItX files were not found. Refresh the remote file list and try again.' );
+        return ( \@messages, $self->_manual_stage_manifest_for_template($manifest), undef );
+    }
+
+    my @invalid_files = grep { ( $_->{status} || '' ) ne 'valid' } @files;
+    if (@invalid_files) {
+        push @messages, $self->_configure_message( error => 'Selected EDItX files include invalid XML. Import only files with XML OK status.' );
+        return ( \@messages, $self->_manual_stage_manifest_for_template($manifest), undef );
+    }
+
+    my @duplicate_files = grep { $_->{duplicate_import_blocked} } @files;
+    if ( @duplicate_files && !$override_duplicate_stage_files ) {
+        push @messages, $self->_configure_message( warning => 'Selected EDItX files include duplicate notices. Enable the duplicate override checkbox to import them.' );
         return ( \@messages, $self->_manual_stage_manifest_for_template($manifest), undef );
     }
 
@@ -1587,6 +1605,7 @@ sub _output_tool_page {
         sftp_config_has_errors => $sftp_status->{has_errors},
         sftp_config_messages   => $sftp_status->{messages},
         manual_run_available   => !$sftp_status->{has_errors} && $sftp_status->{count} ? 1 : 0,
+        can_override_duplicate_stage_files => $self->_current_user_is_superlibrarian(),
         configure_href         => $self->plugin_method_url('configure'),
         tool_href              => $self->plugin_method_url('tool'),
         plugin_display_version => $self->plugin_display_version(),
@@ -1897,6 +1916,22 @@ sub _last_configured_by_context {
         borrowernumber => $borrowernumber,
         label          => 'borrowernumber ' . $borrowernumber,
     };
+}
+
+sub _current_user {
+    my ($self) = @_;
+
+    my $userenv = C4::Context->userenv;
+    return unless $userenv && $userenv->{number};
+
+    return Koha::Patrons->find( $userenv->{number} );
+}
+
+sub _current_user_is_superlibrarian {
+    my ($self) = @_;
+
+    my $current_user = $self->_current_user;
+    return $current_user && $current_user->is_superlibrarian ? 1 : 0;
 }
 
 sub _write_sftp_config_file {
