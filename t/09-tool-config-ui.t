@@ -21,6 +21,7 @@ sub read_file {
 
 my $plugin_pm = read_file('Koha/Plugin/Fi/KohaSuomi/Editx.pm');
 my $schema_lifecycle_pm = read_file('Koha/Plugin/Fi/KohaSuomi/Editx/SchemaLifecycle.pm');
+my $config_migration_pm = read_file('Koha/Plugin/Fi/KohaSuomi/Editx/ConfigMigration.pm');
 my $configure = read_file('Koha/Plugin/Fi/KohaSuomi/Editx/configure.tt');
 my $tool = read_file('Koha/Plugin/Fi/KohaSuomi/Editx/tool.tt');
 my $breadcrumbs = read_file('Koha/Plugin/Fi/KohaSuomi/Editx/includes/editx_breadcrumbs.inc');
@@ -75,10 +76,14 @@ like( $plugin_pm, qr{recommended_import_paths}, 'Configure template receives rec
 like( $plugin_pm, qr{substr\( \$message, 0, 397 \).*substr\( \$message, -398 \)}s, 'Long manual sync diagnostics preserve both beginning and end of captured output' );
 like( $plugin_pm, qr{output_html\(\s*\$template->output\(\),\s*undef,\s*undef,\s*undef,\s*Koha::Plugin::Fi::KohaSuomi::Editx::FlashCookie->merge_cookies}s, 'Configure page passes flash cookies as output_html cookies, not extra options' );
 like( $plugin_pm, qr{use Koha::Plugin::Fi::KohaSuomi::Editx::SchemaLifecycle;}, 'Plugin loads the schema lifecycle service' );
+like( $plugin_pm, qr{use Koha::Plugin::Fi::KohaSuomi::Editx::ConfigMigration;}, 'Plugin loads the config migration service' );
 like( $plugin_pm, qr{sub\s+install\(\)[\s\S]+_schema_lifecycle->install}, 'Plugin install delegates schema work to SchemaLifecycle' );
-like( $plugin_pm, qr{sub\s+upgrade[\s\S]+_schema_lifecycle->upgrade}, 'Plugin upgrade delegates schema work to SchemaLifecycle' );
+like( $plugin_pm, qr{sub\s+upgrade[\s\S]+_schema_lifecycle->upgrade[\s\S]+_config_migration->migrate_legacy_xml}, 'Plugin upgrade delegates schema work and legacy XML config migration' );
 like( $schema_lifecycle_pm, qr{sub\s+install\s*\{[\s\S]+_install_or_upgrade_tables\( migrate_legacy => 0 \)}, 'SchemaLifecycle install creates qualified tables without legacy migration' );
 like( $schema_lifecycle_pm, qr{sub\s+upgrade\s*\{[\s\S]+_install_or_upgrade_tables\( migrate_legacy => 1 \)}, 'SchemaLifecycle upgrade enables legacy table migration' );
+like( $config_migration_pm, qr{id\s*=>\s*'kohasuomi_legacy'[\s\S]+success_action\s*=>\s*'delete'}, 'ConfigMigration converts legacy XML intake into a deleting folder source' );
+like( $config_migration_pm, qr{migrated to plugin config_json and is ignored}, 'ConfigMigration warns that legacy XML is migrated and ignored' );
+like( $config_migration_pm, qr{rename\s+\$path,\s+\$target}, 'ConfigMigration moves legacy XML aside when possible' );
 unlike( $plugin_pm, qr{sub\s+tool\s*\{[\s\S]+?_install_or_upgrade_tables\(\)[\s\S]+?\n\}}, 'Tool page does not run plugin table setup outside lifecycle hooks' );
 unlike( $plugin_pm, qr{sub\s+configure\s*\{[\s\S]+?_install_or_upgrade_tables\(\)[\s\S]+?\n\}}, 'Configure page does not run plugin table setup outside lifecycle hooks' );
 unlike( $plugin_pm . $schema_lifecycle_pm, qr{_migrate_legacy_procurement_file_table}, 'Plugin upgrade no longer migrates the obsolete file-hash import ledger' );

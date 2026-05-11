@@ -16,6 +16,7 @@ use Koha::DateUtils qw(dt_from_string);
 use Koha::Patrons;
 use Koha::Token;
 use Koha::Plugin::Fi::KohaSuomi::Editx::Config;
+use Koha::Plugin::Fi::KohaSuomi::Editx::ConfigMigration;
 use Koha::Plugin::Fi::KohaSuomi::Editx::FlashCookie;
 use Koha::Plugin::Fi::KohaSuomi::Editx::RuntimeLog;
 use Koha::Plugin::Fi::KohaSuomi::Editx::SchemaLifecycle;
@@ -86,6 +87,7 @@ sub upgrade {
 
     $self->_log_runtime( info => 'EDItX plugin upgrade started', { operation => 'upgrade' } );
     my $success = $self->_schema_lifecycle->upgrade;
+    $success &&= $self->_config_migration->migrate_legacy_xml;
     $self->_log_runtime(
         $success ? 'info' : 'error',
         $success ? 'EDItX plugin upgrade finished' : 'EDItX plugin upgrade failed',
@@ -114,6 +116,12 @@ sub _schema_lifecycle {
     my ($self) = @_;
 
     return Koha::Plugin::Fi::KohaSuomi::Editx::SchemaLifecycle->new( plugin => $self );
+}
+
+sub _config_migration {
+    my ($self) = @_;
+
+    return Koha::Plugin::Fi::KohaSuomi::Editx::ConfigMigration->new( plugin => $self );
 }
 
 sub tool {

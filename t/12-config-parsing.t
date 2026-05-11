@@ -26,9 +26,11 @@ if ($core_root) {
 
 my $plugin_class = 'Koha::Plugin::Fi::KohaSuomi::Editx';
 my $schema_lifecycle_class = 'Koha::Plugin::Fi::KohaSuomi::Editx::SchemaLifecycle';
+my $config_migration_class = 'Koha::Plugin::Fi::KohaSuomi::Editx::ConfigMigration';
 use_ok($plugin_class);
 use_ok('Koha::Plugin::Fi::KohaSuomi::Editx::Config');
 use_ok($schema_lifecycle_class);
+use_ok($config_migration_class);
 
 my $plugin = bless {}, $plugin_class;
 my $schema_lifecycle = $schema_lifecycle_class->new( plugin => $plugin );
@@ -111,6 +113,44 @@ my $schema_lifecycle = $schema_lifecycle_class->new( plugin => $plugin );
 
         push @{ $self->{dbh}->{executed} }, [ $self->{sql}, @bind ];
         return exists $self->{dbh}->{execute_result} ? $self->{dbh}->{execute_result} : 1;
+    }
+}
+
+{
+    package KohaSuomi::Editx::ConfigMigrationPlugin;
+
+    sub new {
+        my ( $class, %args ) = @_;
+
+        return bless { data => $args{data} || {}, logs => [] }, $class;
+    }
+
+    sub retrieve_data {
+        my ( $self, $key ) = @_;
+
+        return $self->{data}->{$key};
+    }
+
+    sub store_data {
+        my ( $self, $data ) = @_;
+
+        for my $key ( keys %$data ) {
+            $self->{data}->{$key} = $data->{$key};
+        }
+
+        return 1;
+    }
+
+    sub _log_runtime {
+        my ( $self, $level, $message, $context ) = @_;
+
+        push @{ $self->{logs} }, {
+            level   => $level,
+            message => $message,
+            context => $context,
+        };
+
+        return 1;
     }
 }
 
@@ -199,7 +239,9 @@ subtest 'Plugin lifecycle hooks delegate schema lifecycle work' => sub {
 
     my %called;
     my $fake_schema_lifecycle = bless { called => \%called }, 'KohaSuomi::Editx::FakeSchemaLifecycle';
+    my $fake_config_migration = bless { called => \%called }, 'KohaSuomi::Editx::FakeConfigMigration';
     local *{ $plugin_class . '::_schema_lifecycle' } = sub { return $fake_schema_lifecycle; };
+    local *{ $plugin_class . '::_config_migration' } = sub { return $fake_config_migration; };
     local *{ $plugin_class . '::_log_runtime' } = sub { return 1; };
     local *{ $plugin_class . '::store_data' } = sub { $called{store_data}++; return 1; };
     local *KohaSuomi::Editx::FakeSchemaLifecycle::install = sub {
@@ -217,12 +259,18 @@ subtest 'Plugin lifecycle hooks delegate schema lifecycle work' => sub {
         $self->{called}->{uninstall}++;
         return 1;
     };
+    local *KohaSuomi::Editx::FakeConfigMigration::migrate_legacy_xml = sub {
+        my ($self) = @_;
+        $self->{called}->{migrate_legacy_xml}++;
+        return 1;
+    };
 
     ok( $plugin->install, 'Plugin install succeeds through schema lifecycle' );
     ok( $plugin->upgrade, 'Plugin upgrade succeeds through schema lifecycle' );
     ok( $plugin->uninstall, 'Plugin uninstall succeeds through schema lifecycle' );
     is( $called{install}, 1, 'Plugin install delegates schema lifecycle install once' );
     is( $called{upgrade}, 1, 'Plugin upgrade delegates schema lifecycle upgrade once' );
+    is( $called{migrate_legacy_xml}, 1, 'Plugin upgrade runs legacy XML config migration once' );
     is( $called{uninstall}, 1, 'Plugin uninstall delegates schema lifecycle uninstall once' );
     is( $called{store_data}, 1, 'Plugin upgrade still records the upgrade timestamp' );
 };
@@ -570,6 +618,113 @@ YAML
     is( $settings->{import_tmp_path}, '', 'Experimental flat import folder is ignored' );
     is( $settings->{notification_mailfrom}, '', 'Experimental flat notification sender is ignored' );
     is_deeply( $config->{sftp_sources}, [], 'Experimental SFTP YAML source is ignored' );
+};
+
+subtest 'Legacy procurement XML migration stores config_json and moves XML aside' => sub {
+    no strict 'refs';
+    no warnings qw(once redefine);
+
+    my $root = tempdir( CLEANUP => 1 );
+    my $xml_path = File::Spec->catfile( $root, 'procurement-config.xml' );
+    open my $fh, '>', $xml_path or die "Cannot write $xml_path: $!";
+    print {$fh} <<'XML';
+<?xml version="1.0"?>
+<data>
+  <settings>
+    <import_tmp_path>/srv/editx/tmp</import_tmp_path>
+    <import_load_path>/srv/editx/load</import_load_path>
+    <import_archive_path>/srv/editx/archive</import_archive_path>
+    <import_failed_path>/srv/editx/fail</import_failed_path>
+    <import_failed_archived_path>/srv/editx/failed_archived</import_failed_archived_path>
+    <authoriser>42</authoriser>
+    <allowed_locations>LAP,AIK</allowed_locations>
+    <productform_alternative_triggers>LAP</productform_alternative_triggers>
+    <automatch_biblios>no</automatch_biblios>
+    <use_finna_materialtype>yes</use_finna_materialtype>
+  </settings>
+  <notifications>
+    <mailto>ops@example.org</mailto>
+    <mailfrom>editx@example.org</mailfrom>
+  </notifications>
+</data>
+XML
+    close $fh;
+
+    local *Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Config::getConfigXmlPath = sub {
+        return $xml_path;
+    };
+    my @warnings;
+    local $SIG{__WARN__} = sub {
+        push @warnings, @_;
+    };
+
+    my $fake_plugin = KohaSuomi::Editx::ConfigMigrationPlugin->new;
+    my $migration = $config_migration_class->new( plugin => $fake_plugin );
+
+    ok( $migration->migrate_legacy_xml, 'Legacy XML migration succeeds' );
+    ok( !-e $xml_path, 'Legacy XML file is moved aside after migration' );
+    opendir my $dh, $root or die "Cannot list $root: $!";
+    my @migrated = grep { /\Aprocurement-config\.xml\.migrated-/ } readdir $dh;
+    closedir $dh;
+    is( scalar @migrated, 1, 'Legacy XML quarantine file is created' );
+
+    my $config = Koha::Plugin::Fi::KohaSuomi::Editx::Config->from_plugin_data( $fake_plugin->{data} );
+    is( $config->{import}->{import_tmp_path}, '/srv/editx/staging', 'Legacy incoming tmp path is split into a controlled staging path' );
+    is( $config->{import}->{import_load_path}, '/srv/editx/load', 'Legacy load path is migrated' );
+    is( $config->{processing}->{authoriser}, 42, 'Legacy authoriser is migrated' );
+    is( $config->{processing}->{allowed_locations}, 'LAP,AIK', 'Legacy allowed locations are migrated' );
+    is( $config->{processing}->{automatch_biblios}, 'no', 'Legacy automatch setting is migrated' );
+    is( $config->{processing}->{use_finna_materialtype}, 'yes', 'Legacy Finna material type setting is migrated' );
+    is( $config->{notifications}->{mailto}, 'ops@example.org', 'Legacy notification recipient is migrated' );
+    is( $config->{notifications}->{mailfrom}, 'editx@example.org', 'Legacy notification sender is migrated' );
+    is( scalar @{ $config->{folder_sources} }, 1, 'Legacy XML creates one folder source' );
+    is( $config->{folder_sources}->[0]->{id}, 'kohasuomi_legacy', 'Legacy folder source has a stable source id' );
+    is( $config->{folder_sources}->[0]->{local_dir}, '/srv/editx/tmp', 'Legacy import_tmp_path becomes the folder source directory' );
+    is( $config->{folder_sources}->[0]->{success_action}, 'delete', 'Legacy folder source deletes source files only after successful import' );
+    like( join( "\n", @warnings ), qr{migrated to plugin config_json and is ignored}, 'Migration writes a Koha warning for operators' );
+    like( join( "\n", map { $_->{message} } @{ $fake_plugin->{logs} } ), qr{migrated to plugin config_json}, 'Migration writes the runtime log warning' );
+};
+
+subtest 'Legacy procurement XML migration keeps existing config_json unchanged' => sub {
+    no strict 'refs';
+    no warnings qw(once redefine);
+
+    my $root = tempdir( CLEANUP => 1 );
+    my $xml_path = File::Spec->catfile( $root, 'procurement-config.xml' );
+    open my $fh, '>', $xml_path or die "Cannot write $xml_path: $!";
+    print {$fh} '<data><settings><import_tmp_path>/legacy/tmp</import_tmp_path></settings></data>';
+    close $fh;
+
+    my $existing_json = Koha::Plugin::Fi::KohaSuomi::Editx::Config->to_json(
+        {
+            import => {
+                import_tmp_path => '/current/tmp',
+            },
+            folder_sources => [
+                {
+                    id        => 'current',
+                    local_dir => '/current/inbound',
+                }
+            ],
+        }
+    );
+    my $fake_plugin = KohaSuomi::Editx::ConfigMigrationPlugin->new(
+        data => {
+            Koha::Plugin::Fi::KohaSuomi::Editx::Config::CONFIG_KEY() => $existing_json,
+        }
+    );
+    local *Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Config::getConfigXmlPath = sub {
+        return $xml_path;
+    };
+    my @warnings;
+    local $SIG{__WARN__} = sub {
+        push @warnings, @_;
+    };
+
+    ok( $config_migration_class->new( plugin => $fake_plugin )->migrate_legacy_xml, 'Existing structured config keeps migration successful' );
+    is( $fake_plugin->{data}->{ Koha::Plugin::Fi::KohaSuomi::Editx::Config::CONFIG_KEY() }, $existing_json, 'Existing config_json is not overwritten by legacy XML' );
+    ok( !-e $xml_path, 'Stale legacy XML is still moved aside when config_json already exists' );
+    like( join( "\n", map { $_->{message} } @{ $fake_plugin->{logs} } ), qr{config_json already exists}, 'Existing config decision is logged' );
 };
 
 subtest 'SFTP source normalization defaults optional fields' => sub {
