@@ -1206,6 +1206,76 @@ CSV
     like( _message_text($messages), qr{No product form mappings found in CSV\.}, 'Parser reports an empty CSV import' );
 };
 
+subtest 'ProductForm CSV import groups blocking diagnostics into one alert' => sub {
+    no strict 'refs';
+    no warnings qw(once redefine);
+
+    my @messages;
+    my %page_params;
+
+    local *{ $plugin_class . '::_uploaded_productform_mapping_csv' } = sub { return 'bad csv'; };
+    local *{ $plugin_class . '::_parse_productform_mapping_csv' } = sub {
+        return (
+            [],
+            [
+                $plugin->_configure_message( error   => 'Line 2 has no ONIX code.' ),
+                $plugin->_configure_message( error   => 'Line 3 has 2 columns; expected 3.' ),
+                $plugin->_configure_message( warning => "Line 4 repeats ONIX code 'AA'; the later value will win." ),
+                $plugin->_configure_message(
+                    error => "Line 5: ProductForm item type 'NOPE' does not exist in Koha; choose an existing item type or leave the field empty."
+                ),
+                $plugin->_configure_message(
+                    error => "Line 6: ProductForm item type 'MISSING' does not exist in Koha; choose an existing item type or leave the field empty."
+                ),
+                $plugin->_configure_message(
+                    error => "Line 7: ProductForm item type 'BAD' does not exist in Koha; choose an existing item type or leave the field empty."
+                ),
+            ],
+            1
+        );
+    };
+    local *{ $plugin_class . '::_productform_mapping_rows' } = sub { return [] };
+    local *{ $plugin_class . '::_save_productform_mappings' } = sub { die 'Blocked ProductForm CSV import must not be saved'; };
+    local *{ $plugin_class . '::_output_configure_page' } = sub {
+        my ( $self, %params ) = @_;
+        %page_params = %params;
+        return;
+    };
+
+    ok(
+        $plugin->_handle_productform_mapping_csv_import(
+            cgi                  => bless( {}, 'KohaSuomi::Editx::TestCGI' ),
+            messages             => \@messages,
+            sftp_sources         => [],
+            procurement_settings => {},
+            nightly_sync_enabled => 0,
+            runtime_log_level    => 'info',
+        ),
+        'Blocked ProductForm CSV import returns to configure page'
+    );
+
+    is( scalar @{ $page_params{messages} }, 1, 'Blocked ProductForm CSV import renders one grouped alert' );
+    is( $page_params{messages}->[0]->{type}, 'error', 'Grouped ProductForm CSV alert is an error' );
+    like(
+        $page_params{messages}->[0]->{text},
+        qr{ProductForm mapping CSV import blocked: 5 errors, 1 warning\.},
+        'Grouped alert reports counts'
+    );
+    like( $page_params{messages}->[0]->{text}, qr{Line 2 has no ONIX code\.}, 'Grouped alert includes the first diagnostic' );
+    like( $page_params{messages}->[0]->{text}, qr{Warning: Line 4 repeats ONIX code 'AA'}, 'Grouped alert keeps warning context' );
+    like(
+        $page_params{messages}->[0]->{text},
+        qr{Line 6: ProductForm item type 'MISSING'},
+        'Grouped alert includes diagnostics up to the display limit'
+    );
+    unlike(
+        $page_params{messages}->[0]->{text},
+        qr{Line 7: ProductForm item type 'BAD'},
+        'Grouped alert omits diagnostics after the display limit'
+    );
+    like( $page_params{messages}->[0]->{text}, qr{1 more diagnostic was not shown\.}, 'Grouped alert reports omitted diagnostics' );
+};
+
 subtest 'ProductForm row add rejects an existing ONIX code' => sub {
     no strict 'refs';
     no warnings qw(once redefine);

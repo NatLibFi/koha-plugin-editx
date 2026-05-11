@@ -1561,8 +1561,8 @@ sub _handle_productform_mapping_csv_import {
     }
 
     my ( $rows, $parse_messages, $has_blocking_errors ) = $self->_parse_productform_mapping_csv($mapping_csv_import);
-    push @{$messages}, @{$parse_messages};
     if ($has_blocking_errors) {
+        push @{$messages}, $self->_productform_csv_import_blocked_message($parse_messages);
         $self->_output_configure_page(
             mapping_rows         => $self->_productform_mapping_rows(),
             sftp_sources         => $params{sftp_sources},
@@ -1573,6 +1573,7 @@ sub _handle_productform_mapping_csv_import {
         );
         return 1;
     }
+    push @{$messages}, @{$parse_messages};
 
     my $save_messages = $self->_save_productform_mappings($rows);
     push @{$messages}, @{$save_messages};
@@ -1591,6 +1592,37 @@ sub _handle_productform_mapping_csv_import {
     $self->_store_last_configured_by();
     $self->_redirect_configure_with_flash( 'productform_mapping_imported', PRODUCTFORM_MAPPINGS_ANCHOR );
     return 1;
+}
+
+sub _productform_csv_import_blocked_message {
+    my ( $self, $parse_messages ) = @_;
+
+    $parse_messages ||= [];
+    my $error_count   = grep { ( $_->{type} // '' ) eq 'error' } @{$parse_messages};
+    my $warning_count = grep { ( $_->{type} // '' ) eq 'warning' } @{$parse_messages};
+    my @counts;
+    push @counts, sprintf( '%d %s', $error_count, $error_count == 1 ? 'error' : 'errors' )
+        if $error_count;
+    push @counts, sprintf( '%d %s', $warning_count, $warning_count == 1 ? 'warning' : 'warnings' )
+        if $warning_count;
+
+    my $text = 'ProductForm mapping CSV import blocked';
+    $text .= ': ' . join( ', ', @counts ) if @counts;
+    $text .= '. Fix the CSV and import it again.';
+
+    my @diagnostics =
+        map { ( ( $_->{type} // '' ) eq 'warning' ? 'Warning: ' : '' ) . $_->{text} }
+        grep { defined $_->{text} && $_->{text} ne '' } @{$parse_messages};
+
+    my $max_details = 5;
+    my @shown       = @diagnostics > $max_details ? @diagnostics[ 0 .. $max_details - 1 ] : @diagnostics;
+    my $remaining   = scalar(@diagnostics) - scalar(@shown);
+
+    $text .= ' First issues: ' . join( '; ', @shown ) . '.' if @shown;
+    $text .= sprintf( ' %d more %s not shown.', $remaining, $remaining == 1 ? 'diagnostic was' : 'diagnostics were' )
+        if $remaining;
+
+    return $self->_configure_message( error => $text );
 }
 
 sub _redirect_configure_with_flash {
