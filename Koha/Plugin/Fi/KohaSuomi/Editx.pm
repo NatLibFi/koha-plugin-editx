@@ -893,8 +893,7 @@ sub _manual_stage_resume {
     if ( $status eq 'downloaded' ) {
         push @messages, $self->_configure_message( success => 'Selected EDItX files were downloaded for preview. Remote files were not changed.' );
     } elsif ( $status eq 'imported' && $manifest->{import_result} ) {
-        my $result = $manifest->{import_result};
-        push @messages, $self->_configure_message( success => "Selected EDItX import finished: processed $result->{processed}, failed $result->{failed}, skipped $result->{skipped}." );
+        # The imported stage renders its own result summary and skipped-file details.
     }
 
     my $manual_sync_result = $manifest->{manual_sync_result};
@@ -992,7 +991,6 @@ sub _manual_stage_import_selected {
 
     my $run_id = scalar $cgi->param('manual_stage_run_id') // '';
     my @selected_ids = $cgi->multi_param('stage_file');
-    my $override_duplicate_stage_files = $cgi->param('override_duplicate_stage_files') ? 1 : 0;
     if ( !$self->_manual_stage_valid_run_id($run_id) ) {
         push @messages, $self->_configure_message( warning => 'The staged EDItX file list is no longer available. Check remote files again.' );
         return ( \@messages, undef, undef );
@@ -1006,11 +1004,6 @@ sub _manual_stage_import_selected {
 
     if ( !@selected_ids ) {
         push @messages, $self->_configure_message( warning => 'Select at least one downloaded EDItX file to import.' );
-        return ( \@messages, $self->_manual_stage_manifest_for_template($manifest), undef );
-    }
-
-    if ( $override_duplicate_stage_files && !$self->_current_user_is_superlibrarian ) {
-        push @messages, $self->_configure_message( error => 'Only superlibrarians can override duplicate EDItX file blocking.' );
         return ( \@messages, $self->_manual_stage_manifest_for_template($manifest), undef );
     }
 
@@ -1028,8 +1021,8 @@ sub _manual_stage_import_selected {
     }
 
     my @duplicate_files = grep { $_->{duplicate_import_blocked} } @files;
-    if ( @duplicate_files && !$override_duplicate_stage_files ) {
-        push @messages, $self->_configure_message( warning => 'Selected EDItX files include duplicate notices. Enable the duplicate override checkbox to import them.' );
+    if (@duplicate_files) {
+        push @messages, $self->_configure_message( warning => 'Selected EDItX files include duplicate notices and were not imported. Review the existing Koha basket links in the preview.' );
         return ( \@messages, $self->_manual_stage_manifest_for_template($manifest), undef );
     }
 
@@ -1047,6 +1040,7 @@ sub _manual_stage_import_selected {
         push @messages, $self->_configure_message( error => 'Selected EDItX import failed: ' . $self->_compact_message($error) );
         return ( \@messages, $self->_manual_stage_manifest_for_template($manifest), undef );
     }
+    $self->_manual_stage_enrich_import_result( $result, \@files );
 
     my $summary_loaded = eval {
         $manual_sync_result = $self->_manual_sync_result($run_started_at);
@@ -1056,7 +1050,6 @@ sub _manual_stage_import_selected {
         push @messages, $self->_configure_message( warning => 'Selected EDItX files were imported, but the created order summary could not be loaded: ' . $self->_compact_message($@) );
     }
 
-    push @messages, $self->_configure_message( success => "Selected EDItX import finished: processed $result->{processed}, failed $result->{failed}, skipped $result->{skipped}." );
     $manifest->{step} = 'imported';
     $manifest->{files} = \@files;
     $manifest->{import_result} = $result;
@@ -1077,6 +1070,78 @@ sub _manual_stage_import_selected {
         },
         $manual_sync_result
     );
+}
+
+sub _manual_stage_enrich_import_result {
+    my ( $self, $result, $files ) = @_;
+
+    return $result if !$result || ref $result ne 'HASH';
+
+    my %files_by_path = map {
+        defined $_->{local_path} && $_->{local_path} ne '' ? ( $_->{local_path} => $_ ) : ()
+    } @{ $files || [] };
+    my @skipped_files;
+
+    for my $skip ( @{ $result->{skipped_files} || [] } ) {
+        my $file = $files_by_path{ $skip->{file} // '' };
+        push @skipped_files, $self->_manual_stage_skipped_file_detail( $skip, $file );
+    }
+
+    if ( !@skipped_files && ( $result->{skipped} || 0 ) ) {
+        for my $file ( grep { $_->{duplicate_import_blocked} } @{ $files || [] } ) {
+            last if @skipped_files >= ( $result->{skipped} || 0 );
+            push @skipped_files, $self->_manual_stage_skipped_file_detail(
+                {
+                    file        => $file->{local_path},
+                    reason      => 'already_imported',
+                    basket_name => $file->{ship_notice_number},
+                    message     => 'File matched an existing Koha basket and was not imported.',
+                },
+                $file
+            );
+        }
+    }
+
+    $result->{skipped_files} = \@skipped_files if @skipped_files;
+
+    return $result;
+}
+
+sub _manual_stage_skipped_file_detail {
+    my ( $self, $skip, $file ) = @_;
+
+    $skip ||= {};
+    $file ||= {};
+
+    return {
+        file                  => $skip->{file} // $file->{local_path} // '',
+        filename              => $file->{filename} // basename( $skip->{file} // '' ),
+        source_id             => $file->{source_id} // '',
+        reason                => $skip->{reason} // 'skipped',
+        reason_label          => $self->_manual_stage_skip_reason_label( $skip, $file ),
+        message               => $file->{duplicate_message} // $skip->{message} // '',
+        ship_notice_number    => $file->{ship_notice_number} // $skip->{basket_name} // '',
+        duplicate_status      => $file->{duplicate_status} // '',
+        existing_basketno     => $file->{existing_basketno} // '',
+        existing_basketname   => $file->{existing_basketname} // '',
+        existing_basket_url   => $file->{existing_basket_url} // '',
+        existing_vendor_name  => $file->{existing_vendor_name} // '',
+        existing_vendor_url   => $file->{existing_vendor_url} // '',
+        existing_order_count  => $file->{existing_order_count} // '',
+        existing_item_count   => $file->{existing_item_count} // '',
+        existing_order_range  => $file->{existing_order_range} // '',
+    };
+}
+
+sub _manual_stage_skip_reason_label {
+    my ( $self, $skip, $file ) = @_;
+
+    return 'Another selected file has the same ShipNoticeNumber'
+        if ( $file->{duplicate_status} // '' ) eq 'duplicate in preview';
+    return 'Existing Koha basket has the same ShipNoticeNumber'
+        if ( $skip->{reason} // '' ) eq 'already_imported';
+
+    return 'Skipped by the importer';
 }
 
 sub _manual_stage_prerequisites {
@@ -1336,7 +1401,7 @@ sub _manual_stage_preview_file {
         $preview{duplicate_status} = 'duplicate basket';
         $preview{duplicate_message} = 'Basket ' . $existing_basket->{basketno} . ' already exists for this ShipNoticeNumber.';
         $preview{duplicate_import_blocked} = 1;
-        $preview{existing_basketno} = $existing_basket->{basketno};
+        $self->_manual_stage_apply_existing_basket_preview( \%preview, $existing_basket );
     } else {
         $preview{duplicate_status} = 'new';
         $preview{duplicate_import_blocked} = 0;
@@ -1545,17 +1610,65 @@ sub _manual_stage_existing_basket {
 
     return if !defined $basket_name || $basket_name eq '';
 
-    return C4::Context->dbh->selectrow_hashref(
+    my $basket = C4::Context->dbh->selectrow_hashref(
         q{
-            SELECT basketno, basketname, booksellerid
-            FROM aqbasket
-            WHERE basketname = ?
-            ORDER BY basketno DESC
+            SELECT
+                b.basketno,
+                b.basketname,
+                b.booksellerid,
+                v.name AS vendor_name,
+                COUNT(o.ordernumber) AS order_count,
+                COALESCE(SUM(o.quantity), 0) AS item_count,
+                MIN(o.ordernumber) AS first_ordernumber,
+                MAX(o.ordernumber) AS last_ordernumber
+            FROM aqbasket b
+            LEFT JOIN aqbooksellers v ON v.id = b.booksellerid
+            LEFT JOIN aqorders o ON o.basketno = b.basketno
+            WHERE b.basketname = ?
+            GROUP BY b.basketno, b.basketname, b.booksellerid, v.name
+            ORDER BY b.basketno DESC
             LIMIT 1
         },
         undef,
         $basket_name
     );
+
+    return $self->_manual_stage_prepare_existing_basket($basket);
+}
+
+sub _manual_stage_prepare_existing_basket {
+    my ( $self, $basket ) = @_;
+
+    return if !$basket;
+
+    $basket->{basket_url} = '/cgi-bin/koha/acqui/basket.pl?basketno=' . url_escape( $basket->{basketno} )
+        if defined $basket->{basketno};
+    $basket->{vendor_url} = '/cgi-bin/koha/acqui/booksellers.pl?booksellerid=' . url_escape( $basket->{booksellerid} )
+        if defined $basket->{booksellerid};
+    if ( defined $basket->{first_ordernumber} && defined $basket->{last_ordernumber} ) {
+        $basket->{order_range} = $basket->{first_ordernumber} eq $basket->{last_ordernumber}
+            ? $basket->{first_ordernumber}
+            : $basket->{first_ordernumber} . '-' . $basket->{last_ordernumber};
+    }
+
+    return $basket;
+}
+
+sub _manual_stage_apply_existing_basket_preview {
+    my ( $self, $preview, $basket ) = @_;
+
+    return if !$preview || !$basket;
+
+    $preview->{existing_basketno}    = $basket->{basketno} // '';
+    $preview->{existing_basketname}  = $basket->{basketname} // '';
+    $preview->{existing_basket_url}  = $basket->{basket_url} // '';
+    $preview->{existing_vendor_name} = $basket->{vendor_name} // '';
+    $preview->{existing_vendor_url}  = $basket->{vendor_url} // '';
+    $preview->{existing_order_count} = $basket->{order_count} // '';
+    $preview->{existing_item_count}  = $basket->{item_count} // '';
+    $preview->{existing_order_range} = $basket->{order_range} // '';
+
+    return $preview;
 }
 
 sub _tool_sftp_status {
@@ -1601,7 +1714,6 @@ sub _output_tool_page {
         sftp_config_has_errors => $sftp_status->{has_errors},
         sftp_config_messages   => $sftp_status->{messages},
         manual_run_available   => !$sftp_status->{has_errors} && $sftp_status->{count} ? 1 : 0,
-        can_override_duplicate_stage_files => $self->_current_user_is_superlibrarian(),
         configure_href         => $self->plugin_method_url('configure'),
         tool_href              => $self->plugin_method_url('tool'),
         plugin_display_version => $self->plugin_display_version(),
@@ -1912,22 +2024,6 @@ sub _last_configured_by_context {
         borrowernumber => $borrowernumber,
         label          => 'borrowernumber ' . $borrowernumber,
     };
-}
-
-sub _current_user {
-    my ($self) = @_;
-
-    my $userenv = C4::Context->userenv;
-    return unless $userenv && $userenv->{number};
-
-    return Koha::Patrons->find( $userenv->{number} );
-}
-
-sub _current_user_is_superlibrarian {
-    my ($self) = @_;
-
-    my $current_user = $self->_current_user;
-    return $current_user && $current_user->is_superlibrarian ? 1 : 0;
 }
 
 sub _write_sftp_config_file {

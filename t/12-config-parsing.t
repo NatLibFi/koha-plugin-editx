@@ -735,7 +735,7 @@ subtest 'Manual staged workflow resumes manifests after redirect-safe GET reload
     is( $stage->{import_result}->{processed}, 1, 'Imported staged state keeps the import counts' );
     is( $sync_result->{order_count}, 1, 'Imported staged state keeps the acquisition summary for links' );
     ok( $attempted, 'Imported staged state renders the import summary section' );
-    like( _message_text($messages), qr{Selected EDItX import finished: processed 1, failed 0, skipped 0}, 'Imported redirect shows the staff success message' );
+    is( _message_text($messages), '', 'Imported redirect leaves the result summary inside the staged result section' );
 };
 
 subtest 'Manual staged preview blocks duplicate ShipNoticeNumber rows in the same download batch' => sub {
@@ -766,7 +766,7 @@ subtest 'Manual staged preview blocks duplicate ShipNoticeNumber rows in the sam
     ok( !$files[2]->{duplicate_import_blocked}, 'Different ShipNoticeNumber remains importable' );
 };
 
-subtest 'Manual staged import blocks duplicate files unless override is allowed' => sub {
+subtest 'Manual staged import blocks duplicate files server-side' => sub {
     no strict 'refs';
     no warnings qw(once redefine);
 
@@ -802,27 +802,9 @@ subtest 'Manual staged import blocks duplicate files unless override is allowed'
         )
     );
 
-    like( _message_text($messages), qr{duplicate notices}, 'Duplicate staged imports are blocked without override' );
+    like( _message_text($messages), qr{duplicate notices and were not imported}, 'Duplicate staged imports are blocked' );
     is( $stage->{step}, 'downloaded', 'Blocked duplicate staged import returns to the preview step' );
     is( $result, undef, 'Blocked duplicate staged import does not run the importer' );
-
-    local *{ $plugin_class . '::_current_user_is_superlibrarian' } = sub {
-        return 0;
-    };
-
-    ( $messages, $stage, $result ) = $plugin->_manual_stage_import_selected(
-        t::EditXFakeCGI->new(
-            {
-                manual_stage_run_id             => 'run-ok',
-                stage_file                      => ['duplicate-file'],
-                override_duplicate_stage_files  => 1,
-            }
-        )
-    );
-
-    like( _message_text($messages), qr{Only superlibrarians can override duplicate EDItX file blocking\.}, 'Duplicate override is rejected for non-superlibrarians' );
-    is( $stage->{step}, 'downloaded', 'Rejected duplicate override returns to the preview step' );
-    is( $result, undef, 'Rejected duplicate override does not run the importer' );
 };
 
 subtest 'Manual staged import reports stale run ids without a 500' => sub {

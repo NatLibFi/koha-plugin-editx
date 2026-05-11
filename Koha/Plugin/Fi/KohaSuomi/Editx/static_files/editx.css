@@ -631,13 +631,6 @@
     background: #fff3cd !important;
 }
 
-.editx-duplicate-override {
-    align-items: center;
-    display: inline-flex;
-    gap: 0.35rem;
-    margin: 0 0.35rem;
-}
-
 .editx-stage-row-duplicate {
     color: #5d6972;
 }
@@ -646,24 +639,28 @@
     background: #eef1f3 !important;
 }
 
-.editx-stage-table > tbody > tr.editx-stage-row-duplicate > td.editx-stage-duplicate-selection-cell:has(.editx-stage-duplicate-checkbox:checked:not(:disabled)) {
-    --editx-stage-duplicate-selected-bg: #f2b3bb;
-    --bs-table-bg-type: var(--editx-stage-duplicate-selected-bg);
-}
-
-.editx-stage-table > tbody > tr.editx-stage-row-duplicate.even > td.editx-stage-duplicate-selection-cell:has(.editx-stage-duplicate-checkbox:checked:not(:disabled)),
-.editx-stage-table > tbody > tr.editx-stage-row-duplicate:nth-of-type(even) > td.editx-stage-duplicate-selection-cell:has(.editx-stage-duplicate-checkbox:checked:not(:disabled)) {
-    --editx-stage-duplicate-selected-bg: #f6c8ce;
-}
-
-.editx-stage-table > tbody > tr.editx-stage-row-duplicate:hover > td.editx-stage-duplicate-selection-cell:has(.editx-stage-duplicate-checkbox:checked:not(:disabled)) {
-    --editx-stage-duplicate-selected-bg: #e99aa5;
-    --bs-table-bg-state: var(--editx-stage-duplicate-selected-bg);
-}
-
 .editx-stage-row-duplicate code,
 .editx-stage-row-duplicate .editx-notice-id {
     color: #4a555d;
+}
+
+.editx-stage-result {
+    margin-top: 0.5rem;
+}
+
+.editx-stage-result-summary {
+    margin: 0.25rem 0 0.75rem;
+}
+
+.editx-stage-result-note {
+    background: #fff8e5;
+    border-left: 4px solid #d89b16;
+    margin: 0.25rem 0 0.75rem;
+    padding: 0.45rem 0.65rem;
+}
+
+.editx-stage-result-table {
+    margin-top: 0.35rem;
 }
 
 .editx-notice-id {

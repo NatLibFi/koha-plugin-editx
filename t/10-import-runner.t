@@ -90,6 +90,13 @@ use_ok('Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::ImportRunner');
         return 1;
     }
 
+    sub basketNameFromFile {
+        my ( $self, $file_name ) = @_;
+        return $self->{basket_names} && exists $self->{basket_names}->{$file_name}
+            ? $self->{basket_names}->{$file_name}
+            : 'duplicate-basket';
+    }
+
     sub registerFileForImport {
         my ( $self, $file_name ) = @_;
         push @{ $self->{events} }, "register:$file_name";
@@ -830,9 +837,21 @@ subtest 'process_orders skips and discards an already imported file' => sub {
     my $result = $runner->process_orders( { $file_name => 'good-order' } );
 
     is_deeply(
-        $result,
+        { map { $_ => $result->{$_} } qw(processed failed skipped) },
         { processed => 0, failed => 0, skipped => 1 },
         'Runner counts an already imported file as skipped'
+    );
+    is_deeply(
+        $result->{skipped_files},
+        [
+            {
+                file        => $file_name,
+                reason      => 'already_imported',
+                basket_name => 'duplicate-basket',
+                message     => "Skipping already imported EDItX file $file_name.",
+            }
+        ],
+        'Runner reports the skipped duplicate file reason'
     );
     is_deeply( \@validated, [], 'Runner does not validate an already imported file' );
     is_deeply( $order_processor->{processed}, [], 'Runner does not process an already imported file' );

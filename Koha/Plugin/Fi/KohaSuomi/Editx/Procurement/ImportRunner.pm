@@ -188,13 +188,15 @@ sub process_orders {
     my $failed = 0;
     my $skipped = 0;
     my @errors;
+    my @skipped_files;
 
     while ( my ( $file_name, $order ) = each %$orders ) {
         try {
             $logger->info("Started processing order from file $file_name");
 
-            if ( $self->_skip_already_imported_file( $file_manager, $file_name, $logger ) ) {
+            if ( my $skipped_file = $self->_skip_already_imported_file( $file_manager, $file_name, $logger ) ) {
                 $skipped++;
+                push @skipped_files, $skipped_file;
             } else {
 
                 $self->validate_editx($file_name);
@@ -224,19 +226,28 @@ sub process_orders {
         failed    => $failed,
         skipped   => $skipped,
         @errors ? ( errors => \@errors ) : (),
+        @skipped_files ? ( skipped_files => \@skipped_files ) : (),
     };
 }
 
 sub _skip_already_imported_file {
     my ( $self, $file_manager, $file_name, $logger ) = @_;
 
-    return 0 if !$file_manager->filePathAlreadyImported($file_name);
+    return if !$file_manager->filePathAlreadyImported($file_name);
 
     my $message = "Skipping already imported EDItX file $file_name.";
+    my $basket_name = eval { $file_manager->basketNameFromFile($file_name) };
+    $basket_name = '' if !defined $basket_name || $@;
+
     $logger->warn($message);
     $file_manager->discardDuplicateFile($file_name);
 
-    return 1;
+    return {
+        file        => $file_name,
+        reason      => 'already_imported',
+        basket_name => $basket_name,
+        message     => $message,
+    };
 }
 
 sub _process_order_in_transaction {
