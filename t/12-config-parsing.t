@@ -1112,6 +1112,69 @@ subtest 'Nightly folder source staging copies stable source files into import tm
     like( join( "\n", map { $_->{message} } @logs ), qr{copied to staging}, 'Nightly folder source scan logs copied files' );
 };
 
+subtest 'Nightly source staging ignores disabled malformed sources' => sub {
+    no strict 'refs';
+    no warnings qw(once redefine);
+
+    my @logs;
+    local *{ $plugin_class . '::_log_runtime' } = _capture_runtime_log(\@logs);
+    local *{ $plugin_class . '::_sftp_sources' } = sub {
+        return [
+            {
+                enabled    => 'no',
+                id         => 'broken sftp',
+                host       => '',
+                user       => '',
+                remote_dir => '',
+            }
+        ];
+    };
+    local *{ $plugin_class . '::_folder_sources' } = sub {
+        return [
+            {
+                enabled        => 'no',
+                id             => 'broken folder',
+                local_dir      => '/path/that/does/not/exist',
+                success_action => 'archive',
+            }
+        ];
+    };
+
+    my $sftp_result = $plugin->_stage_sftp_sources_for_import();
+    my $folder_result = $plugin->_stage_folder_sources_for_import();
+
+    is( $sftp_result->{sources}, 0, 'Disabled malformed SFTP source is ignored by nightly staging' );
+    is( $folder_result->{sources}, 0, 'Disabled malformed folder source is ignored by nightly staging' );
+    like( join( "\n", map { $_->{message} } @logs ), qr{No enabled EDItX SFTP sources configured}m, 'Nightly staging logs skipped SFTP scan' );
+    like( join( "\n", map { $_->{message} } @logs ), qr{No enabled EDItX folder sources configured}m, 'Nightly staging logs skipped folder scan' );
+};
+
+subtest 'Nightly sync skips import when no sources are enabled' => sub {
+    no strict 'refs';
+    no warnings qw(once redefine);
+
+    my @logs;
+    local *{ $plugin_class . '::_log_runtime' } = _capture_runtime_log(\@logs);
+    local *{ $plugin_class . '::_runtime_log_level' } = sub { return 'info'; };
+    local *{ $plugin_class . '::_koha_instance' } = sub { return 'editx_test_' . $$; };
+    local *{ $plugin_class . '::_stage_sftp_sources_for_import' } = sub {
+        return { downloaded => 0, skipped => 0, sources => 0, files => [] };
+    };
+    local *{ $plugin_class . '::_stage_folder_sources_for_import' } = sub {
+        return { copied => 0, skipped => 0, sources => 0, files => [] };
+    };
+    local *{ $plugin_class . '::_run_import_runner_for_sync' } = sub {
+        die 'Import runner must not run without enabled EDItX sources';
+    };
+
+    my $output = '';
+    open my $fh, '>', \$output or die "Cannot open scalar output handle: $!";
+
+    ok( $plugin->_run_nightly_sync( { output_fh => $fh } ), 'Nightly sync succeeds as a no-op when no sources are enabled' );
+    like( $output, qr{No enabled EDItX intake sources are configured; skipping import\.}, 'Nightly sync reports the no-source skip' );
+    like( join( "\n", map { $_->{message} } @logs ), qr{skipped because no enabled intake sources}, 'Nightly sync logs the no-source skip' );
+};
+
 subtest 'Source cleanup mutates folder sources only after successful imports' => sub {
     no strict 'refs';
     no warnings qw(once redefine);
@@ -1562,9 +1625,6 @@ subtest 'Procurement Config applies the same import folder defaults for console 
     local *Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Config::kohaConfigPath = sub {
         return '/etc/koha/sites/kohadev/koha-conf.xml';
     };
-    local *Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Config::loadConfigXml = sub {
-        return { settings => {}, notifications => {} };
-    };
     local *Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Config::loadPluginData = sub {
         return {};
     };
@@ -1742,7 +1802,6 @@ subtest 'ProductForm CSV import groups blocking diagnostics into one alert' => s
             messages             => \@messages,
             sftp_sources         => [],
             procurement_settings => {},
-            nightly_sync_enabled => 0,
             runtime_log_level    => 'info',
         ),
         'Blocked ProductForm CSV import returns to configure page'

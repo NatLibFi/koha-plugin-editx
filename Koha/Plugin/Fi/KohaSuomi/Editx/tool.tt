@@ -25,8 +25,8 @@
                     </div>
                     <div class="editx-status-strip">
                         <div class="editx-status-item">
-                            <span class="editx-status-label">Nightly automation</span>
-                            <strong>[% IF nightly_sync_enabled %]Enabled[% ELSE %]Disabled[% END %]</strong>
+                            <span class="editx-status-label">Nightly sources</span>
+                            <strong>[% enabled_source_count | html %]</strong>
                             <span class="editx-status-note"><a href="[% configure_href | html %]">Configure</a></span>
                         </div>
                         <div class="editx-status-item [% IF source_config_has_errors %]editx-status-warning[% END %]">

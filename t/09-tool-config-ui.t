@@ -22,6 +22,7 @@ sub read_file {
 my $plugin_pm = read_file('Koha/Plugin/Fi/KohaSuomi/Editx.pm');
 my $schema_lifecycle_pm = read_file('Koha/Plugin/Fi/KohaSuomi/Editx/SchemaLifecycle.pm');
 my $config_migration_pm = read_file('Koha/Plugin/Fi/KohaSuomi/Editx/ConfigMigration.pm');
+my $procurement_config_pm = read_file('Koha/Plugin/Fi/KohaSuomi/Editx/Procurement/Config.pm');
 my $configure = read_file('Koha/Plugin/Fi/KohaSuomi/Editx/configure.tt');
 my $tool = read_file('Koha/Plugin/Fi/KohaSuomi/Editx/tool.tt');
 my $breadcrumbs = read_file('Koha/Plugin/Fi/KohaSuomi/Editx/includes/editx_breadcrumbs.inc');
@@ -84,6 +85,8 @@ like( $schema_lifecycle_pm, qr{sub\s+upgrade\s*\{[\s\S]+_install_or_upgrade_tabl
 like( $config_migration_pm, qr{id\s*=>\s*'kohasuomi_legacy'[\s\S]+success_action\s*=>\s*'delete'}, 'ConfigMigration converts legacy XML intake into a deleting folder source' );
 like( $config_migration_pm, qr{migrated to plugin config_json and is ignored}, 'ConfigMigration warns that legacy XML is migrated and ignored' );
 like( $config_migration_pm, qr{rename\s+\$path,\s+\$target}, 'ConfigMigration moves legacy XML aside when possible' );
+unlike( $procurement_config_pm, qr{loadConfigXml|XML::Simple}, 'Runtime procurement config no longer reads legacy XML' );
+unlike( $plugin_pm . $configure . $tool, qr{nightly_sync_enabled}, 'Runtime pages no longer expose a global nightly synchronization toggle' );
 unlike( $plugin_pm, qr{sub\s+tool\s*\{[\s\S]+?_install_or_upgrade_tables\(\)[\s\S]+?\n\}}, 'Tool page does not run plugin table setup outside lifecycle hooks' );
 unlike( $plugin_pm, qr{sub\s+configure\s*\{[\s\S]+?_install_or_upgrade_tables\(\)[\s\S]+?\n\}}, 'Configure page does not run plugin table setup outside lifecycle hooks' );
 unlike( $plugin_pm . $schema_lifecycle_pm, qr{_migrate_legacy_procurement_file_table}, 'Plugin upgrade no longer migrates the obsolete file-hash import ledger' );
@@ -111,6 +114,8 @@ like( $configure, qr{<link rel="stylesheet" href="/api/v1/contrib/editx/static/s
 unlike( $configure, qr{editx_debug|editx_debug_comment|EDItX debug}, 'Configure page does not keep deployment debug comments in source' );
 unlike( $configure, qr{Configure the nightly SFTP download, import folders, EDItX processing rules, notifications, and ONIX ProductForm mappings\.}, 'Configure page header does not present email notifications as a main setup area' );
 like( $configure, qr{Configure EDItX intake sources, import folders, processing rules, and ONIX ProductForm mappings\.}, 'Configure page presents source intake as SFTP-or-folder transport configuration' );
+unlike( $configure, qr{Automatic synchronization|Nightly EDItX synchronization}, 'Configure page does not keep a global nightly synchronization section' );
+like( $configure, qr{Nightly sources[\s\S]+enabled_source_count}, 'Configure page summarizes enabled nightly sources' );
 unlike( $configure, qr{SFTP sources YAML}, 'Configure page does not expose SFTP YAML editing' );
 like( $configure, qr{id="editx-sftp-sources-table"\s+class="editx-config-table editx-sftp-sources-table"[\s\S]+Enabled / Source name[\s\S]+Remote folder / Pattern[\s\S]+Successful import action[\s\S]+data-editx-sftp-source-row="1"[\s\S]+id="editx-add-sftp-source"}, 'Configure page edits SFTP sources as two-line source rows with per-source automation and success action' );
 like( $configure, qr{id="editx-folder-sources-table"\s+class="editx-config-table editx-folder-sources-table"[\s\S]+Enabled / Source name[\s\S]+Folder / Pattern[\s\S]+Successful import action[\s\S]+data-editx-folder-source-row="1"[\s\S]+id="editx-add-folder-source"}, 'Configure page edits folder sources in their own source table' );
@@ -250,7 +255,7 @@ like( $tool, qr{Acquisition result}, 'Tool page renders acquisition result links
 like( $tool, qr{No new acquisition order lines were found for this import}, 'Tool page avoids batch-specific wording for empty acquisition results' );
 like( $tool, qr{manual_sync_result\.history_url}, 'Tool page links empty manual results to acquisition order search' );
 unlike( $tool, qr{/cgi-bin/koha/acqui/acqui-home\.pl}, 'Tool page does not link empty manual results to the general acquisitions home page' );
-like( $tool, qr{nightly_sync_enabled}, 'Tool page shows read-only nightly automation status' );
+like( $tool, qr{Nightly sources[\s\S]+enabled_source_count}, 'Tool page shows enabled nightly source count' );
 like( $tool, qr{href="\[%\s*configure_href\s*\|\s*html\s*%\]">Configure</a>}, 'Tool page links to configuration' );
 like( $tool, qr{source_config_messages[\s\S]+editx-manual-sync-form}, 'Tool page renders source prerequisite warnings before the manual action form' );
 like( $tool, qr{editx-action-note}, 'Tool page explains disabled manual runs inside the manual action form' );
@@ -299,6 +304,9 @@ unlike( $plugin_pm, qr{sub\s+_manual_stage_quote_sftp_path\s*\{}, 'Manual staged
 unlike( $plugin_pm, qr{sub\s+_manual_stage_sftp_path_argument\s*\{}, 'Manual staged workflow has no leftover SFTP path argument helper' );
 unlike( $plugin_pm, qr{sub\s+_manual_stage_remote_dir_for_listing\s*\{}, 'Manual staged workflow has no leftover remote listing helper' );
 unlike( $plugin_pm, qr{sub\s+_manual_stage_parse_sftp_listing_output\s*\{}, 'Manual staged workflow has no leftover listing parser wrapper' );
+unlike( $plugin_pm, qr{sub\s+_write_sftp_config_file\s*\{}, 'Nightly sync no longer writes shell SFTP configuration files' );
+unlike( $plugin_pm, qr{sub\s+_run_command\s*\{}, 'Nightly sync no longer shells out to fetch EDItX sources' );
+unlike( $plugin_pm, qr{sub\s+_shell_quote\s*\{}, 'Plugin no longer keeps shell quoting helpers for source intake' );
 like( $plugin_pm, qr{sub\s+_manual_stage_filename_matches_pattern\s*\{}, 'Manual staged workflow filters SFTP listings locally by filename pattern' );
 like( $plugin_pm, qr{sub\s+_manual_stage_file_glob\s*\{}, 'Manual staged workflow has a shared source file pattern validator' );
 

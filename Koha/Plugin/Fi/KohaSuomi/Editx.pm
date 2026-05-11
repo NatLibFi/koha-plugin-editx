@@ -205,10 +205,6 @@ sub configure {
           $is_save
         ? Koha::Plugin::Fi::KohaSuomi::Editx::RuntimeLog->normalize_level( scalar $cgi->param('runtime_log_level') )
         : $self->_runtime_log_level();
-    my $nightly_sync_enabled =
-          $is_save
-        ? ( $cgi->param('nightly_sync_enabled') ? 1 : 0 )
-        : $self->_nightly_sync_enabled();
     my $sftp_sources =
           $is_save
         ? $self->_sftp_sources_from_cgi($cgi)
@@ -229,7 +225,6 @@ sub configure {
             sftp_sources           => $sftp_sources,
             folder_sources         => $folder_sources,
             procurement_settings   => $procurement_settings,
-            nightly_sync_enabled   => $nightly_sync_enabled,
             runtime_log_level      => $runtime_log_level,
         );
         return if $handled;
@@ -244,7 +239,6 @@ sub configure {
                 folder_sources         => $folder_sources,
                 procurement_settings   => $procurement_settings,
                 messages               => \@messages,
-                nightly_sync_enabled   => $nightly_sync_enabled,
                 runtime_log_level      => $runtime_log_level,
             );
             return;
@@ -263,7 +257,6 @@ sub configure {
                 folder_sources         => $folder_sources,
                 procurement_settings   => $procurement_settings,
                 messages               => \@messages,
-                nightly_sync_enabled   => $nightly_sync_enabled,
                 runtime_log_level      => $runtime_log_level,
             );
             return;
@@ -274,7 +267,9 @@ sub configure {
         my ( $normalized_folder_sources, $folder_messages, $has_folder_blocking_errors ) = $self->_normalize_folder_sources($folder_sources);
         $folder_sources = $normalized_folder_sources;
         my ( $source_messages, $has_source_blocking_errors ) = $self->_validate_config_source_ids( $sftp_sources, $folder_sources );
-        my ( $procurement_messages, $has_procurement_blocking_errors ) = $self->_validate_procurement_settings( $procurement_settings, $nightly_sync_enabled );
+        my @enabled_sources = grep { ( $_->{enabled} // 'yes' ) eq 'yes' } ( @{$sftp_sources}, @{$folder_sources} );
+        my $strict_procurement_settings = @enabled_sources ? 1 : 0;
+        my ( $procurement_messages, $has_procurement_blocking_errors ) = $self->_validate_procurement_settings( $procurement_settings, $strict_procurement_settings );
         push @messages, @$sftp_messages;
         push @messages, @$folder_messages;
         push @messages, @$source_messages;
@@ -284,18 +279,12 @@ sub configure {
         $has_blocking_errors ||= $has_source_blocking_errors;
         $has_blocking_errors ||= $has_procurement_blocking_errors;
 
-        if ( !$has_blocking_errors && $nightly_sync_enabled ) {
-            my @enabled_sources = grep { ( $_->{enabled} // 'yes' ) eq 'yes' } ( @{$sftp_sources}, @{$folder_sources} );
-            if ( !@enabled_sources ) {
-                push @messages, $self->_configure_message( error => 'Nightly sync is enabled but no enabled EDItX sources are configured.' );
+        if ( !$has_blocking_errors && @enabled_sources ) {
+            for my $source (@$sftp_sources) {
+                next unless ( $source->{enabled} // 'yes' ) eq 'yes';
+                next if $source->{local_dir} || $procurement_settings->{import_tmp_path};
+                push @messages, $self->_configure_message( error => "SFTP source '$source->{id}' has no local_dir and import_tmp_path is not set." );
                 $has_blocking_errors = 1;
-            } else {
-                for my $source (@$sftp_sources) {
-                    next unless ( $source->{enabled} // 'yes' ) eq 'yes';
-                    next if $source->{local_dir} || $procurement_settings->{import_tmp_path};
-                    push @messages, $self->_configure_message( error => "SFTP source '$source->{id}' has no local_dir and import_tmp_path is not set." );
-                    $has_blocking_errors = 1;
-                }
             }
         }
 
@@ -306,14 +295,12 @@ sub configure {
                 folder_sources         => $folder_sources,
                 procurement_settings   => $procurement_settings,
                 messages               => \@messages,
-                nightly_sync_enabled   => $nightly_sync_enabled,
                 runtime_log_level      => $runtime_log_level,
             );
             return;
         }
         $self->store_data(
             {
-                nightly_sync_enabled => $nightly_sync_enabled,
                 runtime_log_level    => $runtime_log_level,
                 %{ Koha::Plugin::Fi::KohaSuomi::Editx::Config->store_data(
                     Koha::Plugin::Fi::KohaSuomi::Editx::Config->from_flat(
@@ -332,7 +319,7 @@ sub configure {
             info => 'EDItX plugin configuration saved',
             {
                 operation            => 'configure',
-                nightly_sync_enabled => $nightly_sync_enabled,
+                enabled_source_count => scalar @enabled_sources,
                 runtime_log_level    => $runtime_log_level,
             },
             { runtime_log_level => $runtime_log_level }
@@ -348,7 +335,6 @@ sub configure {
         folder_sources         => $folder_sources,
         procurement_settings   => $procurement_settings,
         messages               => \@messages,
-        nightly_sync_enabled   => $nightly_sync_enabled,
         runtime_log_level      => $runtime_log_level,
         cookies                => $flash->{cookie},
     );
@@ -356,12 +342,6 @@ sub configure {
 
 sub cronjob_nightly {
     my ($self) = @_;
-
-    unless ( $self->_nightly_sync_enabled() ) {
-        $self->_log_runtime( info => 'EDItX nightly synchronization skipped because it is disabled', { operation => 'nightly', interface => 'cron' } );
-        print "EDItX nightly synchronization is disabled in plugin configuration.\n";
-        return 1;
-    }
 
     $self->_log_runtime( info => 'EDItX nightly synchronization hook started', { operation => 'nightly', interface => 'cron' } );
     return $self->_run_nightly_sync();
@@ -1650,6 +1630,7 @@ sub _tool_source_status {
 
     my ( $sources, $messages, $has_errors ) = $self->_manual_stage_sources();
     my $default_local_dir = $procurement_settings->{import_tmp_path} // '';
+    my $enabled_count = $self->_enabled_source_count($sources);
 
     if ( !$has_errors && !@$sources ) {
         push @$messages, $self->_configure_message( warning => 'No EDItX intake sources are saved in the plugin configuration.' );
@@ -1664,10 +1645,24 @@ sub _tool_source_status {
     }
 
     return {
-        count      => scalar @$sources,
-        has_errors => $has_errors ? 1 : 0,
-        messages   => $messages,
+        count         => scalar @$sources,
+        enabled_count => $enabled_count,
+        has_errors    => $has_errors ? 1 : 0,
+        messages      => $messages,
     };
+}
+
+sub _enabled_source_count {
+    my ( $self, @source_lists ) = @_;
+
+    my $count = 0;
+    for my $sources (@source_lists) {
+        for my $source ( @{ $sources || [] } ) {
+            $count++ if ( $source->{enabled} // 'yes' ) eq 'yes';
+        }
+    }
+
+    return $count;
 }
 
 sub _output_tool_page {
@@ -1683,9 +1678,9 @@ sub _output_tool_page {
         manual_run_confirmation => $params{manual_run_confirmation},
         manual_stage           => $params{manual_stage},
         manual_stage_sources   => $self->_manual_stage_source_options($procurement_settings),
-        nightly_sync_enabled   => $self->_nightly_sync_enabled(),
         procurement_settings   => $procurement_settings,
         source_count           => $source_status->{count},
+        enabled_source_count   => $source_status->{enabled_count},
         source_config_has_errors => $source_status->{has_errors},
         source_config_messages => $source_status->{messages},
         manual_run_available   => !$source_status->{has_errors} && $source_status->{count} ? 1 : 0,
@@ -1702,14 +1697,16 @@ sub _output_configure_page {
 
     my $template = $self->get_template( { file => 'configure.tt' } );
     my $itemtypes = $self->_itemtypes();
+    my $sftp_sources = $params{sftp_sources} // $self->_sftp_sources();
+    my $folder_sources = $params{folder_sources} // $self->_folder_sources();
     $template->param(
         mapping_rows           => $params{mapping_rows},
         mapping_editor         => $params{mapping_editor},
-        sftp_sources           => $params{sftp_sources} // $self->_sftp_sources(),
-        folder_sources         => $params{folder_sources} // $self->_folder_sources(),
+        sftp_sources           => $sftp_sources,
+        folder_sources         => $folder_sources,
         procurement_settings   => $params{procurement_settings},
         messages               => $params{messages},
-        nightly_sync_enabled   => $params{nightly_sync_enabled},
+        enabled_source_count   => $self->_enabled_source_count( $sftp_sources, $folder_sources ),
         itemtypes              => $itemtypes,
         itemtypes_text         => join( ', ', @{$itemtypes} ),
         locations_text         => join( ', ', @{ $self->_authorised_values('LOC') } ),
@@ -1767,7 +1764,6 @@ sub _handle_productform_mapping_action {
             sftp_sources           => $params{sftp_sources},
             procurement_settings   => $params{procurement_settings},
             messages               => $messages,
-            nightly_sync_enabled   => $params{nightly_sync_enabled},
             runtime_log_level      => $params{runtime_log_level},
         );
         return 1;
@@ -1787,7 +1783,6 @@ sub _handle_productform_mapping_action {
                 sftp_sources           => $params{sftp_sources},
                 procurement_settings   => $params{procurement_settings},
                 messages               => $messages,
-                nightly_sync_enabled   => $params{nightly_sync_enabled},
                 runtime_log_level      => $params{runtime_log_level},
             );
             return 1;
@@ -1818,7 +1813,6 @@ sub _handle_productform_mapping_action {
             sftp_sources           => $params{sftp_sources},
             procurement_settings   => $params{procurement_settings},
             messages               => $messages,
-            nightly_sync_enabled   => $params{nightly_sync_enabled},
             runtime_log_level      => $params{runtime_log_level},
             mapping_editor         => $mapping_editor,
         );
@@ -1835,7 +1829,6 @@ sub _handle_productform_mapping_action {
             sftp_sources           => $params{sftp_sources},
             procurement_settings   => $params{procurement_settings},
             messages               => $messages,
-            nightly_sync_enabled   => $params{nightly_sync_enabled},
             runtime_log_level      => $params{runtime_log_level},
             mapping_editor         => $mapping_editor,
         );
@@ -1865,7 +1858,6 @@ sub _handle_productform_mapping_csv_import {
             sftp_sources         => $params{sftp_sources},
             procurement_settings => $params{procurement_settings},
             messages             => $messages,
-            nightly_sync_enabled => $params{nightly_sync_enabled},
             runtime_log_level    => $params{runtime_log_level},
         );
         return 1;
@@ -1879,7 +1871,6 @@ sub _handle_productform_mapping_csv_import {
             sftp_sources         => $params{sftp_sources},
             procurement_settings => $params{procurement_settings},
             messages             => $messages,
-            nightly_sync_enabled => $params{nightly_sync_enabled},
             runtime_log_level    => $params{runtime_log_level},
         );
         return 1;
@@ -1894,7 +1885,6 @@ sub _handle_productform_mapping_csv_import {
             sftp_sources         => $params{sftp_sources},
             procurement_settings => $params{procurement_settings},
             messages             => $messages,
-            nightly_sync_enabled => $params{nightly_sync_enabled},
             runtime_log_level    => $params{runtime_log_level},
         );
         return 1;
@@ -2034,65 +2024,12 @@ sub _last_configured_by_context {
     };
 }
 
-sub _write_sftp_config_file {
-    my ( $self, $koha_instance ) = @_;
-
-    my ( $sources, $messages, $has_errors ) = $self->_normalize_sftp_sources( $self->_sftp_sources );
-    die join( "\n", map { $_->{text} } @$messages ) . "\n" if $has_errors;
-    $sources = [ grep { ( $_->{enabled} // 'yes' ) eq 'yes' } @$sources ];
-    if ( !@$sources ) {
-        $self->_log_runtime( info => 'No enabled EDItX SFTP sources configured; skipping SFTP fetch configuration', { operation => 'sync' } );
-        return;
-    }
-    $self->_log_runtime( debug => 'Writing temporary EDItX SFTP configuration', { source_count => scalar @$sources } );
-
-    my $default_local_dir = $self->_default_import_tmp_path();
-    my $safe_instance = $koha_instance;
-    $safe_instance =~ s/[^A-Za-z0-9_.-]/_/g;
-
-    my ( $fh, $config_file ) = tempfile( "editx-sftp-$safe_instance-XXXXXX", DIR => '/tmp', UNLINK => 0 );
-
-    print {$fh} "SFTP_TARGETS=" . $self->_shell_quote( join( ' ', map { $_->{id} } @$sources ) ) . "\n";
-
-    for my $source (@$sources) {
-        my $id = $source->{id};
-        my $local_dir = $source->{local_dir} || $default_local_dir;
-        die "No local_dir configured for SFTP source '$id' and import_tmp_path is not set.\n" unless $local_dir;
-
-        my %values = (
-            HOST                     => $source->{host},
-            PORT                     => $source->{port},
-            USER                     => $source->{user},
-            IDENTITY_FILE            => $source->{identity_file},
-            REMOTE_DIR               => $source->{remote_dir},
-            LOCAL_DIR                => $local_dir,
-            PATTERN                  => $source->{pattern},
-            AFTER_DOWNLOAD           => 'keep',
-            REMOTE_ARCHIVE_DIR       => $source->{remote_archive_dir},
-            KNOWN_HOSTS_FILE         => $source->{known_hosts_file},
-            STRICT_HOST_KEY_CHECKING => $source->{strict_host_key_checking},
-            SSH_CONFIG               => $source->{ssh_config},
-        );
-
-        for my $suffix ( sort keys %values ) {
-            next unless defined $values{$suffix} && $values{$suffix} ne '';
-            print {$fh} "SFTP_${id}_${suffix}=" . $self->_shell_quote( $values{$suffix} ) . "\n";
-        }
-    }
-
-    close $fh or die "Cannot close temporary EDItX SFTP config $config_file: $!";
-    chmod 0600, $config_file or die "Cannot chmod temporary EDItX SFTP config $config_file: $!";
-    $self->_log_runtime( debug => 'Temporary EDItX SFTP configuration written', { source_count => scalar @$sources } );
-
-    return $config_file;
-}
-
 sub _stage_sftp_sources_for_import {
     my ($self) = @_;
 
-    my ( $sources, $messages, $has_errors ) = $self->_normalize_sftp_sources( $self->_sftp_sources );
+    my $enabled_sources = [ grep { ( $_->{enabled} // 'yes' ) eq 'yes' } @{ $self->_sftp_sources() || [] } ];
+    my ( $sources, $messages, $has_errors ) = $self->_normalize_sftp_sources($enabled_sources);
     die join( "\n", map { $_->{text} } @$messages ) . "\n" if $has_errors;
-    $sources = [ grep { ( $_->{enabled} // 'yes' ) eq 'yes' } @$sources ];
     if ( !@$sources ) {
         $self->_log_runtime( info => 'No enabled EDItX SFTP sources configured; skipping SFTP source scan', { operation => 'sftp_scan' } );
         return { downloaded => 0, skipped => 0, sources => 0, files => [] };
@@ -2182,9 +2119,9 @@ sub _stage_sftp_source_for_import {
 sub _stage_folder_sources_for_import {
     my ($self) = @_;
 
-    my ( $sources, $messages, $has_errors ) = $self->_normalize_folder_sources( $self->_folder_sources );
+    my $enabled_sources = [ grep { ( $_->{enabled} // 'yes' ) eq 'yes' } @{ $self->_folder_sources() || [] } ];
+    my ( $sources, $messages, $has_errors ) = $self->_normalize_folder_sources($enabled_sources);
     die join( "\n", map { $_->{text} } @$messages ) . "\n" if $has_errors;
-    $sources = [ grep { ( $_->{enabled} // 'yes' ) eq 'yes' } @$sources ];
     if ( !@$sources ) {
         $self->_log_runtime( info => 'No enabled EDItX folder sources configured; skipping folder source scan', { operation => 'folder_scan' } );
         return { copied => 0, skipped => 0, sources => 0 };
@@ -2328,17 +2265,23 @@ sub _run_nightly_sync {
             push @source_files, @{ $folder_result->{files} || [] };
             $self->_sync_print( $options, "Folder source scan copied $folder_result->{copied} EDItX file(s) to staging.\n" );
         }
-        my $import_result = $self->_run_import_runner_for_sync($options);
-        my $cleanup_result = $self->_apply_source_success_actions( $import_result, \@source_files );
-        if ($cleanup_result) {
-            $self->_sync_print(
-                $options,
-                "Source cleanup: kept $cleanup_result->{kept}, deleted $cleanup_result->{deleted}, archived $cleanup_result->{archived}, failed $cleanup_result->{failed}.\n"
-            );
+        my $enabled_source_count = ( $sftp_result->{sources} || 0 ) + ( $folder_result->{sources} || 0 );
+        if ( !$enabled_source_count ) {
+            $self->_sync_print( $options, "No enabled EDItX intake sources are configured; skipping import.\n" );
+            $self->_log_runtime( info => 'EDItX synchronization skipped because no enabled intake sources are configured', { operation => 'sync', koha_instance => $koha_instance } );
+        } else {
+            my $import_result = $self->_run_import_runner_for_sync($options);
+            my $cleanup_result = $self->_apply_source_success_actions( $import_result, \@source_files );
+            if ($cleanup_result) {
+                $self->_sync_print(
+                    $options,
+                    "Source cleanup: kept $cleanup_result->{kept}, deleted $cleanup_result->{deleted}, archived $cleanup_result->{archived}, failed $cleanup_result->{failed}.\n"
+                );
+            }
+            die "EDItX import failed for $import_result->{failed} file(s).\n" if $import_result->{failed};
+            $self->_sync_print( $options, "Finished EDItX nightly synchronization for $koha_instance.\n" );
+            $self->_log_runtime( info => 'Finished EDItX synchronization chain', { operation => 'sync', koha_instance => $koha_instance } );
         }
-        die "EDItX import failed for $import_result->{failed} file(s).\n" if $import_result->{failed};
-        $self->_sync_print( $options, "Finished EDItX nightly synchronization for $koha_instance.\n" );
-        $self->_log_runtime( info => 'Finished EDItX synchronization chain', { operation => 'sync', koha_instance => $koha_instance } );
         1;
     };
     my $error = $@;
@@ -2395,50 +2338,6 @@ sub _run_nightly_sync_for_web {
     die $self->_sync_error_message( $error, $output ) unless $success;
 
     return $output;
-}
-
-sub _run_command {
-    my ( $self, @args ) = @_;
-
-    my $options = ref $args[0] eq 'HASH' ? shift @args : {};
-    my @command = @args;
-    my $command_text = join ' ', @command;
-
-    $self->_log_runtime( debug => "Starting EDItX command: $command_text", { operation => 'sync_command' } );
-
-    if ( my $output_fh = $options->{output_fh} ) {
-        my $pid = fork;
-        die 'Cannot fork EDItX command: ' . $! unless defined $pid;
-        if ( !$pid ) {
-            open STDOUT, '>&', $output_fh or die "Cannot redirect child STDOUT: $!";
-            open STDERR, '>&', $output_fh or die "Cannot redirect child STDERR: $!";
-            exec @command;
-            die 'Failed to execute ' . join( ' ', @command ) . ": $!";
-        }
-        my $waited = waitpid $pid, 0;
-        die 'Failed to wait for EDItX command: ' . $! if $waited == -1;
-    } else {
-        system @command;
-    }
-
-    if ( $? == -1 ) {
-        $self->_log_runtime( error => "Failed to execute EDItX command: $command_text", { operation => 'sync_command', error => "$!" } );
-        die "Failed to execute $command_text: $!";
-    }
-    if ( $? & 127 ) {
-        my $signal = $? & 127;
-        $self->_log_runtime( error => "EDItX command died with signal $signal: $command_text", { operation => 'sync_command', signal => $signal } );
-        die "$command_text died with signal $signal";
-    }
-    if ( $? != 0 ) {
-        my $status = $? >> 8;
-        $self->_log_runtime( error => "EDItX command exited with status $status: $command_text", { operation => 'sync_command', status => $status } );
-        die "$command_text exited with status $status";
-    }
-
-    $self->_log_runtime( debug => "Finished EDItX command: $command_text", { operation => 'sync_command' } );
-
-    return 1;
 }
 
 sub _sync_print {
@@ -2536,12 +2435,6 @@ sub _instance_from_koha_conf_path {
     return $1 if $koha_conf =~ m{\A/etc/koha/sites/([^/]+)/koha-conf\.xml\z};
 
     return;
-}
-
-sub _nightly_sync_enabled {
-    my ($self) = @_;
-
-    return $self->retrieve_data('nightly_sync_enabled') ? 1 : 0;
 }
 
 sub _editx_config {
@@ -3518,14 +3411,6 @@ sub _recommended_sftp_paths {
         identity_file    => "$base/editx_sftp",
         known_hosts_file => "$base/known_hosts",
     };
-}
-
-sub _shell_quote {
-    my ( $self, $value ) = @_;
-
-    $value //= '';
-    $value =~ s/'/'"'"'/g;
-    return "'$value'";
 }
 
 sub _config_scalar {

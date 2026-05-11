@@ -1,9 +1,7 @@
 #!/usr/bin/perl
 package Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::Config;
 
-use XML::Simple;
 use File::Basename;
-use Data::Dumper;
 use C4::Context;
 use Koha::Plugin::Fi::KohaSuomi::Editx::Config;
 use Koha::Plugin::Fi::KohaSuomi::Editx::RuntimeLog;
@@ -38,18 +36,6 @@ sub new {
     $singleton ||= bless {}, $class;
 }
 
-sub loadConfigXml{
-    my $self = shift;
-    my $configs = {};
-    my $xmlPath = $self->getConfigXmlPath();
-
-    if( -e $xmlPath ){
-        my $simple = XML::Simple->new;
-        $configs = $simple->XMLin($xmlPath);
-    }
-    return $configs;
-}
-
 sub getConfigXmlPath{
     my $self = shift;
     my $kohaConfigPath = $self->kohaConfigPath();
@@ -67,7 +53,7 @@ sub getLogDir {
 
 sub getSettings{
     my $self = shift;
-    my $confs = $self->loadConfigXml();
+    my $confs = {};
     $confs->{'settings'} ||= {};
     $confs->{'notifications'} ||= {};
 

@@ -26,9 +26,9 @@
                     </div>
                     <div class="editx-status-strip">
                         <div class="editx-status-item">
-                            <span class="editx-status-label">Nightly sync</span>
-                            <strong>[% IF nightly_sync_enabled %]Enabled[% ELSE %]Disabled[% END %]</strong>
-                            <span class="editx-status-note">Koha plugin nightly hook</span>
+                            <span class="editx-status-label">Nightly sources</span>
+                            <strong>[% enabled_source_count | html %]</strong>
+                            <span class="editx-status-note">Enabled source[% UNLESS enabled_source_count == 1 %]s[% END %]</span>
                         </div>
                         <div class="editx-status-item">
                             <span class="editx-status-label">Import intake</span>
@@ -51,21 +51,6 @@
                     <input type="hidden" name="class" value="[% CLASS | html %]" />
                     <input type="hidden" name="method" value="[% METHOD | html %]" />
                     [% INCLUDE 'csrf-token.inc' %]
-
-                    <fieldset class="rows">
-                        <legend>Automatic synchronization</legend>
-                        <ol>
-                            <li>
-                                <label for="nightly_sync_enabled">Nightly EDItX synchronization</label>
-                                <input id="nightly_sync_enabled"
-                                       name="nightly_sync_enabled"
-                                       type="checkbox"
-                                       value="1"
-                                       [% IF nightly_sync_enabled %]checked="checked"[% END %] />
-                                <div class="hint">Runs enabled EDItX sources from Koha's nightly plugin cron hook.</div>
-                            </li>
-                        </ol>
-                    </fieldset>
 
                     <fieldset class="rows">
                         <legend>Import folders</legend>
