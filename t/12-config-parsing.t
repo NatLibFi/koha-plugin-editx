@@ -1136,7 +1136,7 @@ subtest 'Procurement folder validation rejects non-directory parents' => sub {
     like( $message_text, qr{Successful archive folder cannot be created because the nearest existing parent is not a directory}, 'Validation rejects non-directory parents' );
 };
 
-subtest 'ProductForm CSV parser nulls unknown itemtypes without blocking save' => sub {
+subtest 'ProductForm CSV parser blocks unknown itemtypes' => sub {
     no strict 'refs';
     no warnings qw(once redefine);
     local *{ $plugin_class . '::_itemtypes' } = sub { return [qw(BK ALT)]; };
@@ -1150,19 +1150,36 @@ CSV
 
     my $message_text = _message_text($messages);
 
-    ok( !$has_blocking_errors, 'Unknown itemtypes are warnings, not blocking errors' );
-    is_deeply(
-        $rows,
-        [
-            { onix_code => 'AA', productform => 'BK', productform_alternative => undef },
-            { onix_code => 'AB', productform => undef, productform_alternative => 'ALT' },
-            { onix_code => 'AA', productform => 'BK', productform_alternative => 'ALT' },
-        ],
-        'Parser keeps rows and nulls unknown itemtype values'
-    );
-    like( $message_text, qr{Line 2: item type 'MISSING' does not exist; productform_alternative was stored as NULL\.}, 'Parser warns about unknown alternative itemtype' );
-    like( $message_text, qr{Line 3: item type 'NOPE' does not exist; productform was stored as NULL\.}, 'Parser warns about unknown primary itemtype' );
+    ok( $has_blocking_errors, 'Unknown itemtypes block ProductForm CSV import' );
+    is_deeply( $rows, [], 'Parser does not return rows for saving when itemtypes are unknown' );
+    like( $message_text, qr{Line 2: alternative ProductForm item type 'MISSING' does not exist in Koha; choose an existing item type or leave the field empty\.}, 'Parser reports unknown alternative itemtype as an error' );
+    like( $message_text, qr{Line 3: ProductForm item type 'NOPE' does not exist in Koha; choose an existing item type or leave the field empty\.}, 'Parser reports unknown primary itemtype as an error' );
     like( $message_text, qr{Line 4 repeats ONIX code 'AA'; the later value will win\.}, 'Parser warns about duplicate ONIX codes' );
+};
+
+subtest 'ProductForm row normalization blocks unknown itemtypes' => sub {
+    no strict 'refs';
+    no warnings qw(once redefine);
+    local *{ $plugin_class . '::_itemtypes' } = sub { return [qw(BK ALT)]; };
+
+    my ( $rows, $messages, $has_blocking_errors ) = $plugin->_normalize_productform_mapping_rows(
+        [
+            {
+                _label                  => 'New mapping row',
+                onix_code               => 'AA',
+                productform             => 'MISSING',
+                productform_alternative => 'ALT',
+            }
+        ]
+    );
+
+    ok( $has_blocking_errors, 'Unknown itemtypes block ProductForm row save' );
+    is_deeply( $rows, [], 'Normalizer does not return rows for saving when an itemtype is unknown' );
+    like(
+        _message_text($messages),
+        qr{New mapping row: ProductForm item type 'MISSING' does not exist in Koha; choose an existing item type or leave the field empty\.},
+        'Normalizer reports the unknown itemtype as an error'
+    );
 };
 
 subtest 'ProductForm CSV parser blocks malformed imports' => sub {

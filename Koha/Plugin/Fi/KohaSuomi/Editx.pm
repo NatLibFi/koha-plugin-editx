@@ -2073,13 +2073,13 @@ sub _parse_productform_mapping_csv {
         }
 
         if ( $productform && !$itemtypes{$productform} ) {
-            push @messages, $self->_configure_message( warning => "Line $line_number: item type '$productform' does not exist; productform was stored as NULL." );
-            $productform = undef;
+            push @messages, $self->_productform_mapping_itemtype_error( "Line $line_number", 'productform', $productform );
+            $has_blocking_errors = 1;
         }
 
         if ( $productform_alternative && !$itemtypes{$productform_alternative} ) {
-            push @messages, $self->_configure_message( warning => "Line $line_number: item type '$productform_alternative' does not exist; productform_alternative was stored as NULL." );
-            $productform_alternative = undef;
+            push @messages, $self->_productform_mapping_itemtype_error( "Line $line_number", 'productform_alternative', $productform_alternative );
+            $has_blocking_errors = 1;
         }
 
         push @rows,
@@ -2102,6 +2102,8 @@ sub _parse_productform_mapping_csv {
         push @messages, $self->_configure_message( error => 'No product form mappings found in CSV.' );
         $has_blocking_errors = 1;
     }
+
+    return ( [], \@messages, 1 ) if $has_blocking_errors;
 
     return ( \@rows, \@messages, $has_blocking_errors );
 }
@@ -2203,13 +2205,13 @@ sub _normalize_productform_mapping_rows {
         }
 
         if ( $productform && !$itemtypes{$productform} ) {
-            push @messages, $self->_configure_message( warning => "$label: item type '$productform' does not exist; productform was stored as NULL." );
-            $productform = undef;
+            push @messages, $self->_productform_mapping_itemtype_error( $label, 'productform', $productform );
+            $has_blocking_errors = 1;
         }
 
         if ( $productform_alternative && !$itemtypes{$productform_alternative} ) {
-            push @messages, $self->_configure_message( warning => "$label: item type '$productform_alternative' does not exist; productform_alternative was stored as NULL." );
-            $productform_alternative = undef;
+            push @messages, $self->_productform_mapping_itemtype_error( $label, 'productform_alternative', $productform_alternative );
+            $has_blocking_errors = 1;
         }
 
         push @rows,
@@ -2225,7 +2227,21 @@ sub _normalize_productform_mapping_rows {
         $has_blocking_errors = 1;
     }
 
+    return ( [], \@messages, 1 ) if $has_blocking_errors;
+
     return ( \@rows, \@messages, $has_blocking_errors );
+}
+
+sub _productform_mapping_itemtype_error {
+    my ( $self, $label, $field, $itemtype ) = @_;
+
+    my $field_label = $field eq 'productform_alternative'
+        ? 'alternative ProductForm item type'
+        : 'ProductForm item type';
+
+    return $self->_configure_message(
+        error => "$label: $field_label '$itemtype' does not exist in Koha; choose an existing item type or leave the field empty."
+    );
 }
 
 sub _parse_sftp_sources_yaml {
