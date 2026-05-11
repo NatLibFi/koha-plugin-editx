@@ -24,10 +24,13 @@ if ($core_root) {
 }
 
 my $plugin_class = 'Koha::Plugin::Fi::KohaSuomi::Editx';
+my $schema_lifecycle_class = 'Koha::Plugin::Fi::KohaSuomi::Editx::SchemaLifecycle';
 use_ok($plugin_class);
 use_ok('Koha::Plugin::Fi::KohaSuomi::Editx::Config');
+use_ok($schema_lifecycle_class);
 
 my $plugin = bless {}, $plugin_class;
+my $schema_lifecycle = $schema_lifecycle_class->new( plugin => $plugin );
 
 {
     package KohaSuomi::Editx::TestCGI;
@@ -153,14 +156,14 @@ subtest 'Install calls table setup without legacy migration' => sub {
 
     my @logs;
     local *{ $plugin_class . '::_log_runtime' } = _capture_runtime_log(\@logs);
-    local *{ $plugin_class . '::_drop_obsolete_procurement_file_table' } = sub { die 'install must not clean obsolete procurement_file'; };
-    local *{ $plugin_class . '::_install_or_upgrade_tables' } = sub {
+    local *{ $schema_lifecycle_class . '::_drop_obsolete_procurement_file_table' } = sub { die 'install must not clean obsolete procurement_file'; };
+    local *{ $schema_lifecycle_class . '::_install_or_upgrade_tables' } = sub {
         my ( $self, %args ) = @_;
         is_deeply( \%args, { migrate_legacy => 0 }, 'Install disables legacy migration in table setup' );
         return 1;
     };
 
-    ok( $plugin->install, 'Install succeeds with legacy migration disabled' );
+    ok( $schema_lifecycle->install, 'Install succeeds with legacy migration disabled' );
     like(
         join( "\n", map { $_->{message} } @logs ),
         qr{qualified tables without legacy migration},
@@ -173,24 +176,54 @@ subtest 'Upgrade cleans obsolete procurement_file ledger after table setup' => s
     no warnings qw(once redefine);
 
     my %called;
-    my @logs;
-    local *{ $plugin_class . '::_log_runtime' } = _capture_runtime_log(\@logs);
-    local *{ $plugin_class . '::store_data' } = sub { $called{store_data}++; return 1; };
-    local *{ $plugin_class . '::_install_or_upgrade_tables' } = sub {
+    local *{ $schema_lifecycle_class . '::_install_or_upgrade_tables' } = sub {
         my ( $self, %args ) = @_;
         is_deeply( \%args, { migrate_legacy => 1 }, 'Upgrade enables legacy migration in table setup' );
         $called{table_setup}++;
         return 1;
     };
-    local *{ $plugin_class . '::_drop_obsolete_procurement_file_table' } = sub {
+    local *{ $schema_lifecycle_class . '::_drop_obsolete_procurement_file_table' } = sub {
         $called{drop_obsolete_procurement_file}++;
         return 1;
     };
 
-    ok( $plugin->upgrade, 'Upgrade succeeds after obsolete procurement_file cleanup' );
+    ok( $schema_lifecycle->upgrade, 'Upgrade succeeds after obsolete procurement_file cleanup' );
     is( $called{table_setup}, 1, 'Upgrade runs table setup once' );
     is( $called{drop_obsolete_procurement_file}, 1, 'Upgrade runs obsolete procurement_file cleanup once' );
-    like( join( "\n", map { $_->{message} } @logs ), qr{upgrade finished}, 'Upgrade logs success after cleanup' );
+};
+
+subtest 'Plugin lifecycle hooks delegate schema lifecycle work' => sub {
+    no strict 'refs';
+    no warnings qw(once redefine);
+
+    my %called;
+    my $fake_schema_lifecycle = bless { called => \%called }, 'KohaSuomi::Editx::FakeSchemaLifecycle';
+    local *{ $plugin_class . '::_schema_lifecycle' } = sub { return $fake_schema_lifecycle; };
+    local *{ $plugin_class . '::_log_runtime' } = sub { return 1; };
+    local *{ $plugin_class . '::store_data' } = sub { $called{store_data}++; return 1; };
+    local *KohaSuomi::Editx::FakeSchemaLifecycle::install = sub {
+        my ($self) = @_;
+        $self->{called}->{install}++;
+        return 1;
+    };
+    local *KohaSuomi::Editx::FakeSchemaLifecycle::upgrade = sub {
+        my ($self) = @_;
+        $self->{called}->{upgrade}++;
+        return 1;
+    };
+    local *KohaSuomi::Editx::FakeSchemaLifecycle::uninstall = sub {
+        my ($self) = @_;
+        $self->{called}->{uninstall}++;
+        return 1;
+    };
+
+    ok( $plugin->install, 'Plugin install succeeds through schema lifecycle' );
+    ok( $plugin->upgrade, 'Plugin upgrade succeeds through schema lifecycle' );
+    ok( $plugin->uninstall, 'Plugin uninstall succeeds through schema lifecycle' );
+    is( $called{install}, 1, 'Plugin install delegates schema lifecycle install once' );
+    is( $called{upgrade}, 1, 'Plugin upgrade delegates schema lifecycle upgrade once' );
+    is( $called{uninstall}, 1, 'Plugin uninstall delegates schema lifecycle uninstall once' );
+    is( $called{store_data}, 1, 'Plugin upgrade still records the upgrade timestamp' );
 };
 
 subtest 'Install table setup does not touch legacy tables' => sub {
@@ -206,14 +239,14 @@ subtest 'Install table setup does not touch legacy tables' => sub {
         my ( $self, $table_name ) = @_;
         return "koha_plugin_fi_kohasuomi_editx_$table_name";
     };
-    local *{ $plugin_class . '::_drop_map_productform_foreign_keys' } = sub { $called{drop_foreign_keys}++; return 1; };
-    local *{ $plugin_class . '::_allow_nullable_map_productform_columns' } = sub { $called{allow_nullable}++; return 1; };
-    local *{ $plugin_class . '::_ensure_sequences_row' } = sub { $called{ensure_sequences}++; return 1; };
-    local *{ $plugin_class . '::_table_exists' } = sub { die 'install must not inspect legacy or qualified table existence'; };
-    local *{ $plugin_class . '::_migrate_legacy_sequences_table' } = sub { die 'install must not migrate legacy sequences'; };
-    local *{ $plugin_class . '::_migrate_legacy_map_productform_table' } = sub { die 'install must not migrate legacy ProductForm mappings'; };
+    local *{ $schema_lifecycle_class . '::_drop_map_productform_foreign_keys' } = sub { $called{drop_foreign_keys}++; return 1; };
+    local *{ $schema_lifecycle_class . '::_allow_nullable_map_productform_columns' } = sub { $called{allow_nullable}++; return 1; };
+    local *{ $schema_lifecycle_class . '::_ensure_sequences_row' } = sub { $called{ensure_sequences}++; return 1; };
+    local *{ $schema_lifecycle_class . '::_table_exists' } = sub { die 'install must not inspect legacy or qualified table existence'; };
+    local *{ $schema_lifecycle_class . '::_migrate_legacy_sequences_table' } = sub { die 'install must not migrate legacy sequences'; };
+    local *{ $schema_lifecycle_class . '::_migrate_legacy_map_productform_table' } = sub { die 'install must not migrate legacy ProductForm mappings'; };
 
-    ok( $plugin->_install_or_upgrade_tables( migrate_legacy => 0 ), 'Install table setup succeeds without legacy migration' );
+    ok( $schema_lifecycle->_install_or_upgrade_tables( migrate_legacy => 0 ), 'Install table setup succeeds without legacy migration' );
     is( $called{ensure_sequences}, 1, 'Install still ensures the qualified sequences row' );
     like( join( "\n", @{ $dbh->{do_calls} } ), qr{CREATE TABLE IF NOT EXISTS `koha_plugin_fi_kohasuomi_editx_map_productform`}, 'Install creates the qualified ProductForm table' );
 };
@@ -232,18 +265,18 @@ subtest 'Upgrade table setup enables legacy migration' => sub {
         my ( $self, $table_name ) = @_;
         return "koha_plugin_fi_kohasuomi_editx_$table_name";
     };
-    local *{ $plugin_class . '::_drop_map_productform_foreign_keys' } = sub { $called{drop_foreign_keys}++; return 1; };
-    local *{ $plugin_class . '::_allow_nullable_map_productform_columns' } = sub { $called{allow_nullable}++; return 1; };
-    local *{ $plugin_class . '::_ensure_sequences_row' } = sub { $called{ensure_sequences}++; return 1; };
-    local *{ $plugin_class . '::_table_exists' } = sub {
+    local *{ $schema_lifecycle_class . '::_drop_map_productform_foreign_keys' } = sub { $called{drop_foreign_keys}++; return 1; };
+    local *{ $schema_lifecycle_class . '::_allow_nullable_map_productform_columns' } = sub { $called{allow_nullable}++; return 1; };
+    local *{ $schema_lifecycle_class . '::_ensure_sequences_row' } = sub { $called{ensure_sequences}++; return 1; };
+    local *{ $schema_lifecycle_class . '::_table_exists' } = sub {
         my ( $self, $table_name ) = @_;
         push @checked_tables, $table_name;
         return 0;
     };
-    local *{ $plugin_class . '::_migrate_legacy_sequences_table' } = sub { $called{migrate_sequences}++; return 1; };
-    local *{ $plugin_class . '::_migrate_legacy_map_productform_table' } = sub { $called{migrate_productform}++; return 1; };
+    local *{ $schema_lifecycle_class . '::_migrate_legacy_sequences_table' } = sub { $called{migrate_sequences}++; return 1; };
+    local *{ $schema_lifecycle_class . '::_migrate_legacy_map_productform_table' } = sub { $called{migrate_productform}++; return 1; };
 
-    ok( $plugin->_install_or_upgrade_tables( migrate_legacy => 1 ), 'Upgrade table setup succeeds with legacy migration enabled' );
+    ok( $schema_lifecycle->_install_or_upgrade_tables( migrate_legacy => 1 ), 'Upgrade table setup succeeds with legacy migration enabled' );
     is_deeply(
         \@checked_tables,
         [
@@ -270,14 +303,14 @@ subtest 'Upgrade ignores legacy when qualified tables already exist' => sub {
         my ( $self, $table_name ) = @_;
         return "koha_plugin_fi_kohasuomi_editx_$table_name";
     };
-    local *{ $plugin_class . '::_drop_map_productform_foreign_keys' } = sub { $called{drop_foreign_keys}++; return 1; };
-    local *{ $plugin_class . '::_allow_nullable_map_productform_columns' } = sub { $called{allow_nullable}++; return 1; };
-    local *{ $plugin_class . '::_ensure_sequences_row' } = sub { $called{ensure_sequences}++; return 1; };
-    local *{ $plugin_class . '::_table_exists' } = sub { return 1; };
-    local *{ $plugin_class . '::_migrate_legacy_sequences_table' } = sub { die 'upgrade must not inspect legacy sequences when the qualified table already exists'; };
-    local *{ $plugin_class . '::_migrate_legacy_map_productform_table' } = sub { die 'upgrade must not inspect legacy ProductForm mappings when the qualified table already exists'; };
+    local *{ $schema_lifecycle_class . '::_drop_map_productform_foreign_keys' } = sub { $called{drop_foreign_keys}++; return 1; };
+    local *{ $schema_lifecycle_class . '::_allow_nullable_map_productform_columns' } = sub { $called{allow_nullable}++; return 1; };
+    local *{ $schema_lifecycle_class . '::_ensure_sequences_row' } = sub { $called{ensure_sequences}++; return 1; };
+    local *{ $schema_lifecycle_class . '::_table_exists' } = sub { return 1; };
+    local *{ $schema_lifecycle_class . '::_migrate_legacy_sequences_table' } = sub { die 'upgrade must not inspect legacy sequences when the qualified table already exists'; };
+    local *{ $schema_lifecycle_class . '::_migrate_legacy_map_productform_table' } = sub { die 'upgrade must not inspect legacy ProductForm mappings when the qualified table already exists'; };
 
-    ok( $plugin->_install_or_upgrade_tables( migrate_legacy => 1 ), 'Upgrade table setup succeeds without legacy migration when qualified tables exist' );
+    ok( $schema_lifecycle->_install_or_upgrade_tables( migrate_legacy => 1 ), 'Upgrade table setup succeeds without legacy migration when qualified tables exist' );
     is( $called{ensure_sequences}, 1, 'Upgrade still runs normal qualified-table maintenance' );
     is(
         scalar( grep { $_->{message} =~ /legacy migration skipped/ } @logs ),
@@ -299,17 +332,17 @@ subtest 'Upgrade migrates only qualified tables missing before upgrade' => sub {
         my ( $self, $table_name ) = @_;
         return "koha_plugin_fi_kohasuomi_editx_$table_name";
     };
-    local *{ $plugin_class . '::_drop_map_productform_foreign_keys' } = sub { $called{drop_foreign_keys}++; return 1; };
-    local *{ $plugin_class . '::_allow_nullable_map_productform_columns' } = sub { $called{allow_nullable}++; return 1; };
-    local *{ $plugin_class . '::_ensure_sequences_row' } = sub { $called{ensure_sequences}++; return 1; };
-    local *{ $plugin_class . '::_table_exists' } = sub {
+    local *{ $schema_lifecycle_class . '::_drop_map_productform_foreign_keys' } = sub { $called{drop_foreign_keys}++; return 1; };
+    local *{ $schema_lifecycle_class . '::_allow_nullable_map_productform_columns' } = sub { $called{allow_nullable}++; return 1; };
+    local *{ $schema_lifecycle_class . '::_ensure_sequences_row' } = sub { $called{ensure_sequences}++; return 1; };
+    local *{ $schema_lifecycle_class . '::_table_exists' } = sub {
         my ( $self, $table_name ) = @_;
         return $table_name eq 'koha_plugin_fi_kohasuomi_editx_sequences' ? 1 : 0;
     };
-    local *{ $plugin_class . '::_migrate_legacy_sequences_table' } = sub { die 'upgrade must skip legacy sequences when the qualified table existed'; };
-    local *{ $plugin_class . '::_migrate_legacy_map_productform_table' } = sub { $called{migrate_productform}++; return 1; };
+    local *{ $schema_lifecycle_class . '::_migrate_legacy_sequences_table' } = sub { die 'upgrade must skip legacy sequences when the qualified table existed'; };
+    local *{ $schema_lifecycle_class . '::_migrate_legacy_map_productform_table' } = sub { $called{migrate_productform}++; return 1; };
 
-    ok( $plugin->_install_or_upgrade_tables( migrate_legacy => 1 ), 'Upgrade table setup succeeds with mixed pre-existing qualified tables' );
+    ok( $schema_lifecycle->_install_or_upgrade_tables( migrate_legacy => 1 ), 'Upgrade table setup succeeds with mixed pre-existing qualified tables' );
     is( $called{migrate_productform}, 1, 'Upgrade migrates only the missing qualified ProductForm table' );
     is(
         scalar( grep { $_->{message} =~ /legacy migration skipped/ && $_->{context}->{table} eq 'koha_plugin_fi_kohasuomi_editx_sequences' } @logs ),
@@ -331,13 +364,13 @@ subtest 'ProductForm legacy migration imports supported Koha Suomi source and re
         my ( $self, $table_name ) = @_;
         return "koha_plugin_fi_kohasuomi_editx_$table_name";
     };
-    local *{ $plugin_class . '::_table_exists' } = sub {
+    local *{ $schema_lifecycle_class . '::_table_exists' } = sub {
         my ( $self, $table_name ) = @_;
         push @checked_tables, $table_name;
         return $table_name eq 'map_productform';
     };
 
-    ok( $plugin->_migrate_legacy_map_productform_table, 'ProductForm migration succeeds from the legacy unqualified table' );
+    ok( $schema_lifecycle->_migrate_legacy_map_productform_table, 'ProductForm migration succeeds from the legacy unqualified table' );
     my $sql = join "\n", @{ $dbh->{do_calls} };
     is_deeply( \@checked_tables, ['map_productform'], 'ProductForm migration checks only the supported Koha Suomi legacy source table' );
     like( $sql, qr{INSERT INTO `koha_plugin_fi_kohasuomi_editx_map_productform`.*FROM `map_productform`}s, 'Legacy ProductForm rows are copied for a newly created target table' );
@@ -361,12 +394,12 @@ subtest 'ProductForm legacy migration logs DB errors and keeps the old table' =>
         my ( $self, $table_name ) = @_;
         return "koha_plugin_fi_kohasuomi_editx_$table_name";
     };
-    local *{ $plugin_class . '::_table_exists' } = sub {
+    local *{ $schema_lifecycle_class . '::_table_exists' } = sub {
         my ( $self, $table_name ) = @_;
         return $table_name eq 'map_productform';
     };
 
-    ok( !$plugin->_migrate_legacy_map_productform_table, 'ProductForm migration fails when the DB copy fails' );
+    ok( !$schema_lifecycle->_migrate_legacy_map_productform_table, 'ProductForm migration fails when the DB copy fails' );
     like( join( "\n", map { $_->{message} } @logs ), qr{migration failed: copy failed}, 'ProductForm migration logs the DB error' );
     unlike( join( "\n", @{ $dbh->{do_calls} } ), qr{DROP TABLE}, 'Failed ProductForm migration does not drop the legacy source table' );
 };
@@ -380,13 +413,13 @@ subtest 'Obsolete procurement_file cleanup drops only the known KohaSuomi file-h
     my @logs;
     local *C4::Context::dbh = sub { return $dbh; };
     local *{ $plugin_class . '::_log_runtime' } = _capture_runtime_log(\@logs);
-    local *{ $plugin_class . '::_table_exists' } = sub {
+    local *{ $schema_lifecycle_class . '::_table_exists' } = sub {
         my ( $self, $table_name ) = @_;
         push @checked_tables, $table_name;
         return $table_name eq 'procurement_file';
     };
 
-    ok( $plugin->_drop_obsolete_procurement_file_table, 'Obsolete procurement_file cleanup succeeds' );
+    ok( $schema_lifecycle->_drop_obsolete_procurement_file_table, 'Obsolete procurement_file cleanup succeeds' );
     is_deeply( \@checked_tables, ['procurement_file'], 'Cleanup checks only the supported KohaSuomi procurement_file table' );
     like( join( "\n", @{ $dbh->{select_calls} } ), qr{SELECT COUNT\(\*\) FROM `procurement_file`}, 'Cleanup counts existing file-hash ledger rows' );
     like( join( "\n", @{ $dbh->{do_calls} } ), qr{DROP TABLE IF EXISTS `procurement_file`}, 'Cleanup drops the obsolete file-hash ledger' );
@@ -403,13 +436,13 @@ subtest 'Obsolete procurement_file cleanup skips missing KohaSuomi file-hash led
     my @checked_tables;
     my @logs;
     local *{ $plugin_class . '::_log_runtime' } = _capture_runtime_log(\@logs);
-    local *{ $plugin_class . '::_table_exists' } = sub {
+    local *{ $schema_lifecycle_class . '::_table_exists' } = sub {
         my ( $self, $table_name ) = @_;
         push @checked_tables, $table_name;
         return 0;
     };
 
-    ok( $plugin->_drop_obsolete_procurement_file_table, 'Missing obsolete procurement_file table is skipped' );
+    ok( $schema_lifecycle->_drop_obsolete_procurement_file_table, 'Missing obsolete procurement_file table is skipped' );
     is_deeply( \@checked_tables, ['procurement_file'], 'Missing cleanup checks only the supported KohaSuomi procurement_file table' );
     like( join( "\n", map { $_->{message} } @logs ), qr{not found; cleanup skipped}, 'Missing cleanup decision is logged' );
 };
@@ -422,12 +455,12 @@ subtest 'Obsolete procurement_file cleanup logs DB errors and keeps upgrade fail
     my @logs;
     local *C4::Context::dbh = sub { return $dbh; };
     local *{ $plugin_class . '::_log_runtime' } = _capture_runtime_log(\@logs);
-    local *{ $plugin_class . '::_table_exists' } = sub {
+    local *{ $schema_lifecycle_class . '::_table_exists' } = sub {
         my ( $self, $table_name ) = @_;
         return $table_name eq 'procurement_file';
     };
 
-    ok( !$plugin->_drop_obsolete_procurement_file_table, 'Obsolete procurement_file cleanup fails when the drop fails' );
+    ok( !$schema_lifecycle->_drop_obsolete_procurement_file_table, 'Obsolete procurement_file cleanup fails when the drop fails' );
     like( join( "\n", map { $_->{message} } @logs ), qr{cleanup failed: drop failed}, 'Cleanup logs the DB error' );
 };
 
@@ -442,13 +475,13 @@ subtest 'Uninstall drops only current qualified table names' => sub {
         my ( $self, $table_name ) = @_;
         return "koha_plugin_fi_kohasuomi_editx_$table_name";
     };
-    local *{ $plugin_class . '::_drop_tables_if_exist' } = sub {
+    local *{ $schema_lifecycle_class . '::_drop_tables_if_exist' } = sub {
         my ( $self, @table_names ) = @_;
         @dropped_tables = @table_names;
         return 1;
     };
 
-    ok( $plugin->uninstall, 'Uninstall succeeds' );
+    ok( $schema_lifecycle->uninstall, 'Uninstall succeeds' );
     is_deeply(
         \@dropped_tables,
         [

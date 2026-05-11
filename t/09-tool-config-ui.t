@@ -20,6 +20,7 @@ sub read_file {
 }
 
 my $plugin_pm = read_file('Koha/Plugin/Fi/KohaSuomi/Editx.pm');
+my $schema_lifecycle_pm = read_file('Koha/Plugin/Fi/KohaSuomi/Editx/SchemaLifecycle.pm');
 my $configure = read_file('Koha/Plugin/Fi/KohaSuomi/Editx/configure.tt');
 my $tool = read_file('Koha/Plugin/Fi/KohaSuomi/Editx/tool.tt');
 my $breadcrumbs = read_file('Koha/Plugin/Fi/KohaSuomi/Editx/includes/editx_breadcrumbs.inc');
@@ -30,7 +31,7 @@ my $update_sql = read_file('installation/update_tables.sql');
 my $fetch_sftp = read_file('Koha/Plugin/Fi/KohaSuomi/Editx/cronjobs/fetch_editx_sftp.sh');
 my $order_processor = read_file('Koha/Plugin/Fi/KohaSuomi/Editx/Procurement/OrderProcessor.pm');
 my $unofficial_instance_env = 'KOHA' . '_INSTANCE';
-my ($uninstall_pm) = $plugin_pm =~ /(sub\s+uninstall\(\)\s*\{[\s\S]+?\n\})\n\nsub\s+tool/;
+my ($uninstall_pm) = $schema_lifecycle_pm =~ /(sub\s+uninstall\s*\{[\s\S]+?\n\})\n\nsub\s+_install_or_upgrade_tables/;
 
 like( $plugin_pm, qr{our\s+\$VERSION\s*=\s*"0\.0\.2";}, 'Plugin version is hardcoded in source instead of kept as a release placeholder' );
 unlike( $plugin_pm, qr{\{VERSION\}}, 'Plugin source does not expose a raw version placeholder' );
@@ -71,12 +72,15 @@ like( $plugin_pm, qr{print\s+\$cgi->redirect\(\s*\$self->_manual_stage_url\(\s*\
 like( $plugin_pm, qr{recommended_import_paths}, 'Configure template receives recommended import path examples' );
 like( $plugin_pm, qr{substr\( \$message, 0, 397 \).*substr\( \$message, -398 \)}s, 'Long manual sync diagnostics preserve both beginning and end of captured output' );
 like( $plugin_pm, qr{output_html\(\s*\$template->output\(\),\s*undef,\s*undef,\s*undef,\s*Koha::Plugin::Fi::KohaSuomi::Editx::FlashCookie->merge_cookies}s, 'Configure page passes flash cookies as output_html cookies, not extra options' );
-like( $plugin_pm, qr{sub\s+install\(\)[\s\S]+_install_or_upgrade_tables\( migrate_legacy => 0 \)}, 'Plugin install creates qualified tables without legacy migration' );
-like( $plugin_pm, qr{sub\s+upgrade[\s\S]+_install_or_upgrade_tables\( migrate_legacy => 1 \)}, 'Plugin upgrade enables legacy table migration' );
+like( $plugin_pm, qr{use Koha::Plugin::Fi::KohaSuomi::Editx::SchemaLifecycle;}, 'Plugin loads the schema lifecycle service' );
+like( $plugin_pm, qr{sub\s+install\(\)[\s\S]+_schema_lifecycle->install}, 'Plugin install delegates schema work to SchemaLifecycle' );
+like( $plugin_pm, qr{sub\s+upgrade[\s\S]+_schema_lifecycle->upgrade}, 'Plugin upgrade delegates schema work to SchemaLifecycle' );
+like( $schema_lifecycle_pm, qr{sub\s+install\s*\{[\s\S]+_install_or_upgrade_tables\( migrate_legacy => 0 \)}, 'SchemaLifecycle install creates qualified tables without legacy migration' );
+like( $schema_lifecycle_pm, qr{sub\s+upgrade\s*\{[\s\S]+_install_or_upgrade_tables\( migrate_legacy => 1 \)}, 'SchemaLifecycle upgrade enables legacy table migration' );
 unlike( $plugin_pm, qr{sub\s+tool\s*\{[\s\S]+?_install_or_upgrade_tables\(\)[\s\S]+?\n\}}, 'Tool page does not run plugin table setup outside lifecycle hooks' );
 unlike( $plugin_pm, qr{sub\s+configure\s*\{[\s\S]+?_install_or_upgrade_tables\(\)[\s\S]+?\n\}}, 'Configure page does not run plugin table setup outside lifecycle hooks' );
-unlike( $plugin_pm, qr{_migrate_legacy_procurement_file_table}, 'Plugin upgrade no longer migrates the obsolete file-hash import ledger' );
-like( $uninstall_pm, qr{get_qualified_table_name\('sequences'\)[\s\S]+get_qualified_table_name\('map_productform'\)}, 'Plugin uninstall removes current qualified plugin tables' );
+unlike( $plugin_pm . $schema_lifecycle_pm, qr{_migrate_legacy_procurement_file_table}, 'Plugin upgrade no longer migrates the obsolete file-hash import ledger' );
+like( $uninstall_pm, qr{_qualified_table_name\('sequences'\)[\s\S]+_qualified_table_name\('map_productform'\)}, 'Plugin uninstall removes current qualified plugin tables' );
 unlike( $uninstall_pm, qr{editx_sequences|editx_map_productform|editx_procurement_file|procurement_file|qw\(|'procurement_file'}, 'Plugin uninstall does not remove legacy or obsolete table names' );
 like( $install_sql, qr{CREATE TABLE IF NOT EXISTS `koha_plugin_fi_kohasuomi_editx_map_productform`}, 'Install SQL still creates the ProductForm mapping table' );
 unlike( $install_sql, qr{RENAME\s+TABLE}i, 'Install SQL does not rename tables' );
