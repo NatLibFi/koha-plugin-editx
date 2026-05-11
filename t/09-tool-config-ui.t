@@ -128,6 +128,7 @@ like( $configure, qr{URLSearchParams[\s\S]+productform_focus[\s\S]+function\s+sc
 like( $plugin_pm, qr{productform_focus\s*=>\s*\$rows->\[0\]->\{onix_code\}}, 'ProductForm row saves redirect with the edited ONIX code as table focus' );
 like( $configure, qr{enctype="multipart/form-data"}, 'Configure form can upload ProductForm mapping CSV files' );
 like( $configure, qr{id="mapping_csv_file"[\s\S]+name="import_mapping_csv"[\s\S]+name="export_mapping_csv"}, 'Configure page imports ProductForm mappings from a CSV file and exports them by POST' );
+like( $configure, qr{class="editx-csv-controls"[\s\S]+id="mapping_csv_file"[\s\S]+name="import_mapping_csv"[\s\S]+name="export_mapping_csv"}, 'Configure page keeps ProductForm CSV import and export controls on the file input row' );
 unlike( $configure, qr{id="mapping_csv_export"}, 'Configure page does not render the ProductForm mapping CSV in the HTML body' );
 like( $configure, qr{class="editx-code-example editx-code-example-watermark"\s+data-editx-watermark="Example"}, 'CSV import/export sample is explicitly marked as an example' );
 like( $configure, qr{data-editx-partial-table="1"[\s\S]+editx-table-expander[\s\S]+editx-partial-table-toggle}, 'ProductForm mapping table uses a centered expander control' );
@@ -154,6 +155,8 @@ like( $css, qr{\.editx-runtime-log-toolbar\s*\{[\s\S]+width:\s*100%;}, 'CSS alig
 like( $css, qr{\.editx-config-form textarea\.editx-runtime-log-tail\s*\{[\s\S]+max-width:\s*100%;[\s\S]+width:\s*100%;}, 'CSS overrides the generic textarea cap for the runtime log textarea' );
 like( $css, qr{\.editx-config-form textarea\.editx-runtime-log-tail\.editx-runtime-log-tail-wrapped\s*\{[\s\S]+white-space:\s*pre-wrap;}, 'CSS keeps runtime log wrapping stronger than the base textarea rule' );
 like( $css, qr{\.editx-partial-table-wrap}, 'CSS supports partially collapsed table editors' );
+like( $css, qr{\.editx-productform-table tfoot td\s*\{[\s\S]+background:\s*#eef1f3;}, 'CSS gives the ProductForm table editor footer a stronger gray background' );
+like( $css, qr{\.editx-csv-controls\s*\{[\s\S]+display:\s*flex;[\s\S]+flex-wrap:\s*wrap;}, 'CSS keeps ProductForm CSV controls in a compact responsive row' );
 like( $css, qr{\.editx-import-folders-table\s*\{[\s\S]+display:\s*inline-table;[\s\S]+width:\s*max-content;}, 'CSS keeps the import folders table shrink-wrapped to its content' );
 like( $css, qr{\.editx-sftp-sources-table\s*\{[\s\S]+min-width:\s*58rem;[\s\S]+table-layout:\s*fixed;[\s\S]+width:\s*100%;}, 'CSS gives the two-line SFTP source table a compact fixed layout' );
 like( $css, qr{\.editx-sftp-remote-pattern\s*\{[\s\S]+grid-template-columns:\s*minmax\(0, 1fr\) minmax\(6rem, 8rem\);}, 'CSS keeps remote folder and pattern compact inside one SFTP source cell' );

@@ -375,7 +375,7 @@
 }
 
 .editx-productform-table tfoot td {
-    background: #f8faf9;
+    background: #eef1f3;
     border-top: 2px solid var(--bs-border-color, #d9dee3);
     bottom: 0;
     position: sticky;
@@ -399,6 +399,18 @@
 
 .editx-productform-edit-cancel.is-hidden {
     display: none;
+}
+
+.editx-csv-controls {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    margin: 0.35rem 0;
+}
+
+.editx-csv-controls label {
+    margin: 0;
 }
 
 .editx-table-expander {

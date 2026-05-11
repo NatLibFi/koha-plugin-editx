@@ -1005,6 +1005,105 @@ CSV
     like( $message_text, qr{Line 4 repeats ONIX code 'AA'; the later value will win\.}, 'Parser warns about duplicate ONIX codes' );
 };
 
+subtest 'ProductForm CSV parser blocks malformed imports' => sub {
+    no strict 'refs';
+    no warnings qw(once redefine);
+    local *{ $plugin_class . '::_itemtypes' } = sub { return [qw(BK ALT)]; };
+
+    my ( $rows, $messages, $has_blocking_errors ) = $plugin->_parse_productform_mapping_csv(<<'CSV');
+onix_code,productform,productform_alternative
+NULL,BK,ALT
+AA,BK
+CSV
+
+    my $message_text = _message_text($messages);
+
+    ok( $has_blocking_errors, 'Malformed ProductForm CSV rows block import' );
+    is_deeply( $rows, [], 'Malformed ProductForm CSV rows are not returned for saving' );
+    like( $message_text, qr{Line 2 has no ONIX code\.}, 'Parser reports missing ONIX code' );
+    like( $message_text, qr{Line 3 has 2 columns; expected 3\.}, 'Parser reports wrong column count' );
+
+    ( $rows, $messages, $has_blocking_errors ) = $plugin->_parse_productform_mapping_csv("onix_code,productform,productform_alternative\n");
+
+    ok( $has_blocking_errors, 'Header-only ProductForm CSV blocks import' );
+    like( _message_text($messages), qr{No product form mappings found in CSV\.}, 'Parser reports an empty CSV import' );
+};
+
+subtest 'ProductForm row add rejects an existing ONIX code' => sub {
+    no strict 'refs';
+    no warnings qw(once redefine);
+
+    my $dbh = KohaSuomi::Editx::TestDbh->new( counts => [1] );
+    local *C4::Context::dbh = sub { return $dbh; };
+    local *{ $plugin_class . '::get_qualified_table_name' } = sub {
+        my ( $self, $table_name ) = @_;
+        return "koha_plugin_fi_kohasuomi_editx_$table_name";
+    };
+
+    my $messages = $plugin->_add_productform_mapping(
+        {
+            onix_code               => 'AA',
+            productform             => 'BK',
+            productform_alternative => undef,
+        }
+    );
+
+    like( _message_text($messages), qr{ONIX code 'AA' already exists}, 'Adding a duplicate ONIX code returns a user-facing error' );
+    is_deeply( $dbh->{prepared}, undef, 'Duplicate add does not prepare an insert' );
+    is_deeply( $dbh->{executed}, undef, 'Duplicate add does not execute an insert' );
+};
+
+subtest 'ProductForm row add inserts a new ONIX code' => sub {
+    no strict 'refs';
+    no warnings qw(once redefine);
+
+    my $dbh = KohaSuomi::Editx::TestDbh->new( counts => [0] );
+    local *C4::Context::dbh = sub { return $dbh; };
+    local *{ $plugin_class . '::get_qualified_table_name' } = sub {
+        my ( $self, $table_name ) = @_;
+        return "koha_plugin_fi_kohasuomi_editx_$table_name";
+    };
+
+    my $messages = $plugin->_add_productform_mapping(
+        {
+            onix_code               => 'AA',
+            productform             => 'BK',
+            productform_alternative => undef,
+        }
+    );
+    my $sql = join "\n", @{ $dbh->{prepared} || [] };
+
+    is( _message_text($messages), '', 'Adding a new ProductForm row succeeds without warnings' );
+    like( $sql, qr{INSERT INTO `koha_plugin_fi_kohasuomi_editx_map_productform` \(onix_code, productform, productform_alternative\)\s+VALUES \(\?, \?, \?\)}s, 'Add inserts the new ProductForm mapping row' );
+    unlike( $sql, qr{ON DUPLICATE KEY UPDATE}, 'Add does not upsert an existing ProductForm mapping row' );
+    is_deeply( $dbh->{executed}->[0], [ $dbh->{prepared}->[0], 'AA', 'BK', undef ], 'Add binds the new mapping values' );
+};
+
+subtest 'ProductForm row update rejects changing ONIX code to an existing row' => sub {
+    no strict 'refs';
+    no warnings qw(once redefine);
+
+    my $dbh = KohaSuomi::Editx::TestDbh->new( counts => [1] );
+    local *C4::Context::dbh = sub { return $dbh; };
+    local *{ $plugin_class . '::get_qualified_table_name' } = sub {
+        my ( $self, $table_name ) = @_;
+        return "koha_plugin_fi_kohasuomi_editx_$table_name";
+    };
+
+    my $messages = $plugin->_update_productform_mapping(
+        'AA',
+        {
+            onix_code               => 'BB',
+            productform             => 'BK',
+            productform_alternative => undef,
+        }
+    );
+
+    like( _message_text($messages), qr{ONIX code 'BB' already exists}, 'Updating a row to an existing ONIX code returns a user-facing error' );
+    is_deeply( $dbh->{do_calls}, [], 'Conflicting edit does not update a row' );
+    is_deeply( $dbh->{txn_calls}, undef, 'Conflicting edit does not start a transaction' );
+};
+
 subtest 'ProductForm row update does not delete before saving' => sub {
     no strict 'refs';
     no warnings qw(once redefine);

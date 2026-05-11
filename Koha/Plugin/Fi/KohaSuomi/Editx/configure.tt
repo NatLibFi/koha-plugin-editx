@@ -360,21 +360,23 @@
                         </div>
                         <details class="editx-example">
                             <summary>CSV import and export</summary>
-                            <label for="mapping_csv_file">Import CSV</label>
-                            <input id="mapping_csv_file"
-                                   name="mapping_csv_file"
-                                   type="file"
-                                   accept=".csv,text/csv" />
+                            <div class="editx-csv-controls">
+                                <label for="mapping_csv_file">Import CSV</label>
+                                <input id="mapping_csv_file"
+                                       name="mapping_csv_file"
+                                       type="file"
+                                       accept=".csv,text/csv" />
+                                <button type="submit"
+                                        class="btn btn-default btn-sm"
+                                        formaction="[% configure_href | html %]#ProductFormMappings"
+                                        name="import_mapping_csv"
+                                        value="1">Import CSV</button>
+                                <button type="submit"
+                                        class="btn btn-default btn-sm"
+                                        name="export_mapping_csv"
+                                        value="1">Export CSV</button>
+                            </div>
                             <div class="hint">Import replaces the current ProductForm mapping table.</div>
-                            <button type="submit"
-                                    class="btn btn-default btn-sm"
-                                    formaction="[% configure_href | html %]#ProductFormMappings"
-                                    name="import_mapping_csv"
-                                    value="1">Import CSV</button>
-                            <button type="submit"
-                                    class="btn btn-default btn-sm"
-                                    name="export_mapping_csv"
-                                    value="1">Export CSV</button>
                             <pre class="editx-code-example editx-code-example-watermark" data-editx-watermark="Example"><code>onix_code,productform,productform_alternative
 AA,YLEIS,
 BB,ESINE,

@@ -1724,7 +1724,7 @@ sub _handle_productform_mapping_action {
 
     my $save_messages = $cgi->param('update_mapping_row')
         ? $self->_update_productform_mapping( $original_mapping_onix_code, $rows->[0] )
-        : $self->_upsert_productform_mapping( $rows->[0] );
+        : $self->_add_productform_mapping( $rows->[0] );
     push @{$messages}, @{$save_messages};
     if ( @{$save_messages} ) {
         $self->_output_configure_page(
@@ -2583,20 +2583,25 @@ sub _save_productform_mappings {
     return \@messages;
 }
 
-sub _upsert_productform_mapping {
+sub _add_productform_mapping {
     my ( $self, $row ) = @_;
 
     my $dbh = C4::Context->dbh;
     my $map_productform_table = $self->_quote_identifier( $self->get_qualified_table_name('map_productform') );
     my @messages;
 
+    if ( $self->_productform_mapping_exists( $row->{onix_code} ) ) {
+        return [
+            $self->_configure_message(
+                error => "ProductForm mapping for ONIX code '$row->{onix_code}' already exists. Edit that row instead."
+            )
+        ];
+    }
+
     my $saved = eval {
         my $sth = $dbh->prepare( "
             INSERT INTO $map_productform_table (onix_code, productform, productform_alternative)
             VALUES (?, ?, ?)
-            ON DUPLICATE KEY UPDATE
-                productform = VALUES(productform),
-                productform_alternative = VALUES(productform_alternative)
         " );
         $sth->execute( $row->{onix_code}, $row->{productform}, $row->{productform_alternative} ) or die $dbh->errstr;
         1;
@@ -2620,6 +2625,14 @@ sub _update_productform_mapping {
     my $dbh = C4::Context->dbh;
     my $map_productform_table = $self->_quote_identifier( $self->get_qualified_table_name('map_productform') );
     my @messages;
+
+    if ( $original_onix_code ne $row->{onix_code} && $self->_productform_mapping_exists( $row->{onix_code} ) ) {
+        return [
+            $self->_configure_message(
+                error => "ProductForm mapping for ONIX code '$row->{onix_code}' already exists. Choose a different ONIX code or edit that row."
+            )
+        ];
+    }
 
     my $saved = eval {
         $dbh->begin_work;
@@ -2653,6 +2666,21 @@ sub _update_productform_mapping {
     }
 
     return \@messages;
+}
+
+sub _productform_mapping_exists {
+    my ( $self, $onix_code ) = @_;
+
+    return 0 unless defined $onix_code && length $onix_code;
+
+    my $map_productform_table = $self->_quote_identifier( $self->get_qualified_table_name('map_productform') );
+    my ($count) = C4::Context->dbh->selectrow_array(
+        "SELECT COUNT(*) FROM $map_productform_table WHERE onix_code = ?",
+        undef,
+        $onix_code
+    );
+
+    return $count ? 1 : 0;
 }
 
 sub _delete_productform_mapping {
