@@ -5,6 +5,7 @@ use Modern::Perl;
 use base qw(Koha::Plugins::Base);
 ## We will also need to include any Koha libraries we want to access
 use File::Basename qw(basename);
+use File::Copy qw(copy);
 use File::Path qw(make_path);
 use File::Spec;
 use File::Temp qw(tempfile tempdir);
@@ -451,23 +452,23 @@ sub _manual_sync_confirmation {
     my ( $procurement_messages, $has_procurement_errors ) = $self->_validate_procurement_settings( $procurement_settings, 1 );
     push @messages, @$procurement_messages;
 
-    my ( $sources, $sftp_messages, $has_sftp_errors ) = $self->_normalize_sftp_sources( $self->_sftp_sources );
-    push @messages, @$sftp_messages;
+    my ( $sources, $source_messages, $has_source_errors ) = $self->_manual_stage_sources();
+    push @messages, @$source_messages;
     if ( !@$sources ) {
-        push @messages, $self->_configure_message( error => 'No EDItX SFTP sources are configured.' );
-        $has_sftp_errors = 1;
+        push @messages, $self->_configure_message( error => 'No EDItX intake sources are configured.' );
+        $has_source_errors = 1;
     }
     if ( $action eq 'stage_check_remote' ) {
-        my ( $selected_sources, $source_messages, $has_source_errors ) =
-            $self->_manual_selected_sftp_sources( $cgi, $sources, require_selection => 1 );
-        push @messages, @$source_messages;
-        $sources = $selected_sources if !$has_source_errors;
-        $has_sftp_errors ||= $has_source_errors;
+        my ( $selected_sources, $selection_messages, $has_selection_errors ) =
+            $self->_manual_selected_sources( $cgi, $sources, require_selection => 1 );
+        push @messages, @$selection_messages;
+        $sources = $selected_sources if !$has_selection_errors;
+        $has_source_errors ||= $has_selection_errors;
     }
 
-    return ( \@messages, undef ) if $has_procurement_errors || $has_sftp_errors;
+    return ( \@messages, undef ) if $has_procurement_errors || $has_source_errors;
 
-    my @sources = map {
+    my @sftp_sources = map {
         my $local_dir = $_->{local_dir} || $procurement_settings->{import_tmp_path};
         {
             id             => $_->{id},
@@ -483,7 +484,18 @@ sub _manual_sync_confirmation {
             remote_archive_dir => $_->{remote_archive_dir},
             known_hosts_file   => $_->{known_hosts_file},
         }
-    } @$sources;
+    } grep { $_->{transport} eq 'sftp' } @$sources;
+
+    my @folder_sources = map {
+        {
+            id                => $_->{id},
+            local_dir         => $_->{local_dir},
+            pattern           => $_->{pattern},
+            minimum_age_seconds => $_->{minimum_age_seconds},
+            success_action    => $_->{success_action},
+            local_archive_dir => $_->{local_archive_dir},
+        }
+    } grep { $_->{transport} eq 'folder' } @$sources;
 
     my @folders = (
         { label => 'Temporary download folder', path => $procurement_settings->{import_tmp_path} },
@@ -496,14 +508,16 @@ sub _manual_sync_confirmation {
     return (
         \@messages,
         {
-            sources      => \@sources,
-            folders      => \@folders,
-            action       => $action,
-            title        => $action eq 'stage_check_remote' ? 'Confirm staged remote check' : 'Confirm manual download and import',
-            description  => $action eq 'stage_check_remote' ? 'Review the saved configuration before checking remote EDItX files.' : 'Review the saved configuration that will be used for this run.',
-            op           => $action eq 'stage_check_remote' ? 'cud-stage-check-remote' : 'cud-run-sync-now',
-            input_name   => $action eq 'stage_check_remote' ? 'stage_check_remote' : 'run_sync_now',
-            button_label => $action eq 'stage_check_remote' ? 'Confirm and check remote files' : 'Confirm and run import',
+            sources        => $sources,
+            sftp_sources   => \@sftp_sources,
+            folder_sources => \@folder_sources,
+            folders        => \@folders,
+            action         => $action,
+            title          => $action eq 'stage_check_remote' ? 'Confirm staged source check' : 'Confirm manual intake and import',
+            description    => $action eq 'stage_check_remote' ? 'Review the saved configuration before checking EDItX source files.' : 'Review the saved configuration that will be used for this run.',
+            op             => $action eq 'stage_check_remote' ? 'cud-stage-check-remote' : 'cud-run-sync-now',
+            input_name     => $action eq 'stage_check_remote' ? 'stage_check_remote' : 'run_sync_now',
+            button_label   => $action eq 'stage_check_remote' ? 'Confirm and check source files' : 'Confirm and run import',
         }
     );
 }
@@ -513,7 +527,7 @@ sub _manual_stage_check_remote {
 
     my @messages;
     if ( !$self->_csrf_token_valid($cgi) ) {
-        push @messages, $self->_configure_message( error => 'Remote EDItX files were not checked because the security token was invalid. Reload the page and try again.' );
+        push @messages, $self->_configure_message( error => 'EDItX source files were not checked because the security token was invalid. Reload the page and try again.' );
         return ( \@messages, undef );
     }
 
@@ -523,33 +537,34 @@ sub _manual_stage_check_remote {
 
     my @files;
     for my $source (@$sources) {
-        my $listed = eval { $self->_manual_stage_list_sftp_source( $source, $procurement_settings ) };
+        my $listed = eval { $self->_manual_stage_list_source( $source, $procurement_settings ) };
         if ( my $error = $@ ) {
-            push @messages, $self->_configure_message( error => "Could not check remote files for source '$source->{id}': " . $self->_compact_message($error) );
+            push @messages, $self->_configure_message( error => "Could not check EDItX files for source '$source->{id}': " . $self->_compact_message($error) );
             next;
         }
         push @files, @{ $listed->{files} };
         if ( !@{ $listed->{files} } ) {
-            my $detail = "No remote EDItX files were parsed for source '$source->{id}' in $source->{remote_dir} using pattern '$source->{pattern}'.";
-            if ( my $operation = $self->_compact_message( $listed->{sftp_operation} ) ) {
-                $detail .= " SFTP operation: $operation.";
+            my $source_location = $source->{transport} eq 'sftp' ? $source->{remote_dir} : $source->{local_dir};
+            my $detail = "No EDItX files were parsed for source '$source->{id}' in $source_location using pattern '$source->{pattern}'.";
+            if ( my $operation = $self->_compact_message( $listed->{source_operation} ) ) {
+                $detail .= " Source operation: $operation.";
             }
-            if ( my $summary = $self->_compact_message( $listed->{sftp_output} ) ) {
-                $detail .= " SFTP output: $summary";
+            if ( my $summary = $self->_compact_message( $listed->{source_output} ) ) {
+                $detail .= " Source output: $summary";
             } else {
-                $detail .= " SFTP returned no listing details.";
+                $detail .= " Source returned no listing details.";
             }
             push @messages, $self->_configure_message( warning => $detail );
         }
     }
 
-    push @messages, $self->_configure_message( info => @files ? 'Remote EDItX files were checked. Select the files to download.' : 'No remote EDItX files matched the configured sources.' );
+    push @messages, $self->_configure_message( info => @files ? 'EDItX source files were checked. Select the files to stage.' : 'No EDItX files matched the configured sources.' );
 
     return (
         \@messages,
         {
-            step  => 'remote',
-            title => 'Stage 1: Check remote files',
+            step  => 'source',
+            title => 'Stage 1: Check source files',
             files => \@files,
         }
     );
@@ -561,20 +576,20 @@ sub _manual_stage_resume {
     my @messages;
     my $run_id = scalar $cgi->param('manual_stage_run_id') // '';
     if ( !$self->_manual_stage_valid_run_id($run_id) ) {
-        push @messages, $self->_configure_message( warning => 'The staged EDItX file list is no longer available. Check remote files again.' );
+        push @messages, $self->_configure_message( warning => 'The staged EDItX file list is no longer available. Check source files again.' );
         return ( \@messages, undef, undef, undef );
     }
 
     my $manifest = eval { $self->_manual_stage_load_manifest($run_id) };
     if ( my $error = $@ ) {
-        push @messages, $self->_configure_message( warning => 'The staged EDItX file list could not be loaded. Check remote files again. Details: ' . $self->_compact_message($error) );
+        push @messages, $self->_configure_message( warning => 'The staged EDItX file list could not be loaded. Check source files again. Details: ' . $self->_compact_message($error) );
         return ( \@messages, undef, undef, undef );
     }
 
     my $stage = $self->_manual_stage_manifest_for_template($manifest);
     my $status = scalar $cgi->param('stage_status') // '';
     if ( $status eq 'downloaded' ) {
-        push @messages, $self->_configure_message( success => 'Selected EDItX files were downloaded for preview. Remote files were not changed.' );
+        push @messages, $self->_configure_message( success => 'Selected EDItX files were staged for preview. Source files were not changed.' );
     } elsif ( $status eq 'imported' && $manifest->{import_result} ) {
         # The imported stage renders its own result summary and skipped-file details.
     }
@@ -588,13 +603,13 @@ sub _manual_stage_download_selected {
 
     my @messages;
     if ( !$self->_csrf_token_valid($cgi) ) {
-        push @messages, $self->_configure_message( error => 'Selected EDItX files were not downloaded because the security token was invalid. Reload the page and try again.' );
+        push @messages, $self->_configure_message( error => 'Selected EDItX files were not staged because the security token was invalid. Reload the page and try again.' );
         return ( \@messages, undef );
     }
 
-    my @selected = $cgi->multi_param('remote_file');
+    my @selected = $cgi->multi_param('source_file');
     if ( !@selected ) {
-        push @messages, $self->_configure_message( warning => 'Select at least one remote EDItX file to download.' );
+        push @messages, $self->_configure_message( warning => 'Select at least one EDItX source file to stage.' );
         return ( \@messages, undef );
     }
 
@@ -605,9 +620,9 @@ sub _manual_stage_download_selected {
     my %sources_by_id = map { $_->{id} => $_ } @$sources;
     my %selected_by_source;
     for my $key (@selected) {
-        my ( $source_id, $filename ) = $self->_manual_stage_parse_remote_key($key);
+        my ( $source_id, $filename ) = $self->_manual_stage_parse_source_key($key);
         if ( !$source_id || !$filename || !$sources_by_id{$source_id} || !$self->_manual_stage_safe_filename($filename) ) {
-            push @messages, $self->_configure_message( error => 'One selected remote EDItX file was invalid. Refresh the file list and try again.' );
+            push @messages, $self->_configure_message( error => 'One selected EDItX source file was invalid. Refresh the file list and try again.' );
             return ( \@messages, undef );
         }
         push @{ $selected_by_source{$source_id} }, $filename;
@@ -619,7 +634,7 @@ sub _manual_stage_download_selected {
     for my $source_id ( sort keys %selected_by_source ) {
         my $source = $sources_by_id{$source_id};
         my $downloaded = eval {
-            $self->_manual_stage_download_sftp_files(
+            $self->_manual_stage_copy_source_files(
                 $source,
                 $procurement_settings,
                 $run_dir,
@@ -627,14 +642,14 @@ sub _manual_stage_download_selected {
             );
         };
         if ( my $error = $@ ) {
-            push @messages, $self->_configure_message( error => "Could not download EDItX files from source '$source_id': " . $self->_compact_message($error) );
+            push @messages, $self->_configure_message( error => "Could not stage EDItX files from source '$source_id': " . $self->_compact_message($error) );
             next;
         }
         push @downloaded, @$downloaded;
     }
 
     if ( !@downloaded ) {
-        push @messages, $self->_configure_message( error => 'No selected EDItX files were downloaded.' );
+        push @messages, $self->_configure_message( error => 'No selected EDItX files were staged.' );
         return ( \@messages, undef );
     }
 
@@ -649,13 +664,13 @@ sub _manual_stage_download_selected {
     };
     $self->_manual_stage_save_manifest($manifest);
 
-    push @messages, $self->_configure_message( success => 'Selected EDItX files were downloaded for preview. Remote files were not changed.' );
+    push @messages, $self->_configure_message( success => 'Selected EDItX files were staged for preview. Source files were not changed.' );
 
     return (
         \@messages,
         {
             step    => 'downloaded',
-            title   => 'Stage 2: Preview downloaded files',
+            title   => 'Stage 2: Preview staged files',
             run_id  => $run_id,
             files   => \@files,
             summary => $self->_manual_stage_summary(\@files),
@@ -675,25 +690,25 @@ sub _manual_stage_import_selected {
     my $run_id = scalar $cgi->param('manual_stage_run_id') // '';
     my @selected_ids = $cgi->multi_param('stage_file');
     if ( !$self->_manual_stage_valid_run_id($run_id) ) {
-        push @messages, $self->_configure_message( warning => 'The staged EDItX file list is no longer available. Check remote files again.' );
+        push @messages, $self->_configure_message( warning => 'The staged EDItX file list is no longer available. Check source files again.' );
         return ( \@messages, undef, undef );
     }
 
     my $manifest = eval { $self->_manual_stage_load_manifest($run_id) };
     if ( my $error = $@ ) {
-        push @messages, $self->_configure_message( warning => 'The staged EDItX file list could not be loaded. Check remote files again. Details: ' . $self->_compact_message($error) );
+        push @messages, $self->_configure_message( warning => 'The staged EDItX file list could not be loaded. Check source files again. Details: ' . $self->_compact_message($error) );
         return ( \@messages, undef, undef );
     }
 
     if ( !@selected_ids ) {
-        push @messages, $self->_configure_message( warning => 'Select at least one downloaded EDItX file to import.' );
+        push @messages, $self->_configure_message( warning => 'Select at least one staged EDItX file to import.' );
         return ( \@messages, $self->_manual_stage_manifest_for_template($manifest), undef );
     }
 
     my %selected = map { $_ => 1 } @selected_ids;
     my @files = grep { $selected{ $_->{id} } } @{ $manifest->{files} || [] };
     if ( !@files ) {
-        push @messages, $self->_configure_message( warning => 'Selected staged EDItX files were not found. Refresh the remote file list and try again.' );
+        push @messages, $self->_configure_message( warning => 'Selected staged EDItX files were not found. Refresh the source file list and try again.' );
         return ( \@messages, $self->_manual_stage_manifest_for_template($manifest), undef );
     }
 
@@ -835,24 +850,43 @@ sub _manual_stage_prerequisites {
     my ( $procurement_messages, $has_procurement_errors ) = $self->_validate_procurement_settings( $procurement_settings, 1 );
     push @messages, @$procurement_messages;
 
-    my ( $sources, $sftp_messages, $has_sftp_errors ) = $self->_normalize_sftp_sources( $self->_sftp_sources );
-    push @messages, @$sftp_messages;
+    my ( $sources, $source_messages, $has_source_errors ) = $self->_manual_stage_sources();
+    push @messages, @$source_messages;
     if ( !@$sources ) {
-        push @messages, $self->_configure_message( error => 'No EDItX SFTP sources are configured.' );
-        $has_sftp_errors = 1;
+        push @messages, $self->_configure_message( error => 'No EDItX intake sources are configured.' );
+        $has_source_errors = 1;
     }
     if ($cgi) {
-        my ( $selected_sources, $source_messages, $has_source_errors ) =
-            $self->_manual_selected_sftp_sources( $cgi, $sources, require_selection => 0 );
-        push @messages, @$source_messages;
-        $sources = $selected_sources if !$has_source_errors;
-        $has_sftp_errors ||= $has_source_errors;
+        my ( $selected_sources, $selection_messages, $has_selection_errors ) =
+            $self->_manual_selected_sources( $cgi, $sources, require_selection => 0 );
+        push @messages, @$selection_messages;
+        $sources = $selected_sources if !$has_selection_errors;
+        $has_source_errors ||= $has_selection_errors;
     }
 
-    return ( $procurement_settings, $sources, \@messages, $has_procurement_errors || $has_sftp_errors ? 1 : 0 );
+    return ( $procurement_settings, $sources, \@messages, $has_procurement_errors || $has_source_errors ? 1 : 0 );
 }
 
-sub _manual_selected_sftp_sources {
+sub _manual_stage_sources {
+    my ($self) = @_;
+
+    my @messages;
+    my ( $sftp_sources, $sftp_messages, $has_sftp_errors ) = $self->_normalize_sftp_sources( $self->_sftp_sources );
+    my ( $folder_sources, $folder_messages, $has_folder_errors ) = $self->_normalize_folder_sources( $self->_folder_sources );
+    push @messages, @$sftp_messages;
+    push @messages, @$folder_messages;
+
+    for my $source (@$sftp_sources) {
+        $source->{transport} = 'sftp';
+    }
+    for my $source (@$folder_sources) {
+        $source->{transport} = 'folder';
+    }
+
+    return ( [ @$sftp_sources, @$folder_sources ], \@messages, $has_sftp_errors || $has_folder_errors ? 1 : 0 );
+}
+
+sub _manual_selected_sources {
     my ( $self, $cgi, $sources, %params ) = @_;
 
     my @messages;
@@ -860,7 +894,7 @@ sub _manual_selected_sftp_sources {
     if ( !@selected_ids ) {
         return ( $sources, \@messages, 0 ) if !$params{require_selection};
 
-        push @messages, $self->_configure_message( warning => 'Select at least one SFTP source to check.' );
+        push @messages, $self->_configure_message( warning => 'Select at least one EDItX source to check.' );
         return ( [], \@messages, 1 );
     }
 
@@ -871,7 +905,7 @@ sub _manual_selected_sftp_sources {
     for my $source_id (@selected_ids) {
         next if $seen{$source_id}++;
         if ( !$sources_by_id{$source_id} ) {
-            push @messages, $self->_configure_message( error => "Selected SFTP source '$source_id' is no longer configured." );
+            push @messages, $self->_configure_message( error => "Selected EDItX source '$source_id' is no longer configured." );
             $has_errors = 1;
             next;
         }
@@ -879,7 +913,7 @@ sub _manual_selected_sftp_sources {
     }
 
     if ( !@selected_sources && !$has_errors ) {
-        push @messages, $self->_configure_message( warning => 'Select at least one SFTP source to check.' );
+        push @messages, $self->_configure_message( warning => 'Select at least one EDItX source to check.' );
         $has_errors = 1;
     }
 
@@ -889,15 +923,74 @@ sub _manual_selected_sftp_sources {
 sub _manual_stage_source_options {
     my ( $self, $procurement_settings ) = @_;
 
-    my ( $sources ) = $self->_normalize_sftp_sources( $self->_sftp_sources );
+    my ( $sources ) = $self->_manual_stage_sources();
     return [
         map {
             {
-                id     => $_->{id},
-                remote => ( $_->{user} || q{} ) . '@' . ( $_->{host} || q{} ) . ':' . ( $_->{port} || q{} ) . ' ' . ( $_->{remote_dir} || q{} ),
+                id          => $_->{id},
+                transport   => $_->{transport},
+                description => $_->{transport} eq 'sftp'
+                    ? 'SFTP ' . ( $_->{user} || q{} ) . '@' . ( $_->{host} || q{} ) . ':' . ( $_->{port} || q{} ) . ' ' . ( $_->{remote_dir} || q{} )
+                    : 'Folder ' . ( $_->{local_dir} || q{} ) . ' ' . ( $_->{pattern} || q{} ),
             }
         } @$sources
     ];
+}
+
+sub _manual_stage_list_source {
+    my ( $self, $source, $procurement_settings ) = @_;
+
+    return $source->{transport} && $source->{transport} eq 'folder'
+        ? $self->_manual_stage_list_folder_source( $source, $procurement_settings )
+        : $self->_manual_stage_list_sftp_source( $source, $procurement_settings );
+}
+
+sub _manual_stage_list_folder_source {
+    my ( $self, $source, $procurement_settings ) = @_;
+
+    my $pattern = $source->{pattern} || '*.xml';
+    my $source_dir = $source->{local_dir} || '';
+    die "Folder source '$source->{id}' has no local_dir.\n" if !$source_dir;
+    die "Folder source '$source->{id}' local_dir is not a directory: $source_dir\n" if !-d $source_dir;
+
+    opendir my $dh, $source_dir or die "Failed to list folder source '$source->{id}' in $source_dir: $!";
+    my @entries = readdir $dh;
+    closedir $dh;
+
+    my $minimum_age_seconds = $source->{minimum_age_seconds};
+    $minimum_age_seconds = 60 if !defined $minimum_age_seconds || $minimum_age_seconds eq '';
+    my $now = time;
+    my @files;
+    for my $filename ( sort @entries ) {
+        next if !$self->_manual_stage_safe_filename($filename);
+        next if !$self->_manual_stage_filename_matches_pattern( $filename, $pattern );
+
+        my $source_path = File::Spec->catfile( $source_dir, $filename );
+        next if !-f $source_path;
+
+        my @stat = stat($source_path);
+        next if !@stat;
+        my $mtime = $stat[9];
+        next if defined $minimum_age_seconds && $minimum_age_seconds ne '' && $now - $mtime < $minimum_age_seconds;
+
+        push @files, {
+            key          => $self->_manual_stage_source_key( $source->{id}, $filename ),
+            source_id    => $source->{id},
+            transport    => 'folder',
+            filename     => $filename,
+            size         => $stat[7],
+            modified     => strftime( '%Y-%m-%d %H:%M:%S', localtime($mtime) ),
+            local_status => 'source folder',
+            source_dir   => $source_dir,
+            after_action => 'manual keeps source',
+        };
+    }
+
+    return {
+        files            => \@files,
+        source_output    => @entries ? scalar(@entries) . ' folder entr' . ( @entries == 1 ? 'y' : 'ies' ) . ' returned.' : 'Folder source returned an empty directory listing.',
+        source_operation => "folder scan($source_dir)",
+    };
 }
 
 sub _manual_stage_list_sftp_source {
@@ -931,23 +1024,32 @@ sub _manual_stage_list_sftp_source {
         my $local_status = $local_path && -f $local_path ? 'downloaded' : 'remote only';
 
         push @files, {
-            key          => $self->_manual_stage_remote_key( $source->{id}, $filename ),
+            key          => $self->_manual_stage_source_key( $source->{id}, $filename ),
             source_id    => $source->{id},
+            transport    => 'sftp',
             filename     => $filename,
             size         => $size,
             modified     => $modified,
             local_status => $local_status,
             remote_dir   => $source->{remote_dir},
-            after_action => 'manual keeps remote',
+            after_action => 'manual keeps source',
         };
     }
     $sftp->disconnect if $sftp->can('disconnect');
 
     return {
-        files          => \@files,
-        sftp_output    => @$entries ? scalar(@$entries) . ' remote entr' . ( @$entries == 1 ? 'y' : 'ies' ) . ' returned.' : 'Net::SFTP::Foreign returned an empty remote directory listing.',
-        sftp_operation => "Net::SFTP::Foreign ls($remote_dir)",
+        files            => \@files,
+        source_output    => @$entries ? scalar(@$entries) . ' remote entr' . ( @$entries == 1 ? 'y' : 'ies' ) . ' returned.' : 'Net::SFTP::Foreign returned an empty remote directory listing.',
+        source_operation => "Net::SFTP::Foreign ls($remote_dir)",
     };
+}
+
+sub _manual_stage_copy_source_files {
+    my ( $self, $source, $procurement_settings, $run_dir, $filenames ) = @_;
+
+    return $source->{transport} && $source->{transport} eq 'folder'
+        ? $self->_manual_stage_copy_folder_files( $source, $procurement_settings, $run_dir, $filenames )
+        : $self->_manual_stage_download_sftp_files( $source, $procurement_settings, $run_dir, $filenames );
 }
 
 sub _manual_stage_download_sftp_files {
@@ -970,17 +1072,56 @@ sub _manual_stage_download_sftp_files {
         }
         die "Selected EDItX file was not downloaded: $filename\n" if !-f $local_path;
         push @downloaded, {
-            id          => $self->_manual_stage_file_id( $source->{id}, $filename ),
-            source_id   => $source->{id},
-            source_name => $source->{id},
-            remote_file => $filename,
-            filename    => $filename,
-            local_path  => $local_path,
+            id              => $self->_manual_stage_file_id( $source->{id}, $filename ),
+            source_id       => $source->{id},
+            source_name     => $source->{id},
+            transport       => 'sftp',
+            remote_file     => $filename,
+            filename        => $filename,
+            source_path     => $remote_path,
+            local_path      => $local_path,
+            success_action  => $source->{success_action},
+            remote_archive_dir => $source->{remote_archive_dir},
         };
     }
     $sftp->disconnect if $sftp->can('disconnect');
 
     return \@downloaded;
+}
+
+sub _manual_stage_copy_folder_files {
+    my ( $self, $source, $procurement_settings, $run_dir, $filenames ) = @_;
+
+    my $source_dir = $source->{local_dir} || '';
+    die "Folder source '$source->{id}' has no local_dir.\n" if !$source_dir;
+    die "Folder source '$source->{id}' local_dir is not a directory: $source_dir\n" if !-d $source_dir;
+
+    my $target_dir = File::Spec->catdir( $run_dir, $source->{id} );
+    make_path($target_dir) if !-d $target_dir;
+
+    my @copied;
+    for my $filename (@$filenames) {
+        die "Selected EDItX file has an unsafe filename: $filename\n" if !$self->_manual_stage_safe_filename($filename);
+        my $source_path = File::Spec->catfile( $source_dir, $filename );
+        my $local_path = File::Spec->catfile( $target_dir, $filename );
+        die "Selected EDItX folder source file does not exist: $source_path\n" if !-f $source_path;
+        copy( $source_path, $local_path )
+            or die "Selected EDItX folder source file was not copied: $source_path: $!\n";
+        die "Selected EDItX folder source file was not copied: $filename\n" if !-f $local_path;
+        push @copied, {
+            id                => $self->_manual_stage_file_id( $source->{id}, $filename ),
+            source_id         => $source->{id},
+            source_name       => $source->{id},
+            transport         => 'folder',
+            filename          => $filename,
+            source_path       => $source_path,
+            local_path        => $local_path,
+            success_action    => $source->{success_action},
+            local_archive_dir => $source->{local_archive_dir},
+        };
+    }
+
+    return \@copied;
 }
 
 sub _manual_stage_sftp_connect {
@@ -1139,7 +1280,7 @@ sub _manual_stage_mark_batch_duplicates {
 
         if ( my $first = $seen_notice{$ship_notice_number} ) {
             $file->{duplicate_status} = 'duplicate in preview';
-            $file->{duplicate_message} = 'Another downloaded file in this preview has the same ShipNoticeNumber';
+            $file->{duplicate_message} = 'Another staged file in this preview has the same ShipNoticeNumber';
             $file->{duplicate_message} .= ': ' . ( $first->{filename} // 'unknown file' ) . '.';
             $file->{duplicate_import_blocked} = 1;
             next;
@@ -1226,7 +1367,7 @@ sub _manual_stage_manifest_for_template {
 
     return {
         step    => 'downloaded',
-        title   => 'Stage 2: Preview downloaded files',
+        title   => 'Stage 2: Preview staged files',
         run_id  => $manifest->{run_id},
         files   => $files,
         summary => $self->_manual_stage_summary($files),
@@ -1241,13 +1382,13 @@ sub _manual_stage_url {
         . '&stage_status=' . url_escape( $status || '' );
 }
 
-sub _manual_stage_remote_key {
+sub _manual_stage_source_key {
     my ( $self, $source_id, $filename ) = @_;
 
     return $source_id . '::' . $filename;
 }
 
-sub _manual_stage_parse_remote_key {
+sub _manual_stage_parse_source_key {
     my ( $self, $key ) = @_;
 
     return split /::/, $key || '', 2;
@@ -1267,11 +1408,11 @@ sub _manual_stage_safe_filename {
     return defined $filename && $filename ne '' && $filename !~ m{[\\/\0]} && $filename !~ /\A\./;
 }
 
-sub _manual_stage_sftp_glob {
+sub _manual_stage_file_glob {
     my ( $self, $pattern ) = @_;
 
     $pattern //= '*.xml';
-    die "Invalid EDItX SFTP file pattern: $pattern\n" if $pattern !~ /\A[A-Za-z0-9_.?*\[\]-]+\z/;
+    die "Invalid EDItX file pattern: $pattern\n" if $pattern !~ /\A[A-Za-z0-9_.?*\[\]-]+\z/;
     return $pattern;
 }
 
@@ -1279,7 +1420,7 @@ sub _manual_stage_filename_matches_pattern {
     my ( $self, $filename, $pattern ) = @_;
 
     return 0 if !$filename;
-    $pattern = $self->_manual_stage_sftp_glob($pattern);
+    $pattern = $self->_manual_stage_file_glob($pattern);
 
     my $regex = quotemeta($pattern);
     $regex =~ s/\\\*/.*/g;
@@ -1354,18 +1495,19 @@ sub _manual_stage_apply_existing_basket_preview {
     return $preview;
 }
 
-sub _tool_sftp_status {
+sub _tool_source_status {
     my ( $self, $procurement_settings ) = @_;
 
-    my ( $sources, $messages, $has_errors ) = $self->_normalize_sftp_sources( $self->_sftp_sources );
+    my ( $sources, $messages, $has_errors ) = $self->_manual_stage_sources();
     my $default_local_dir = $procurement_settings->{import_tmp_path} // '';
 
     if ( !$has_errors && !@$sources ) {
-        push @$messages, $self->_configure_message( warning => 'No SFTP sources are saved in the EDItX plugin configuration.' );
+        push @$messages, $self->_configure_message( warning => 'No EDItX intake sources are saved in the plugin configuration.' );
         $has_errors = 1;
     }
 
     for my $source (@$sources) {
+        next if $source->{transport} && $source->{transport} eq 'folder';
         next if $source->{local_dir} || $default_local_dir;
         push @$messages, $self->_configure_message( warning => "SFTP source '$source->{id}' has no local_dir and import_tmp_path is not set." );
         $has_errors = 1;
@@ -1382,7 +1524,7 @@ sub _output_tool_page {
     my ( $self, %params ) = @_;
 
     my $procurement_settings = $self->_procurement_settings();
-    my $sftp_status = $self->_tool_sftp_status($procurement_settings);
+    my $source_status = $self->_tool_source_status($procurement_settings);
     my $template = $self->get_template( { file => 'tool.tt' } );
     $template->param(
         messages               => $params{messages},
@@ -1393,10 +1535,10 @@ sub _output_tool_page {
         manual_stage_sources   => $self->_manual_stage_source_options($procurement_settings),
         nightly_sync_enabled   => $self->_nightly_sync_enabled(),
         procurement_settings   => $procurement_settings,
-        sftp_sources_count     => $sftp_status->{count},
-        sftp_config_has_errors => $sftp_status->{has_errors},
-        sftp_config_messages   => $sftp_status->{messages},
-        manual_run_available   => !$sftp_status->{has_errors} && $sftp_status->{count} ? 1 : 0,
+        source_count           => $source_status->{count},
+        source_config_has_errors => $source_status->{has_errors},
+        source_config_messages => $source_status->{messages},
+        manual_run_available   => !$source_status->{has_errors} && $source_status->{count} ? 1 : 0,
         configure_href         => $self->plugin_method_url('configure'),
         tool_href              => $self->plugin_method_url('tool'),
         plugin_display_version => $self->plugin_display_version(),
@@ -1748,7 +1890,10 @@ sub _write_sftp_config_file {
     my ( $sources, $messages, $has_errors ) = $self->_normalize_sftp_sources( $self->_sftp_sources );
     die join( "\n", map { $_->{text} } @$messages ) . "\n" if $has_errors;
     $sources = [ grep { ( $_->{enabled} // 'yes' ) eq 'yes' } @$sources ];
-    die "No enabled EDItX SFTP sources configured.\n" unless @$sources;
+    if ( !@$sources ) {
+        $self->_log_runtime( info => 'No enabled EDItX SFTP sources configured; skipping SFTP fetch configuration', { operation => 'sync' } );
+        return;
+    }
     $self->_log_runtime( debug => 'Writing temporary EDItX SFTP configuration', { source_count => scalar @$sources } );
 
     my $default_local_dir = $self->_default_import_tmp_path();
@@ -1792,6 +1937,108 @@ sub _write_sftp_config_file {
     return $config_file;
 }
 
+sub _stage_folder_sources_for_import {
+    my ($self) = @_;
+
+    my ( $sources, $messages, $has_errors ) = $self->_normalize_folder_sources( $self->_folder_sources );
+    die join( "\n", map { $_->{text} } @$messages ) . "\n" if $has_errors;
+    $sources = [ grep { ( $_->{enabled} // 'yes' ) eq 'yes' } @$sources ];
+    if ( !@$sources ) {
+        $self->_log_runtime( info => 'No enabled EDItX folder sources configured; skipping folder source scan', { operation => 'folder_scan' } );
+        return { copied => 0, skipped => 0, sources => 0 };
+    }
+
+    my $procurement_settings = $self->_procurement_settings();
+    my $target_dir = $procurement_settings->{import_tmp_path};
+    die "Temporary download folder is not configured.\n" if !$target_dir;
+    die "Temporary download folder is not a directory: $target_dir\n" if !-d $target_dir;
+    die "Temporary download folder is not writable by the Koha process: $target_dir\n" if !-w $target_dir || !-x $target_dir;
+
+    my %total = ( copied => 0, skipped => 0, sources => scalar @$sources );
+    for my $source (@$sources) {
+        my $result = $self->_stage_folder_source_for_import( $source, $target_dir );
+        $total{copied}  += $result->{copied}  || 0;
+        $total{skipped} += $result->{skipped} || 0;
+    }
+
+    $self->_log_runtime(
+        info => 'EDItX folder source scan finished',
+        {
+            operation    => 'folder_scan',
+            source_count => $total{sources},
+            copied       => $total{copied},
+            skipped      => $total{skipped},
+        }
+    );
+
+    return \%total;
+}
+
+sub _stage_folder_source_for_import {
+    my ( $self, $source, $target_dir ) = @_;
+
+    my $source_dir = $source->{local_dir};
+    my $pattern = $source->{pattern} || '*.xml';
+    my $minimum_age_seconds = $source->{minimum_age_seconds};
+    $minimum_age_seconds = 60 if !defined $minimum_age_seconds || $minimum_age_seconds eq '';
+
+    die "Folder source '$source->{id}' local_dir is not a directory: $source_dir\n" if !-d $source_dir;
+    opendir my $dh, $source_dir or die "Cannot open EDItX folder source '$source->{id}' at $source_dir: $!";
+    my @entries = readdir $dh;
+    closedir $dh;
+
+    $self->_log_runtime(
+        info => 'Scanning EDItX folder source',
+        {
+            operation => 'folder_scan',
+            source_id => $source->{id},
+            source_dir => $source_dir,
+            pattern => $pattern,
+        }
+    );
+
+    my %result = ( copied => 0, skipped => 0 );
+    my $now = time;
+    for my $filename ( sort @entries ) {
+        if ( !$self->_manual_stage_safe_filename($filename) ) {
+            $result{skipped}++;
+            next;
+        }
+        next if !$self->_manual_stage_filename_matches_pattern( $filename, $pattern );
+
+        my $source_path = File::Spec->catfile( $source_dir, $filename );
+        if ( !-f $source_path ) {
+            $result{skipped}++;
+            next;
+        }
+
+        my @stat = stat($source_path);
+        if ( !@stat ) {
+            $result{skipped}++;
+            $self->_log_runtime( warn => 'Could not stat EDItX folder source file', { operation => 'folder_scan', source_id => $source->{id}, file => $source_path, error => "$!" } );
+            next;
+        }
+        if ( defined $minimum_age_seconds && $minimum_age_seconds ne '' && $now - $stat[9] < $minimum_age_seconds ) {
+            $result{skipped}++;
+            next;
+        }
+
+        my $target_path = File::Spec->catfile( $target_dir, $filename );
+        if ( -e $target_path ) {
+            $result{skipped}++;
+            $self->_log_runtime( warn => 'EDItX folder source file skipped because target staging file already exists', { operation => 'folder_scan', source_id => $source->{id}, source_file => $source_path, target_file => $target_path } );
+            next;
+        }
+
+        copy( $source_path, $target_path )
+            or die "Cannot copy EDItX folder source file $source_path to $target_path: $!";
+        $result{copied}++;
+        $self->_log_runtime( info => 'EDItX folder source file copied to staging', { operation => 'folder_scan', source_id => $source->{id}, source_file => $source_path, target_file => $target_path } );
+    }
+
+    return \%result;
+}
+
 sub _run_nightly_sync {
     my ( $self, $options ) = @_;
 
@@ -1808,7 +2055,6 @@ sub _run_nightly_sync {
     my $lock_dir = "/tmp/editx-nightly-$lock_instance.lock";
     my $sftp_config_file;
 
-    die "No executable EDItX SFTP fetch script: $fetch_script" unless -x $fetch_script;
     die "No EDItX import script: $import_script" unless -f $import_script;
 
     if ( !mkdir $lock_dir ) {
@@ -1824,7 +2070,14 @@ sub _run_nightly_sync {
 
         $self->_log_runtime( info => 'Starting EDItX synchronization chain', { operation => 'sync', koha_instance => $koha_instance } );
         $self->_sync_print( $options, "Starting EDItX nightly synchronization for $koha_instance.\n" );
-        $self->_run_command( $options, $fetch_script, $sftp_config_file, $koha_instance );
+        if ($sftp_config_file) {
+            die "No executable EDItX SFTP fetch script: $fetch_script" unless -x $fetch_script;
+            $self->_run_command( $options, $fetch_script, $sftp_config_file, $koha_instance );
+        }
+        my $folder_result = $self->_stage_folder_sources_for_import();
+        if ( $folder_result && $folder_result->{sources} ) {
+            $self->_sync_print( $options, "Folder source scan copied $folder_result->{copied} EDItX file(s) to staging.\n" );
+        }
         $self->_run_command( $options, $^X, $import_script );
         $self->_sync_print( $options, "Finished EDItX nightly synchronization for $koha_instance.\n" );
         $self->_log_runtime( info => 'Finished EDItX synchronization chain', { operation => 'sync', koha_instance => $koha_instance } );
@@ -2476,7 +2729,7 @@ sub _normalize_folder_sources {
             $has_blocking_errors = 1;
         }
 
-        for my $error ( @{ $self->_directory_validation_errors( "Folder source $source_number local_dir", $normalized{local_dir} ) } ) {
+        for my $error ( @{ $self->_directory_validation_errors( "Folder source $source_number local_dir", $normalized{local_dir}, require_write => 0, require_read => 1, allow_create => 0 ) } ) {
             push @messages, $self->_configure_message( error => $error );
             $has_blocking_errors = 1;
         }
@@ -2874,9 +3127,12 @@ sub _validate_procurement_settings {
 }
 
 sub _directory_validation_errors {
-    my ( $self, $label, $path ) = @_;
+    my ( $self, $label, $path, %params ) = @_;
 
     my @errors;
+    my $allow_create = exists $params{allow_create} ? $params{allow_create} : 1;
+    my $require_write = exists $params{require_write} ? $params{require_write} : 1;
+    my $require_read = exists $params{require_read} ? $params{require_read} : 0;
     if ( !defined $path || $path eq '' ) {
         push @errors, "$label is required before EDItX import can run.";
         return \@errors;
@@ -2897,9 +3153,16 @@ sub _directory_validation_errors {
     if ( -e $normalized_path ) {
         if ( !-d $normalized_path ) {
             push @errors, "$label exists but is not a directory: $normalized_path";
-        } elsif ( !-w $normalized_path || !-x $normalized_path ) {
+        } elsif ( $require_write && ( !-w $normalized_path || !-x $normalized_path ) ) {
             push @errors, "$label exists but is not writable by the Koha process: $normalized_path";
+        } elsif ( $require_read && ( !-r $normalized_path || !-x $normalized_path ) ) {
+            push @errors, "$label exists but is not readable by the Koha process: $normalized_path";
         }
+        return \@errors;
+    }
+
+    if ( !$allow_create ) {
+        push @errors, "$label does not exist: $normalized_path";
         return \@errors;
     }
 

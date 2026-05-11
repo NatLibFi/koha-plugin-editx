@@ -21,7 +21,7 @@
                 <div class="page-section editx-page-header">
                     <div>
                         <h1>EDItX plugin v[% plugin_display_version | html %]</h1>
-                        <p class="help-block">Run saved EDItX SFTP download and import operations, then open the created acquisition records.</p>
+                        <p class="help-block">Run saved EDItX source intake and import operations, then open the created acquisition records.</p>
                     </div>
                     <div class="editx-status-strip">
                         <div class="editx-status-item">
@@ -29,10 +29,10 @@
                             <strong>[% IF nightly_sync_enabled %]Enabled[% ELSE %]Disabled[% END %]</strong>
                             <span class="editx-status-note"><a href="[% configure_href | html %]">Configure</a></span>
                         </div>
-                        <div class="editx-status-item [% IF sftp_config_has_errors %]editx-status-warning[% END %]">
-                            <span class="editx-status-label">SFTP sources</span>
-                            <strong>[% sftp_sources_count | html %]</strong>
-                            <span class="editx-status-note">Saved source[% UNLESS sftp_sources_count == 1 %]s[% END %]</span>
+                        <div class="editx-status-item [% IF source_config_has_errors %]editx-status-warning[% END %]">
+                            <span class="editx-status-label">EDItX sources</span>
+                            <strong>[% source_count | html %]</strong>
+                            <span class="editx-status-note">Saved source[% UNLESS source_count == 1 %]s[% END %]</span>
                         </div>
                         <div class="editx-status-item">
                             <span class="editx-status-label">Import intake</span>
@@ -46,7 +46,7 @@
                     <div class="alert alert-[% message.alert_class | html %]">[% message.text | html %]</div>
                 [% END %]
 
-                [% FOREACH message IN sftp_config_messages %]
+                [% FOREACH message IN source_config_messages %]
                     <div class="alert alert-[% message.alert_class | html %]">
                         [% message.text | html %]
                         <a href="[% configure_href | html %]">Open configuration</a>
@@ -58,7 +58,7 @@
                         <div class="editx-section-heading">
                             <div>
                                 <h2>Staged manual workflow</h2>
-                                <p>Check remote files, download selected shipment notices for preview, then import only the selected local files.</p>
+                                <p>Check source files, stage selected shipment notices for preview, then import only the selected local files.</p>
                             </div>
                             [% UNLESS manual_stage %]
                                 <form method="post" class="editx-inline-action">
@@ -73,7 +73,7 @@
                                                 <label>
                                                     <input type="checkbox" name="manual_source_id" value="[% source.id | html %]" checked="checked" />
                                                     <span>[% source.id | html %]</span>
-                                                    <span class="editx-status-note">[% source.remote | html %]</span>
+                                                    <span class="editx-status-note">[% source.description | html %]</span>
                                                 </label>
                                             [% END %]
                                         </div>
@@ -84,19 +84,19 @@
                                     [% END %]
                                     [% UNLESS manual_run_available %]
                                         <p class="editx-action-note">
-                                            Fix SFTP configuration before using the staged workflow.
+                                            Fix EDItX source configuration before using the staged workflow.
                                             <a href="[% configure_href | html %]">Open configuration</a>
                                         </p>
                                     [% END %]
                                     <button type="submit"
                                             class="btn btn-primary"
-                                            [% UNLESS manual_run_available %]disabled="disabled"[% END %]>Stage 1: Check remote files</button>
+                                            [% UNLESS manual_run_available %]disabled="disabled"[% END %]>Stage 1: Check source files</button>
                                 </form>
                             [% END %]
                         </div>
 
-                    [% IF manual_stage && manual_stage.step == 'remote' %]
-                        <h3>Remote EDItX files</h3>
+                    [% IF manual_stage && manual_stage.step == 'source' %]
+                        <h3>EDItX source files</h3>
                         [% IF manual_stage.files.size %]
                             <form method="post" class="editx-stage-form">
                                 <input type="hidden" name="class" value="[% CLASS | html %]" />
@@ -104,12 +104,12 @@
                                 <input type="hidden" name="op" value="cud-stage-download-selected" />
                                 <input type="hidden" name="stage_download_selected" value="1" />
                                 [% INCLUDE 'csrf-token.inc' %]
-                                <table id="editx-remote-files-table"
+                                <table id="editx-source-files-table"
                                        class="table table-striped editx-stage-table"
-                                       data-editx-stage-selection-table="remote_file">
+                                       data-editx-stage-selection-table="source_file">
                                     <thead>
                                         <tr>
-                                            <th class="NoSort editx-stage-selection-cell"><input type="checkbox" data-editx-check-all="remote_file" aria-label="Select all filtered remote files" /></th>
+                                            <th class="NoSort editx-stage-selection-cell"><input type="checkbox" data-editx-check-all="source_file" aria-label="Select all filtered source files" /></th>
                                             <th>Source</th>
                                             <th>Filename</th>
                                             <th class="editx-stage-modified-cell">Modified</th>
@@ -121,7 +121,7 @@
                                     <tbody>
                                         [% FOREACH file IN manual_stage.files %]
                                             <tr>
-                                                <td class="editx-stage-selection-cell"><input type="checkbox" name="remote_file" value="[% file.key | html %]" /></td>
+                                                <td class="editx-stage-selection-cell"><input type="checkbox" name="source_file" value="[% file.key | html %]" /></td>
                                                 <td>[% file.source_id | html %]</td>
                                                 <td><code>[% file.filename | html %]</code></td>
                                                 <td class="editx-stage-modified-cell">[% file.modified | html %]</td>
@@ -133,12 +133,12 @@
                                     </tbody>
                                 </table>
                                 <div class="editx-confirm-actions">
-                                    <button type="submit" class="btn btn-primary">Download selected</button>
+                                    <button type="submit" class="btn btn-primary">Stage selected</button>
                                     <a class="btn btn-default" href="[% tool_href | html %]">Cancel</a>
                                 </div>
                             </form>
                         [% ELSE %]
-                            <p>No remote EDItX files matched the configured SFTP sources.</p>
+                            <p>No EDItX files matched the configured sources.</p>
                             <form method="post" class="editx-confirm-actions">
                                 <input type="hidden" name="class" value="[% CLASS | html %]" />
                                 <input type="hidden" name="method" value="[% METHOD | html %]" />
@@ -147,7 +147,7 @@
                                 [% INCLUDE 'csrf-token.inc' %]
                                 <button type="submit"
                                         class="btn btn-default"
-                                        [% UNLESS manual_run_available %]disabled="disabled"[% END %]>Check remote files again</button>
+                                        [% UNLESS manual_run_available %]disabled="disabled"[% END %]>Check source files again</button>
                                 <a class="btn btn-default" href="[% tool_href | html %]">Return to start</a>
                             </form>
                         [% END %]
@@ -162,20 +162,20 @@
                             <input type="hidden" name="manual_stage_run_id" value="[% manual_stage.run_id | html %]" />
                             [% INCLUDE 'csrf-token.inc' %]
 
-                            <h3>Downloaded EDItX preview</h3>
+                            <h3>Staged EDItX preview</h3>
                             [% IF manual_stage.summary %]
                                 <p>
-                                    Downloaded <strong>[% manual_stage.summary.files | html %]</strong> file(s),
+                                    Staged <strong>[% manual_stage.summary.files | html %]</strong> file(s),
                                     <strong>[% manual_stage.summary.items | html %]</strong> item line(s),
                                     <strong>[% manual_stage.summary.copies | html %]</strong> copy/copies.
                                 </p>
                             [% END %]
-                            <table id="editx-downloaded-files-table"
+                            <table id="editx-staged-files-table"
                                    class="table table-striped editx-stage-table"
                                    data-editx-stage-selection-table="stage_file">
                                 <thead>
                                     <tr>
-                                        <th class="NoSort editx-stage-selection-cell"><input type="checkbox" data-editx-check-all="stage_file" aria-label="Select all filtered importable downloaded files" /></th>
+                                        <th class="NoSort editx-stage-selection-cell"><input type="checkbox" data-editx-check-all="stage_file" aria-label="Select all filtered importable staged files" /></th>
                                         <th>Filename</th>
                                         <th>Notice / Total</th>
                                         <th>Seller / Vendor IDs</th>
@@ -325,7 +325,7 @@
                             [% INCLUDE 'csrf-token.inc' %]
                             <button type="submit"
                                     class="btn btn-default"
-                                    [% UNLESS manual_run_available %]disabled="disabled"[% END %]>Check remote files again</button>
+                                    [% UNLESS manual_run_available %]disabled="disabled"[% END %]>Check source files again</button>
                             <a class="btn btn-default" href="[% tool_href | html %]">Return to start</a>
                         </form>
                     [% END %]
@@ -387,6 +387,7 @@
                         <h2>[% manual_run_confirmation.title | html %]</h2>
                         <p>[% manual_run_confirmation.description | html %]</p>
 
+                        [% IF manual_run_confirmation.sftp_sources.size %]
                         <h3>SFTP intake</h3>
                         <table class="table table-striped">
                             <thead>
@@ -399,7 +400,7 @@
                                 </tr>
                             </thead>
                             <tbody>
-                                [% FOREACH source IN manual_run_confirmation.sources %]
+                                [% FOREACH source IN manual_run_confirmation.sftp_sources %]
                                     <tr>
                                         <td>[% source.id | html %]</td>
                                         <td>
@@ -427,6 +428,38 @@
                                 [% END %]
                             </tbody>
                         </table>
+                        [% END %]
+
+                        [% IF manual_run_confirmation.folder_sources.size %]
+                        <h3>Folder intake</h3>
+                        <table class="table table-striped">
+                            <thead>
+                                <tr>
+                                    <th>Source</th>
+                                    <th>Folder</th>
+                                    <th>Pattern</th>
+                                    <th>Minimum age</th>
+                                    <th>Successful import action</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                [% FOREACH source IN manual_run_confirmation.folder_sources %]
+                                    <tr>
+                                        <td>[% source.id | html %]</td>
+                                        <td><code>[% source.local_dir | html %]</code></td>
+                                        <td><code>[% source.pattern | html %]</code></td>
+                                        <td>[% source.minimum_age_seconds | html %] second(s)</td>
+                                        <td>
+                                            [% source.success_action | html %]
+                                            [% IF source.local_archive_dir %]
+                                                <span class="editx-status-note">Local archive: [% source.local_archive_dir | html %]</span>
+                                            [% END %]
+                                        </td>
+                                    </tr>
+                                [% END %]
+                            </tbody>
+                        </table>
+                        [% END %]
 
                         <h3>Import folders</h3>
                         <table class="table table-striped">
@@ -468,18 +501,18 @@
                     <input type="hidden" name="run_sync_now" value="1" />
                     [% INCLUDE 'csrf-token.inc' %]
                     <div>
-                        <h2>Download and import</h2>
-                        <p>Runs the full saved SFTP download and import chain in one operation.</p>
+                        <h2>Stage and import</h2>
+                        <p>Runs the full saved source intake and import chain in one operation.</p>
                         [% UNLESS manual_run_available %]
                             <p class="editx-action-note">
-                                Fix SFTP configuration before running a manual import.
+                                Fix EDItX source configuration before running a manual import.
                                 <a href="[% configure_href | html %]">Open configuration</a>
                             </p>
                         [% END %]
                     </div>
                     <button type="submit"
                             class="btn btn-primary"
-                            [% UNLESS manual_run_available %]disabled="disabled"[% END %]>Run full download and import</button>
+                            [% UNLESS manual_run_available %]disabled="disabled"[% END %]>Run full intake and import</button>
                 </form>
                 [% END %]
             </main>

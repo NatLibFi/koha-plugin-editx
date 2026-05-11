@@ -3,6 +3,7 @@
 use Modern::Perl;
 
 use FindBin qw($Bin);
+use File::Path qw(make_path);
 use File::Spec;
 use File::Temp qw(tempdir);
 use Test::More;
@@ -656,13 +657,14 @@ subtest 'SFTP source normalization allows simple globs and rejects unsafe patter
     ok( $has_blocking_errors, 'Unsafe SFTP pattern has blocking errors' );
     is( $sources->[0]->{pattern}, 'LibraryShipNotice_*.xml', 'Normalizer keeps a simple SFTP glob pattern' );
     like( $message_text, qr{SFTP source 2 pattern '\.\./\*\.xml' is invalid}, 'Normalizer rejects path-like SFTP patterns' );
-    is( $plugin->_manual_stage_sftp_glob('LibraryShipNotice_*.xml'), 'LibraryShipNotice_*.xml', 'Manual staged list accepts a simple filename pattern' );
+    is( $plugin->_manual_stage_file_glob('LibraryShipNotice_*.xml'), 'LibraryShipNotice_*.xml', 'Manual staged list accepts a simple filename pattern' );
 };
 
 subtest 'Folder source normalization validates local source actions' => sub {
     my $root = tempdir( CLEANUP => 1 );
     my $inbox = File::Spec->catdir( $root, 'inbox' );
     my $archive = File::Spec->catdir( $root, 'archive' );
+    make_path($inbox);
 
     my ( $sources, $messages, $has_blocking_errors ) = $plugin->_normalize_folder_sources(
         [
@@ -774,13 +776,13 @@ subtest 'Configured source ids must be unique across transports' => sub {
     }
 }
 
-subtest 'Manual staged source selection scopes remote checks without affecting default batch scope' => sub {
+subtest 'Manual staged source selection scopes source checks without affecting default batch scope' => sub {
     my $sources = [
         { id => 'alpha', host => 'sftp-a.example.org' },
         { id => 'beta',  host => 'sftp-b.example.org' },
     ];
 
-    my ( $selected, $messages, $has_errors ) = $plugin->_manual_selected_sftp_sources(
+    my ( $selected, $messages, $has_errors ) = $plugin->_manual_selected_sources(
         t::EditXFakeCGI->new( { manual_source_id => ['beta'] } ),
         $sources,
         require_selection => 1
@@ -789,7 +791,7 @@ subtest 'Manual staged source selection scopes remote checks without affecting d
     is_deeply( $messages, [], 'Selected staged source has no warning messages' );
     ok( !$has_errors, 'Selected staged source has no errors' );
 
-    ( $selected, $messages, $has_errors ) = $plugin->_manual_selected_sftp_sources(
+    ( $selected, $messages, $has_errors ) = $plugin->_manual_selected_sources(
         t::EditXFakeCGI->new( {} ),
         $sources,
         require_selection => 0
@@ -797,21 +799,21 @@ subtest 'Manual staged source selection scopes remote checks without affecting d
     is_deeply( [ map { $_->{id} } @$selected ], [qw(alpha beta)], 'Missing source selection keeps the default all-source scope' );
     ok( !$has_errors, 'Default all-source scope has no errors' );
 
-    ( $selected, $messages, $has_errors ) = $plugin->_manual_selected_sftp_sources(
+    ( $selected, $messages, $has_errors ) = $plugin->_manual_selected_sources(
         t::EditXFakeCGI->new( {} ),
         $sources,
         require_selection => 1
     );
     ok( $has_errors, 'Review step requires at least one selected source' );
-    like( _message_text($messages), qr{Select at least one SFTP source to check}, 'Review step reports missing source selection' );
+    like( _message_text($messages), qr{Select at least one EDItX source to check}, 'Review step reports missing source selection' );
 
-    ( $selected, $messages, $has_errors ) = $plugin->_manual_selected_sftp_sources(
+    ( $selected, $messages, $has_errors ) = $plugin->_manual_selected_sources(
         t::EditXFakeCGI->new( { manual_source_id => ['missing'] } ),
         $sources,
         require_selection => 1
     );
     ok( $has_errors, 'Unknown selected source is rejected' );
-    like( _message_text($messages), qr{Selected SFTP source 'missing' is no longer configured}, 'Unknown selected source has an actionable warning' );
+    like( _message_text($messages), qr{Selected EDItX source 'missing' is no longer configured}, 'Unknown selected source has an actionable warning' );
 };
 
 subtest 'Manual staged SFTP listing parses Net::SFTP::Foreign entries and keeps diagnostics' => sub {
@@ -860,8 +862,87 @@ subtest 'Manual staged SFTP listing parses Net::SFTP::Foreign entries and keeps 
     ok( !grep( { $_->{filename} eq 'remote_directory' } @{ $listing->{files} } ), 'Manual staged listing ignores remote directories' );
     is( $fake_sftp->{last_ls}, '/out', 'Manual staged listing passes the configured remote directory to Net::SFTP::Foreign' );
     ok( $fake_sftp->{disconnected}, 'Manual staged listing disconnects the SFTP connection' );
-    is( $listing->{sftp_output}, '4 remote entries returned.', 'Manual staged listing reports structured SFTP result count' );
-    is( $listing->{sftp_operation}, 'Net::SFTP::Foreign ls(/out)', 'Manual staged listing reports the SFTP list operation for diagnostics' );
+    is( $listing->{source_output}, '4 remote entries returned.', 'Manual staged listing reports structured SFTP result count' );
+    is( $listing->{source_operation}, 'Net::SFTP::Foreign ls(/out)', 'Manual staged listing reports the SFTP list operation for diagnostics' );
+};
+
+subtest 'Manual staged folder listing and copy uses local sources without SFTP' => sub {
+    my $root = tempdir( CLEANUP => 1 );
+    my $source_dir = File::Spec->catdir( $root, 'inbound' );
+    my $run_dir = File::Spec->catdir( $root, 'run' );
+    make_path( $source_dir, $run_dir );
+
+    my $old_file = File::Spec->catfile( $source_dir, 'LibraryShipNotice_22877649.xml' );
+    open my $old_fh, '>', $old_file or die "Cannot write $old_file: $!";
+    print {$old_fh} '<LibraryShipNotice />';
+    close $old_fh;
+    utime time - 120, time - 120, $old_file;
+
+    my $young_file = File::Spec->catfile( $source_dir, 'LibraryShipNotice_young.xml' );
+    open my $young_fh, '>', $young_file or die "Cannot write $young_file: $!";
+    print {$young_fh} '<LibraryShipNotice />';
+    close $young_fh;
+
+    my $ignored_file = File::Spec->catfile( $source_dir, 'IgnoreMe.txt' );
+    open my $ignored_fh, '>', $ignored_file or die "Cannot write $ignored_file: $!";
+    print {$ignored_fh} 'ignore';
+    close $ignored_fh;
+
+    my $source = {
+        id                  => 'publisher_inbox',
+        transport           => 'folder',
+        local_dir           => $source_dir,
+        pattern             => 'LibraryShipNotice_*.xml',
+        minimum_age_seconds => 60,
+        success_action      => 'keep',
+    };
+
+    my $listing = $plugin->_manual_stage_list_folder_source( $source, { import_tmp_path => File::Spec->catdir( $root, 'tmp' ) } );
+    is( scalar @{ $listing->{files} }, 1, 'Folder source listing returns only stable matching files' );
+    is( $listing->{files}->[0]->{key}, 'publisher_inbox::LibraryShipNotice_22877649.xml', 'Folder source listing builds a stable source/file selection key' );
+    is( $listing->{files}->[0]->{transport}, 'folder', 'Folder source listing marks the transport' );
+    is( $listing->{files}->[0]->{after_action}, 'manual keeps source', 'Folder source staged workflow does not mutate the source file' );
+    is( $listing->{source_operation}, "folder scan($source_dir)", 'Folder source listing reports the local scan operation' );
+
+    my $copied = $plugin->_manual_stage_copy_folder_files( $source, {}, $run_dir, ['LibraryShipNotice_22877649.xml'] );
+    is( scalar @$copied, 1, 'Folder source copy stages the selected source file' );
+    ok( -f $copied->[0]->{local_path}, 'Folder source copy creates a staged local file' );
+    is( $copied->[0]->{source_path}, $old_file, 'Folder source copy keeps source path metadata for later cleanup' );
+    ok( -f $old_file, 'Folder source copy leaves the source file in place' );
+};
+
+subtest 'Nightly folder source staging copies stable source files into import tmp' => sub {
+    no strict 'refs';
+    no warnings qw(once redefine);
+
+    my $root = tempdir( CLEANUP => 1 );
+    my $source_dir = File::Spec->catdir( $root, 'inbound' );
+    my $target_dir = File::Spec->catdir( $root, 'tmp' );
+    make_path( $source_dir, $target_dir );
+
+    my $source_file = File::Spec->catfile( $source_dir, 'LibraryShipNotice_22877649.xml' );
+    open my $source_fh, '>', $source_file or die "Cannot write $source_file: $!";
+    print {$source_fh} '<LibraryShipNotice />';
+    close $source_fh;
+    utime time - 120, time - 120, $source_file;
+
+    my @logs;
+    local *{ $plugin_class . '::_log_runtime' } = _capture_runtime_log(\@logs);
+
+    my $result = $plugin->_stage_folder_source_for_import(
+        {
+            id                  => 'publisher_inbox',
+            local_dir           => $source_dir,
+            pattern             => 'LibraryShipNotice_*.xml',
+            minimum_age_seconds => 60,
+        },
+        $target_dir
+    );
+
+    is( $result->{copied}, 1, 'Nightly folder source scan copies one stable file' );
+    ok( -f File::Spec->catfile( $target_dir, 'LibraryShipNotice_22877649.xml' ), 'Nightly folder source scan copies into import tmp staging' );
+    ok( -f $source_file, 'Nightly folder source scan leaves the source file in place before cleanup support' );
+    like( join( "\n", map { $_->{message} } @logs ), qr{copied to staging}, 'Nightly folder source scan logs copied files' );
 };
 
 subtest 'Manual staged SFTP listing reports empty output to the caller' => sub {
@@ -883,8 +964,8 @@ subtest 'Manual staged SFTP listing reports empty output to the caller' => sub {
     );
 
     is_deeply( $listing->{files}, [], 'Manual staged listing returns no files for empty SFTP output' );
-    is( $listing->{sftp_output}, 'Net::SFTP::Foreign returned an empty remote directory listing.', 'Manual staged listing keeps empty output explicit for warning messages' );
-    is( $listing->{sftp_operation}, 'Net::SFTP::Foreign ls(/out)', 'Manual staged listing reports the SFTP list operation' );
+    is( $listing->{source_output}, 'Net::SFTP::Foreign returned an empty remote directory listing.', 'Manual staged listing keeps empty output explicit for warning messages' );
+    is( $listing->{source_operation}, 'Net::SFTP::Foreign ls(/out)', 'Manual staged listing reports the SFTP list operation' );
 };
 
 subtest 'Manual staging run ids accept File::Temp underscores' => sub {
@@ -926,7 +1007,7 @@ subtest 'Manual staged workflow resumes manifests after redirect-safe GET reload
     is( $stage->{step}, 'downloaded', 'Downloaded staged state is resumed from the manifest' );
     is( $sync_result, undef, 'Downloaded staged state has no import summary' );
     is( $attempted, undef, 'Downloaded staged state does not render the import summary section' );
-    like( _message_text($messages), qr{downloaded for preview}, 'Downloaded redirect shows the staff success message' );
+    like( _message_text($messages), qr{staged for preview}, 'Downloaded redirect shows the staff success message' );
 
     $plugin->_manual_stage_save_manifest(
         {
@@ -1052,17 +1133,17 @@ subtest 'Missing saved config defaults to empty source lists' => sub {
     is_deeply( $config->{folder_sources}, [], 'Missing saved config defaults to no folder sources' );
 };
 
-subtest 'Tool SFTP status rejects an empty saved source list' => sub {
+subtest 'Tool source status rejects an empty saved source list' => sub {
     no strict 'refs';
     no warnings qw(once redefine);
-    local *{ $plugin_class . '::retrieve_data' } = sub { return "sources: []\n"; };
+    local *{ $plugin_class . '::retrieve_data' } = sub { return; };
 
-    my $status = $plugin->_tool_sftp_status( { import_tmp_path => '/tmp/editx' } );
+    my $status = $plugin->_tool_source_status( { import_tmp_path => '/tmp/editx' } );
     my $message_text = _message_text( $status->{messages} );
 
-    is( $status->{count}, 0, 'Tool status counts no saved SFTP sources' );
+    is( $status->{count}, 0, 'Tool status counts no saved EDItX sources' );
     ok( $status->{has_errors}, 'Tool status marks an empty source list as not runnable' );
-    like( $message_text, qr{No SFTP sources are saved in the EDItX plugin configuration\.}, 'Tool status reports missing SFTP sources' );
+    like( $message_text, qr{No EDItX intake sources are saved in the plugin configuration\.}, 'Tool status reports missing EDItX sources' );
 };
 
 subtest 'Koha instance detection uses the Koha configuration path' => sub {
