@@ -24,7 +24,6 @@ use Net::SFTP::Foreign;
 use POSIX qw(strftime);
 use Text::CSV_XS;
 use XML::LibXML;
-use YAML::XS qw(Load Dump);
 use utf8;
 
 use constant PRODUCTFORM_MAPPINGS_ANCHOR => 'ProductFormMappings';
@@ -205,6 +204,10 @@ sub configure {
           $is_save
         ? $self->_sftp_sources_from_cgi($cgi)
         : $self->_sftp_sources();
+    my $folder_sources =
+          $is_save
+        ? $self->_folder_sources_from_cgi($cgi)
+        : $self->_folder_sources();
     my $procurement_settings =
           $is_save
         ? $self->_procurement_settings_from_cgi($cgi)
@@ -215,6 +218,7 @@ sub configure {
             cgi                    => $cgi,
             messages               => \@messages,
             sftp_sources           => $sftp_sources,
+            folder_sources         => $folder_sources,
             procurement_settings   => $procurement_settings,
             nightly_sync_enabled   => $nightly_sync_enabled,
             runtime_log_level      => $runtime_log_level,
@@ -228,6 +232,7 @@ sub configure {
             $self->_output_configure_page(
                 mapping_rows           => $self->_productform_mapping_rows(),
                 sftp_sources           => $sftp_sources,
+                folder_sources         => $folder_sources,
                 procurement_settings   => $procurement_settings,
                 messages               => \@messages,
                 nightly_sync_enabled   => $nightly_sync_enabled,
@@ -246,6 +251,7 @@ sub configure {
             $self->_output_configure_page(
                 mapping_rows           => $self->_productform_mapping_rows(),
                 sftp_sources           => $sftp_sources,
+                folder_sources         => $folder_sources,
                 procurement_settings   => $procurement_settings,
                 messages               => \@messages,
                 nightly_sync_enabled   => $nightly_sync_enabled,
@@ -256,18 +262,27 @@ sub configure {
 
         my ( $normalized_sftp_sources, $sftp_messages, $has_sftp_blocking_errors ) = $self->_normalize_sftp_sources($sftp_sources);
         $sftp_sources = $normalized_sftp_sources;
+        my ( $normalized_folder_sources, $folder_messages, $has_folder_blocking_errors ) = $self->_normalize_folder_sources($folder_sources);
+        $folder_sources = $normalized_folder_sources;
+        my ( $source_messages, $has_source_blocking_errors ) = $self->_validate_config_source_ids( $sftp_sources, $folder_sources );
         my ( $procurement_messages, $has_procurement_blocking_errors ) = $self->_validate_procurement_settings( $procurement_settings, $nightly_sync_enabled );
         push @messages, @$sftp_messages;
+        push @messages, @$folder_messages;
+        push @messages, @$source_messages;
         push @messages, @$procurement_messages;
         my $has_blocking_errors = $has_sftp_blocking_errors;
+        $has_blocking_errors ||= $has_folder_blocking_errors;
+        $has_blocking_errors ||= $has_source_blocking_errors;
         $has_blocking_errors ||= $has_procurement_blocking_errors;
 
         if ( !$has_blocking_errors && $nightly_sync_enabled ) {
-            if ( !@$sftp_sources ) {
-                push @messages, $self->_configure_message( error => 'Nightly sync is enabled but no SFTP sources are configured.' );
+            my @enabled_sources = grep { ( $_->{enabled} // 'yes' ) eq 'yes' } ( @{$sftp_sources}, @{$folder_sources} );
+            if ( !@enabled_sources ) {
+                push @messages, $self->_configure_message( error => 'Nightly sync is enabled but no enabled EDItX sources are configured.' );
                 $has_blocking_errors = 1;
             } else {
                 for my $source (@$sftp_sources) {
+                    next unless ( $source->{enabled} // 'yes' ) eq 'yes';
                     next if $source->{local_dir} || $procurement_settings->{import_tmp_path};
                     push @messages, $self->_configure_message( error => "SFTP source '$source->{id}' has no local_dir and import_tmp_path is not set." );
                     $has_blocking_errors = 1;
@@ -279,6 +294,7 @@ sub configure {
             $self->_output_configure_page(
                 mapping_rows           => $self->_productform_mapping_rows(),
                 sftp_sources           => $sftp_sources,
+                folder_sources         => $folder_sources,
                 procurement_settings   => $procurement_settings,
                 messages               => \@messages,
                 nightly_sync_enabled   => $nightly_sync_enabled,
@@ -295,6 +311,7 @@ sub configure {
                         {
                             procurement_settings => $procurement_settings,
                             sftp_sources         => $sftp_sources,
+                            folder_sources       => $folder_sources,
                         }
                     )
                 ) },
@@ -319,6 +336,7 @@ sub configure {
     $self->_output_configure_page(
         mapping_rows           => $self->_productform_mapping_rows(),
         sftp_sources           => $sftp_sources,
+        folder_sources         => $folder_sources,
         procurement_settings   => $procurement_settings,
         messages               => \@messages,
         nightly_sync_enabled   => $nightly_sync_enabled,
@@ -461,7 +479,7 @@ sub _manual_sync_confirmation {
             pattern        => $_->{pattern},
             local_dir      => $local_dir,
             local_dir_note => $_->{local_dir} ? 'SFTP source override' : 'Temporary download folder',
-            after_download => $_->{after_download},
+            success_action => $_->{success_action},
             remote_archive_dir => $_->{remote_archive_dir},
             known_hosts_file   => $_->{known_hosts_file},
         }
@@ -1395,7 +1413,8 @@ sub _output_configure_page {
     $template->param(
         mapping_rows           => $params{mapping_rows},
         mapping_editor         => $params{mapping_editor},
-        sftp_sources           => $params{sftp_sources},
+        sftp_sources           => $params{sftp_sources} // $self->_sftp_sources(),
+        folder_sources         => $params{folder_sources} // $self->_folder_sources(),
         procurement_settings   => $params{procurement_settings},
         messages               => $params{messages},
         nightly_sync_enabled   => $params{nightly_sync_enabled},
@@ -1728,7 +1747,8 @@ sub _write_sftp_config_file {
 
     my ( $sources, $messages, $has_errors ) = $self->_normalize_sftp_sources( $self->_sftp_sources );
     die join( "\n", map { $_->{text} } @$messages ) . "\n" if $has_errors;
-    die "No EDItX SFTP sources configured.\n" unless @$sources;
+    $sources = [ grep { ( $_->{enabled} // 'yes' ) eq 'yes' } @$sources ];
+    die "No enabled EDItX SFTP sources configured.\n" unless @$sources;
     $self->_log_runtime( debug => 'Writing temporary EDItX SFTP configuration', { source_count => scalar @$sources } );
 
     my $default_local_dir = $self->_default_import_tmp_path();
@@ -1752,7 +1772,7 @@ sub _write_sftp_config_file {
             REMOTE_DIR               => $source->{remote_dir},
             LOCAL_DIR                => $local_dir,
             PATTERN                  => $source->{pattern},
-            AFTER_DOWNLOAD           => $source->{after_download},
+            AFTER_DOWNLOAD           => 'keep',
             REMOTE_ARCHIVE_DIR       => $source->{remote_archive_dir},
             KNOWN_HOSTS_FILE         => $source->{known_hosts_file},
             STRICT_HOST_KEY_CHECKING => $source->{strict_host_key_checking},
@@ -1994,22 +2014,6 @@ sub _nightly_sync_enabled {
     return $self->retrieve_data('nightly_sync_enabled') ? 1 : 0;
 }
 
-sub _sftp_sources_yaml {
-    my ($self) = @_;
-
-    my $config_json = $self->retrieve_data( Koha::Plugin::Fi::KohaSuomi::Editx::Config::CONFIG_KEY() );
-    if ( defined $config_json && $config_json =~ /\S/ ) {
-        return Dump( { sources => $self->_sftp_sources } );
-    }
-
-    my $sftp_sources_yaml = $self->retrieve_data('sftp_sources_yaml');
-    return defined $sftp_sources_yaml ? $sftp_sources_yaml : $self->_empty_sftp_sources_yaml();
-}
-
-sub _empty_sftp_sources_yaml {
-    return "sources: []\n";
-}
-
 sub _editx_config {
     my ($self) = @_;
 
@@ -2022,15 +2026,22 @@ sub _sftp_sources {
     return Koha::Plugin::Fi::KohaSuomi::Editx::Config->sftp_sources( $self->_editx_config );
 }
 
+sub _folder_sources {
+    my ($self) = @_;
+
+    return Koha::Plugin::Fi::KohaSuomi::Editx::Config->folder_sources( $self->_editx_config );
+}
+
 sub _sftp_sources_from_cgi {
     my ( $self, $cgi ) = @_;
 
     my @ids = $cgi->multi_param('sftp_id');
     my @keys = qw(
-        id host port user identity_file remote_dir local_dir pattern after_download remote_archive_dir
+        enabled id host port user identity_file remote_dir local_dir pattern success_action remote_archive_dir
         known_hosts_file strict_host_key_checking ssh_config
     );
     my %values = (
+        enabled                  => [ $cgi->multi_param('sftp_enabled') ],
         id                       => \@ids,
         host                     => [ $cgi->multi_param('sftp_host') ],
         port                     => [ $cgi->multi_param('sftp_port') ],
@@ -2039,7 +2050,7 @@ sub _sftp_sources_from_cgi {
         remote_dir               => [ $cgi->multi_param('sftp_remote_dir') ],
         local_dir                => [ $cgi->multi_param('sftp_local_dir') ],
         pattern                  => [ $cgi->multi_param('sftp_pattern') ],
-        after_download           => [ $cgi->multi_param('sftp_after_download') ],
+        success_action           => [ $cgi->multi_param('sftp_success_action') ],
         remote_archive_dir       => [ $cgi->multi_param('sftp_remote_archive_dir') ],
         known_hosts_file         => [ $cgi->multi_param('sftp_known_hosts_file') ],
         strict_host_key_checking => [ $cgi->multi_param('sftp_strict_host_key_checking') ],
@@ -2058,6 +2069,41 @@ sub _sftp_sources_from_cgi {
             $source{$key} = $values{$key}->[$index];
         }
         next unless grep { defined $_ && $_ ne '' } @source{qw(id host user remote_dir)};
+        push @sources, \%source;
+    }
+
+    return \@sources;
+}
+
+sub _folder_sources_from_cgi {
+    my ( $self, $cgi ) = @_;
+
+    my @ids = $cgi->multi_param('folder_id');
+    my @keys = qw(
+        enabled id local_dir pattern success_action local_archive_dir minimum_age_seconds
+    );
+    my %values = (
+        enabled             => [ $cgi->multi_param('folder_enabled') ],
+        id                  => \@ids,
+        local_dir           => [ $cgi->multi_param('folder_local_dir') ],
+        pattern             => [ $cgi->multi_param('folder_pattern') ],
+        success_action      => [ $cgi->multi_param('folder_success_action') ],
+        local_archive_dir   => [ $cgi->multi_param('folder_local_archive_dir') ],
+        minimum_age_seconds => [ $cgi->multi_param('folder_minimum_age_seconds') ],
+    );
+
+    my $max_index = -1;
+    for my $key (@keys) {
+        $max_index = $#{ $values{$key} } if $#{ $values{$key} } > $max_index;
+    }
+
+    my @sources;
+    for my $index ( 0 .. $max_index ) {
+        my %source;
+        for my $key (@keys) {
+            $source{$key} = $values{$key}->[$index];
+        }
+        next unless grep { defined $_ && $_ ne '' } @source{qw(id local_dir local_archive_dir)};
         push @sources, \%source;
     }
 
@@ -2276,28 +2322,6 @@ sub _productform_mapping_itemtype_error {
     );
 }
 
-sub _parse_sftp_sources_yaml {
-    my ( $self, $sftp_sources_yaml ) = @_;
-
-    my $config = eval { Load($sftp_sources_yaml) };
-
-    if ($@) {
-        return ( [], [ $self->_configure_message( error => "SFTP YAML parse failed: $@" ) ], 1 );
-    }
-
-    $config ||= {};
-    if ( ref $config ne 'HASH' ) {
-        return ( [], [ $self->_configure_message( error => 'SFTP YAML must be a mapping with a sources list.' ) ], 1 );
-    }
-
-    my $sources = $config->{sources} || [];
-    if ( ref $sources ne 'ARRAY' ) {
-        return ( [], [ $self->_configure_message( error => 'SFTP YAML sources must be a list.' ) ], 1 );
-    }
-
-    return $self->_normalize_sftp_sources($sources);
-}
-
 sub _normalize_sftp_sources {
     my ( $self, $sources ) = @_;
 
@@ -2317,7 +2341,7 @@ sub _normalize_sftp_sources {
 
         my %normalized;
         for my $key (qw(
-            id host port user identity_file remote_dir local_dir pattern after_download remote_archive_dir
+            enabled id host port user identity_file remote_dir local_dir pattern success_action remote_archive_dir
             known_hosts_file strict_host_key_checking ssh_config
         )) {
             my $raw_value = $source->{$key};
@@ -2326,9 +2350,10 @@ sub _normalize_sftp_sources {
             $normalized{$key} = $value;
         }
 
+        $normalized{enabled} = $self->_source_enabled_value( $normalized{enabled} );
         $normalized{port} //= 22;
         $normalized{pattern} //= '*.xml';
-        $normalized{after_download} //= 'keep';
+        $normalized{success_action} //= 'keep';
         $normalized{strict_host_key_checking} //= 'yes';
 
         if ( $normalized{strict_host_key_checking} =~ /\A(?:1|true)\z/i ) {
@@ -2366,13 +2391,13 @@ sub _normalize_sftp_sources {
             $has_blocking_errors = 1;
         }
 
-        if ( $normalized{after_download} !~ /\A(?:keep|archive|delete)\z/ ) {
-            push @messages, $self->_configure_message( error => "SFTP source $source_number after_download must be keep, archive, or delete." );
+        if ( $normalized{success_action} !~ /\A(?:keep|archive|delete)\z/ ) {
+            push @messages, $self->_configure_message( error => "SFTP source $source_number success_action must be keep, archive, or delete." );
             $has_blocking_errors = 1;
         }
 
-        if ( $normalized{after_download} eq 'archive' && !$normalized{remote_archive_dir} ) {
-            push @messages, $self->_configure_message( error => "SFTP source $source_number uses archive but has no remote_archive_dir." );
+        if ( $normalized{success_action} eq 'archive' && !$normalized{remote_archive_dir} ) {
+            push @messages, $self->_configure_message( error => "SFTP source $source_number archives successful imports but has no remote_archive_dir." );
             $has_blocking_errors = 1;
         }
 
@@ -2385,6 +2410,102 @@ sub _normalize_sftp_sources {
     }
 
     return ( \@sources, \@messages, $has_blocking_errors );
+}
+
+sub _normalize_folder_sources {
+    my ( $self, $sources ) = @_;
+
+    $sources ||= [];
+    my ( @messages, %seen_ids );
+    my $has_blocking_errors;
+    my @sources;
+    for my $index ( 0 .. $#$sources ) {
+        my $source = $sources->[$index];
+        my $source_number = $index + 1;
+
+        if ( ref $source ne 'HASH' ) {
+            push @messages, $self->_configure_message( error => "Folder source $source_number must be a mapping." );
+            $has_blocking_errors = 1;
+            next;
+        }
+
+        my %normalized;
+        for my $key (qw(enabled id local_dir pattern success_action local_archive_dir minimum_age_seconds)) {
+            $normalized{$key} = $self->_trim_csv_value( $source->{$key} );
+        }
+
+        $normalized{enabled} = $self->_source_enabled_value( $normalized{enabled} );
+        $normalized{pattern} //= '*.xml';
+        $normalized{success_action} //= 'keep';
+        $normalized{minimum_age_seconds} = 60
+            if !defined $normalized{minimum_age_seconds} || $normalized{minimum_age_seconds} eq '';
+
+        for my $required (qw(id local_dir)) {
+            next if defined $normalized{$required} && $normalized{$required} ne '';
+            push @messages, $self->_configure_message( error => "Folder source $source_number has no $required." );
+            $has_blocking_errors = 1;
+        }
+
+        if ( $normalized{id} && $normalized{id} !~ /\A[A-Za-z0-9_]+\z/ ) {
+            push @messages, $self->_configure_message( error => "Folder source $source_number id '$normalized{id}' is invalid; use only letters, numbers, and underscores." );
+            $has_blocking_errors = 1;
+        }
+
+        if ( $normalized{id} && $seen_ids{ $normalized{id} }++ ) {
+            push @messages, $self->_configure_message( error => "Folder source $source_number repeats id '$normalized{id}'." );
+            $has_blocking_errors = 1;
+        }
+
+        if ( $normalized{pattern} && $normalized{pattern} !~ /\A[A-Za-z0-9_.?*\[\]-]+\z/ ) {
+            push @messages, $self->_configure_message( error => "Folder source $source_number pattern '$normalized{pattern}' is invalid; use only filename characters and simple wildcards." );
+            $has_blocking_errors = 1;
+        }
+
+        if ( $normalized{success_action} !~ /\A(?:keep|archive|delete)\z/ ) {
+            push @messages, $self->_configure_message( error => "Folder source $source_number success_action must be keep, archive, or delete." );
+            $has_blocking_errors = 1;
+        }
+
+        if ( $normalized{success_action} eq 'archive' && !$normalized{local_archive_dir} ) {
+            push @messages, $self->_configure_message( error => "Folder source $source_number archives successful imports but has no local_archive_dir." );
+            $has_blocking_errors = 1;
+        }
+
+        if ( defined $normalized{minimum_age_seconds} && $normalized{minimum_age_seconds} !~ /\A[0-9]+\z/ ) {
+            push @messages, $self->_configure_message( error => "Folder source $source_number minimum_age_seconds '$normalized{minimum_age_seconds}' is not numeric." );
+            $has_blocking_errors = 1;
+        }
+
+        for my $error ( @{ $self->_directory_validation_errors( "Folder source $source_number local_dir", $normalized{local_dir} ) } ) {
+            push @messages, $self->_configure_message( error => $error );
+            $has_blocking_errors = 1;
+        }
+
+        if ( $normalized{success_action} eq 'archive' ) {
+            for my $error ( @{ $self->_directory_validation_errors( "Folder source $source_number local_archive_dir", $normalized{local_archive_dir} ) } ) {
+                push @messages, $self->_configure_message( error => $error );
+                $has_blocking_errors = 1;
+            }
+        }
+
+        push @sources, \%normalized;
+    }
+
+    return ( \@sources, \@messages, $has_blocking_errors );
+}
+
+sub _validate_config_source_ids {
+    my ( $self, $sftp_sources, $folder_sources ) = @_;
+
+    my ( @messages, %seen );
+    for my $source ( @{ $sftp_sources || [] }, @{ $folder_sources || [] } ) {
+        my $id = $source->{id};
+        next if !defined $id || $id eq '';
+        next unless $seen{$id}++;
+        push @messages, $self->_configure_message( error => "EDItX source id '$id' is used by more than one source." );
+    }
+
+    return ( \@messages, @messages ? 1 : 0 );
 }
 
 sub _save_productform_mappings {
@@ -2879,6 +3000,13 @@ sub _yes_no_setting {
 
     $value = $self->_config_scalar($value);
     return $value eq 'yes' || $value eq 'no' ? $value : $default;
+}
+
+sub _source_enabled_value {
+    my ( $self, $value ) = @_;
+
+    $value = $self->_config_scalar($value);
+    return $value =~ /\A(?:0|no|false|off)\z/i ? 'no' : 'yes';
 }
 
 sub _csv_values {

@@ -164,11 +164,7 @@ sub _instance_from_koha_conf_path {
 sub loadPluginData {
     my $self = shift;
 
-    my @pluginKeys = (
-        Koha::Plugin::Fi::KohaSuomi::Editx::Config->plugin_data_keys,
-        map { "procurement_$_" } @PLUGIN_SETTING_KEYS,
-        map { "procurement_notification_$_" } @PLUGIN_NOTIFICATION_KEYS,
-    );
+    my @pluginKeys = ( Koha::Plugin::Fi::KohaSuomi::Editx::Config::CONFIG_KEY() );
     my $placeholders = join ',', ('?') x @pluginKeys;
     my $rows = C4::Context->dbh->selectall_arrayref(
         "SELECT plugin_key, plugin_value FROM plugin_data WHERE plugin_class = ? AND plugin_key IN ($placeholders)",
@@ -184,7 +180,7 @@ sub loadPluginData {
         );
     }
 
-    return $plugin_data;
+    return {};
 }
 
 sub getUseAutomatchBiblios {

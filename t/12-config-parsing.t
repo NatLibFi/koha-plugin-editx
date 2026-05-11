@@ -512,10 +512,21 @@ subtest 'Structured config model stores stable settings and preserves scalar run
             },
             sftp_sources => [
                 {
-                    id         => 'alexandria',
-                    host       => 'sftp.example.org',
-                    user       => 'editx-user',
-                    remote_dir => '/out',
+                    enabled        => 'yes',
+                    id             => 'alexandria',
+                    host           => 'sftp.example.org',
+                    user           => 'editx-user',
+                    remote_dir     => '/out',
+                    success_action => 'delete',
+                },
+            ],
+            folder_sources => [
+                {
+                    enabled           => 'no',
+                    id                => 'publisher_inbox',
+                    local_dir         => '/var/lib/koha/kohadev/editx/inbound',
+                    success_action    => 'archive',
+                    local_archive_dir => '/var/lib/koha/kohadev/editx/source_archive',
                 },
             ],
         }
@@ -523,6 +534,7 @@ subtest 'Structured config model stores stable settings and preserves scalar run
     my $json = Koha::Plugin::Fi::KohaSuomi::Editx::Config->to_json($config);
 
     like( $json, qr{"sftp_sources"}, 'Structured config JSON stores SFTP sources' );
+    like( $json, qr{"folder_sources"}, 'Structured config JSON stores folder sources' );
     unlike( $json, qr{runtime_log_level}, 'Runtime log level is not packed into structured config JSON' );
 
     my $settings = Koha::Plugin::Fi::KohaSuomi::Editx::Config->procurement_settings($config);
@@ -530,9 +542,13 @@ subtest 'Structured config model stores stable settings and preserves scalar run
     is( $settings->{notification_mailto}, 'editx@example.org', 'Structured config exposes notification settings' );
     is( $config->{sftp_sources}->[0]->{port}, 22, 'Structured config defaults SFTP port' );
     is( $config->{sftp_sources}->[0]->{pattern}, '*.xml', 'Structured config defaults SFTP pattern' );
+    is( $config->{sftp_sources}->[0]->{success_action}, 'delete', 'Structured config stores SFTP source success action' );
+    is( $config->{folder_sources}->[0]->{enabled}, 'no', 'Structured config stores folder source enabled flag' );
+    is( $config->{folder_sources}->[0]->{pattern}, '*.xml', 'Structured config defaults folder pattern' );
+    is( $config->{folder_sources}->[0]->{minimum_age_seconds}, 60, 'Structured config defaults folder source minimum age' );
 };
 
-subtest 'Structured config model migrates legacy plugin keys' => sub {
+subtest 'Structured config model ignores experimental plugin_data keys without config_json' => sub {
     my $config = Koha::Plugin::Fi::KohaSuomi::Editx::Config->from_plugin_data(
         {
             procurement_import_tmp_path       => '/tmp/editx',
@@ -550,81 +566,154 @@ YAML
     );
 
     my $settings = Koha::Plugin::Fi::KohaSuomi::Editx::Config->procurement_settings($config);
-    is( $settings->{import_tmp_path}, '/tmp/editx', 'Legacy import folder is migrated' );
-    is( $settings->{notification_mailfrom}, 'koha@example.org', 'Legacy notification sender is migrated' );
-    is( $config->{sftp_sources}->[0]->{id}, 'legacy', 'Legacy SFTP YAML source is migrated' );
+    is( $settings->{import_tmp_path}, '', 'Experimental flat import folder is ignored' );
+    is( $settings->{notification_mailfrom}, '', 'Experimental flat notification sender is ignored' );
+    is_deeply( $config->{sftp_sources}, [], 'Experimental SFTP YAML source is ignored' );
 };
 
-subtest 'SFTP YAML parser normalizes optional source fields' => sub {
-    my ( $sources, $messages, $has_blocking_errors ) = $plugin->_parse_sftp_sources_yaml(<<'YAML');
-sources:
-  - id: alexandria
-    host: sftp.example.org
-    user: editx-user
-    remote_dir: /out/alexandria
-    strict_host_key_checking: false
-YAML
+subtest 'SFTP source normalization defaults optional fields' => sub {
+    my ( $sources, $messages, $has_blocking_errors ) = $plugin->_normalize_sftp_sources(
+        [
+            {
+                id                       => 'alexandria',
+                host                     => 'sftp.example.org',
+                user                     => 'editx-user',
+                remote_dir               => '/out/alexandria',
+                strict_host_key_checking => 0,
+            }
+        ]
+    );
 
-    ok( !$has_blocking_errors, 'Valid SFTP YAML has no blocking errors' );
-    is_deeply( $messages, [], 'Valid SFTP YAML has no messages' );
-    is( scalar @$sources, 1, 'Parser returns one source' );
-    is( $sources->[0]->{port}, 22, 'Parser defaults port to 22' );
-    is( $sources->[0]->{pattern}, '*.xml', 'Parser defaults pattern to *.xml' );
-    is( $sources->[0]->{after_download}, 'keep', 'Parser defaults after_download to keep' );
-    is( $sources->[0]->{strict_host_key_checking}, 'no', 'Parser normalizes false strict_host_key_checking to no' );
+    ok( !$has_blocking_errors, 'Valid SFTP source has no blocking errors' );
+    is_deeply( $messages, [], 'Valid SFTP source has no messages' );
+    is( scalar @$sources, 1, 'Normalizer returns one source' );
+    is( $sources->[0]->{enabled}, 'yes', 'Normalizer defaults SFTP source to enabled' );
+    is( $sources->[0]->{port}, 22, 'Normalizer defaults port to 22' );
+    is( $sources->[0]->{pattern}, '*.xml', 'Normalizer defaults pattern to *.xml' );
+    is( $sources->[0]->{success_action}, 'keep', 'Normalizer defaults success_action to keep' );
+    is( $sources->[0]->{strict_host_key_checking}, 'no', 'Normalizer normalizes false strict_host_key_checking to no' );
 };
 
-subtest 'SFTP YAML parser reports blocking source errors' => sub {
-    my ( $sources, $messages, $has_blocking_errors ) = $plugin->_parse_sftp_sources_yaml(<<'YAML');
-sources:
-  - id: invalid-id
-    port: abc
-    after_download: archive
-  - id: invalid-id
-    host: sftp.example.org
-    user: editx-user
-    remote_dir: /out
-  - id: out_of_range
-    host: sftp.example.org
-    user: editx-user
-    remote_dir: /out
-    port: 70000
-YAML
+subtest 'SFTP source normalization reports blocking source errors' => sub {
+    my ( $sources, $messages, $has_blocking_errors ) = $plugin->_normalize_sftp_sources(
+        [
+            {
+                id             => 'invalid-id',
+                port           => 'abc',
+                success_action => 'archive',
+            },
+            {
+                id         => 'invalid-id',
+                host       => 'sftp.example.org',
+                user       => 'editx-user',
+                remote_dir => '/out',
+            },
+            {
+                id         => 'out_of_range',
+                host       => 'sftp.example.org',
+                user       => 'editx-user',
+                remote_dir => '/out',
+                port       => 70000,
+            },
+        ]
+    );
 
     my $message_text = _message_text($messages);
 
-    ok( $has_blocking_errors, 'Invalid SFTP YAML has blocking errors' );
-    is( scalar @$sources, 3, 'Parser still returns normalized source entries for reporting' );
-    like( $message_text, qr{SFTP source 1 has no host\.}, 'Parser reports missing host' );
-    like( $message_text, qr{SFTP source 1 has no user\.}, 'Parser reports missing user' );
-    like( $message_text, qr{SFTP source 1 has no remote_dir\.}, 'Parser reports missing remote_dir' );
-    like( $message_text, qr{SFTP source 1 port 'abc' is not numeric\.}, 'Parser reports a nonnumeric port' );
-    like( $message_text, qr{SFTP source 1 uses archive but has no remote_archive_dir\.}, 'Parser reports archive without remote_archive_dir' );
-    like( $message_text, qr{SFTP source 2 repeats id 'invalid-id'\.}, 'Parser reports duplicate source ids' );
-    like( $message_text, qr{SFTP source 3 port '70000' must be between 1 and 65535\.}, 'Parser reports an out-of-range port' );
+    ok( $has_blocking_errors, 'Invalid SFTP source has blocking errors' );
+    is( scalar @$sources, 3, 'Normalizer still returns normalized source entries for reporting' );
+    like( $message_text, qr{SFTP source 1 has no host\.}, 'Normalizer reports missing host' );
+    like( $message_text, qr{SFTP source 1 has no user\.}, 'Normalizer reports missing user' );
+    like( $message_text, qr{SFTP source 1 has no remote_dir\.}, 'Normalizer reports missing remote_dir' );
+    like( $message_text, qr{SFTP source 1 port 'abc' is not numeric\.}, 'Normalizer reports a nonnumeric port' );
+    like( $message_text, qr{SFTP source 1 archives successful imports but has no remote_archive_dir\.}, 'Normalizer reports archive without remote_archive_dir' );
+    like( $message_text, qr{SFTP source 2 repeats id 'invalid-id'\.}, 'Normalizer reports duplicate source ids' );
+    like( $message_text, qr{SFTP source 3 port '70000' must be between 1 and 65535\.}, 'Normalizer reports an out-of-range port' );
 };
 
-subtest 'SFTP YAML parser allows simple globs and rejects unsafe patterns' => sub {
-    my ( $sources, $messages, $has_blocking_errors ) = $plugin->_parse_sftp_sources_yaml(<<'YAML');
-sources:
-  - id: valid_glob
-    host: sftp.example.org
-    user: editx-user
-    remote_dir: /out
-    pattern: LibraryShipNotice_*.xml
-  - id: unsafe_glob
-    host: sftp.example.org
-    user: editx-user
-    remote_dir: /out
-    pattern: ../*.xml
-YAML
+subtest 'SFTP source normalization allows simple globs and rejects unsafe patterns' => sub {
+    my ( $sources, $messages, $has_blocking_errors ) = $plugin->_normalize_sftp_sources(
+        [
+            {
+                id         => 'valid_glob',
+                host       => 'sftp.example.org',
+                user       => 'editx-user',
+                remote_dir => '/out',
+                pattern    => 'LibraryShipNotice_*.xml',
+            },
+            {
+                id         => 'unsafe_glob',
+                host       => 'sftp.example.org',
+                user       => 'editx-user',
+                remote_dir => '/out',
+                pattern    => '../*.xml',
+            },
+        ]
+    );
 
     my $message_text = _message_text($messages);
 
     ok( $has_blocking_errors, 'Unsafe SFTP pattern has blocking errors' );
-    is( $sources->[0]->{pattern}, 'LibraryShipNotice_*.xml', 'Parser keeps a simple SFTP glob pattern' );
-    like( $message_text, qr{SFTP source 2 pattern '\.\./\*\.xml' is invalid}, 'Parser rejects path-like SFTP patterns' );
+    is( $sources->[0]->{pattern}, 'LibraryShipNotice_*.xml', 'Normalizer keeps a simple SFTP glob pattern' );
+    like( $message_text, qr{SFTP source 2 pattern '\.\./\*\.xml' is invalid}, 'Normalizer rejects path-like SFTP patterns' );
     is( $plugin->_manual_stage_sftp_glob('LibraryShipNotice_*.xml'), 'LibraryShipNotice_*.xml', 'Manual staged list accepts a simple filename pattern' );
+};
+
+subtest 'Folder source normalization validates local source actions' => sub {
+    my $root = tempdir( CLEANUP => 1 );
+    my $inbox = File::Spec->catdir( $root, 'inbox' );
+    my $archive = File::Spec->catdir( $root, 'archive' );
+
+    my ( $sources, $messages, $has_blocking_errors ) = $plugin->_normalize_folder_sources(
+        [
+            {
+                enabled           => 0,
+                id                => 'publisher_inbox',
+                local_dir         => $inbox,
+                success_action    => 'archive',
+                local_archive_dir => $archive,
+            }
+        ]
+    );
+
+    ok( !$has_blocking_errors, 'Valid folder source has no blocking errors' );
+    is_deeply( $messages, [], 'Valid folder source has no messages' );
+    is( $sources->[0]->{enabled}, 'no', 'Folder source enabled flag is normalized' );
+    is( $sources->[0]->{pattern}, '*.xml', 'Folder source pattern defaults to XML files' );
+    is( $sources->[0]->{minimum_age_seconds}, 60, 'Folder source minimum age defaults to 60 seconds' );
+
+    ( $sources, $messages, $has_blocking_errors ) = $plugin->_normalize_folder_sources(
+        [
+            {
+                id             => 'bad-folder',
+                local_dir      => '../inbox',
+                success_action => 'archive',
+            },
+            {
+                id        => 'bad-folder',
+                local_dir => $inbox,
+                pattern   => '../*.xml',
+            },
+        ]
+    );
+
+    my $message_text = _message_text($messages);
+    ok( $has_blocking_errors, 'Invalid folder source has blocking errors' );
+    like( $message_text, qr{Folder source 1 id 'bad-folder' is invalid}, 'Folder source id format is validated' );
+    like( $message_text, qr{Folder source 1 archives successful imports but has no local_archive_dir}, 'Folder archive action requires archive folder' );
+    like( $message_text, qr{Folder source 1 local_dir must be an absolute path}, 'Folder local_dir must be absolute' );
+    like( $message_text, qr{Folder source 2 repeats id 'bad-folder'}, 'Duplicate folder source ids are rejected' );
+    like( $message_text, qr{Folder source 2 pattern '\.\./\*\.xml' is invalid}, 'Folder source pattern rejects path-like globs' );
+};
+
+subtest 'Configured source ids must be unique across transports' => sub {
+    my ( $messages, $has_blocking_errors ) = $plugin->_validate_config_source_ids(
+        [ { id => 'shared' } ],
+        [ { id => 'shared' } ],
+    );
+
+    ok( $has_blocking_errors, 'Duplicate source ids across transports block configuration save' );
+    like( _message_text($messages), qr{EDItX source id 'shared' is used by more than one source}, 'Cross-transport duplicate is reported' );
 };
 
 {
@@ -952,19 +1041,15 @@ subtest 'Manual staged import reports stale run ids without a 500' => sub {
     like( _message_text($messages), qr{staged EDItX file list is no longer available}, 'Invalid staged import state is shown as a staff-facing warning' );
 };
 
-subtest 'SFTP YAML default does not preload example sources' => sub {
+subtest 'Missing saved config defaults to empty source lists' => sub {
     no strict 'refs';
     no warnings qw(once redefine);
     local *{ $plugin_class . '::retrieve_data' } = sub { return; };
 
-    my $yaml = $plugin->_sftp_sources_yaml();
-    my ( $sources, $messages, $has_blocking_errors ) = $plugin->_parse_sftp_sources_yaml($yaml);
+    my $config = $plugin->_editx_config();
 
-    is( $yaml, "sources: []\n", 'Missing saved SFTP config defaults to an empty source list' );
-    unlike( $yaml, qr{alexandria_library|sftp\.example\.org}, 'Default SFTP YAML contains no example source values' );
-    ok( !$has_blocking_errors, 'Empty default SFTP YAML has no parser errors' );
-    is_deeply( $messages, [], 'Empty default SFTP YAML has no parser messages' );
-    is( scalar @$sources, 0, 'Empty default SFTP YAML has no sources' );
+    is_deeply( $config->{sftp_sources}, [], 'Missing saved config defaults to no SFTP sources' );
+    is_deeply( $config->{folder_sources}, [], 'Missing saved config defaults to no folder sources' );
 };
 
 subtest 'Tool SFTP status rejects an empty saved source list' => sub {
@@ -1023,6 +1108,7 @@ subtest 'Recommended import paths are scoped to the Koha instance' => sub {
 
 subtest 'Blank SFTP table defaults do not create an empty source' => sub {
     my $cgi = bless {
+        sftp_enabled                  => ['1'],
         sftp_id                       => [''],
         sftp_host                     => [''],
         sftp_port                     => ['22'],
@@ -1031,7 +1117,7 @@ subtest 'Blank SFTP table defaults do not create an empty source' => sub {
         sftp_remote_dir               => [''],
         sftp_local_dir                => [''],
         sftp_pattern                  => ['*.xml'],
-        sftp_after_download           => ['keep'],
+        sftp_success_action           => ['keep'],
         sftp_remote_archive_dir       => [''],
         sftp_known_hosts_file         => ['/var/lib/koha/kohadev/.ssh/known_hosts'],
         sftp_strict_host_key_checking => ['yes'],
@@ -1039,6 +1125,20 @@ subtest 'Blank SFTP table defaults do not create an empty source' => sub {
     }, 'KohaSuomi::Editx::TestCGI';
 
     is_deeply( $plugin->_sftp_sources_from_cgi($cgi), [], 'Path-only SFTP defaults are ignored until a real source is entered' );
+};
+
+subtest 'Blank folder source table defaults do not create an empty source' => sub {
+    my $cgi = bless {
+        folder_enabled             => ['1'],
+        folder_id                  => [''],
+        folder_local_dir           => [''],
+        folder_pattern             => ['*.xml'],
+        folder_success_action      => ['keep'],
+        folder_local_archive_dir   => [''],
+        folder_minimum_age_seconds => ['60'],
+    }, 'KohaSuomi::Editx::TestCGI';
+
+    is_deeply( $plugin->_folder_sources_from_cgi($cgi), [], 'Path-only folder source defaults are ignored until a real source is entered' );
 };
 
 subtest 'Procurement settings prefill missing import folders from the Koha instance' => sub {

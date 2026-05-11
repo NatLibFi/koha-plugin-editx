@@ -4,7 +4,6 @@ use Modern::Perl;
 
 use C4::Context;
 use Mojo::JSON qw(decode_json encode_json);
-use YAML::XS qw(Load);
 
 use constant CONFIG_KEY   => 'config_json';
 use constant CONFIG_VERSION => 1;
@@ -29,6 +28,33 @@ my @PROCESSING_KEYS = qw(
 my @NOTIFICATION_KEYS = qw(
     notification_mailto
     notification_mailfrom
+);
+
+my @SFTP_SOURCE_KEYS = qw(
+    enabled
+    id
+    host
+    port
+    user
+    identity_file
+    remote_dir
+    local_dir
+    pattern
+    success_action
+    remote_archive_dir
+    known_hosts_file
+    strict_host_key_checking
+    ssh_config
+);
+
+my @FOLDER_SOURCE_KEYS = qw(
+    enabled
+    id
+    local_dir
+    pattern
+    success_action
+    local_archive_dir
+    minimum_age_seconds
 );
 
 sub load {
@@ -60,12 +86,7 @@ sub load_for_plugin_class {
 }
 
 sub plugin_data_keys {
-    return (
-        CONFIG_KEY,
-        'sftp_sources_yaml',
-        ( map { "procurement_$_" } ( @IMPORT_KEYS, @PROCESSING_KEYS ) ),
-        map { "procurement_$_" } @NOTIFICATION_KEYS,
-    );
+    return (CONFIG_KEY);
 }
 
 sub from_plugin_data {
@@ -78,34 +99,7 @@ sub from_plugin_data {
         return $class->normalize($decoded) if !$@ && ref $decoded eq 'HASH';
     }
 
-    return $class->from_legacy_plugin_data($plugin_data);
-}
-
-sub from_legacy_plugin_data {
-    my ( $class, $plugin_data ) = @_;
-
-    $plugin_data ||= {};
-
-    my $config = $class->empty;
-
-    for my $key (@IMPORT_KEYS) {
-        my $value = $plugin_data->{"procurement_$key"};
-        $config->{import}->{$key} = $value if defined $value;
-    }
-
-    for my $key (@PROCESSING_KEYS) {
-        my $value = $plugin_data->{"procurement_$key"};
-        $config->{processing}->{$key} = $value if defined $value;
-    }
-
-    $config->{notifications}->{mailto} = $plugin_data->{procurement_notification_mailto}
-        if defined $plugin_data->{procurement_notification_mailto};
-    $config->{notifications}->{mailfrom} = $plugin_data->{procurement_notification_mailfrom}
-        if defined $plugin_data->{procurement_notification_mailfrom};
-
-    $config->{sftp_sources} = $class->_legacy_sftp_sources( $plugin_data->{sftp_sources_yaml} );
-
-    return $class->normalize($config);
+    return $class->empty;
 }
 
 sub from_flat {
@@ -123,21 +117,23 @@ sub from_flat {
     }
     $config->{notifications}->{mailto}   = $settings->{notification_mailto} // '';
     $config->{notifications}->{mailfrom} = $settings->{notification_mailfrom} // '';
-    $config->{sftp_sources} = $params->{sftp_sources} || [];
+    $config->{sftp_sources}   = $params->{sftp_sources}   || [];
+    $config->{folder_sources} = $params->{folder_sources} || [];
 
     return $class->normalize($config);
 }
 
 sub empty {
     return {
-        version       => CONFIG_VERSION,
-        import        => {},
-        processing    => {
+        version    => CONFIG_VERSION,
+        import     => {},
+        processing => {
             automatch_biblios     => 'yes',
             use_finna_materialtype => 'no',
         },
-        notifications => {},
-        sftp_sources  => [],
+        notifications  => {},
+        sftp_sources   => [],
+        folder_sources => [],
     };
 }
 
@@ -169,8 +165,14 @@ sub normalize {
 
     my $sources = ref $config->{sftp_sources} eq 'ARRAY' ? $config->{sftp_sources} : [];
     $normalized->{sftp_sources} = [
-        map { $class->_normalize_source($_) }
+        map { $class->_normalize_sftp_source($_) }
             grep { ref $_ eq 'HASH' } @{$sources}
+    ];
+
+    my $folder_sources = ref $config->{folder_sources} eq 'ARRAY' ? $config->{folder_sources} : [];
+    $normalized->{folder_sources} = [
+        map { $class->_normalize_folder_source($_) }
+            grep { ref $_ eq 'HASH' } @{$folder_sources}
     ];
 
     return $normalized;
@@ -225,34 +227,45 @@ sub sftp_sources {
     return $config->{sftp_sources};
 }
 
-sub _normalize_source {
+sub folder_sources {
+    my ( $class, $config ) = @_;
+
+    $config = $class->normalize($config);
+    return $config->{folder_sources};
+}
+
+sub _normalize_sftp_source {
     my ( $class, $source ) = @_;
 
     my %normalized;
-    for my $key (qw(
-        id host port user identity_file remote_dir local_dir pattern after_download remote_archive_dir
-        known_hosts_file strict_host_key_checking ssh_config
-    )) {
+    for my $key (@SFTP_SOURCE_KEYS) {
         $normalized{$key} = _scalar( $source->{$key} );
     }
 
+    $normalized{enabled} = _yes_no( $normalized{enabled}, 'yes' );
     $normalized{port} ||= 22;
     $normalized{pattern} ||= '*.xml';
-    $normalized{after_download} ||= 'keep';
+    $normalized{success_action} = _source_success_action( $normalized{success_action} );
     $normalized{strict_host_key_checking} ||= 'yes';
 
     return \%normalized;
 }
 
-sub _legacy_sftp_sources {
-    my ( $class, $yaml ) = @_;
+sub _normalize_folder_source {
+    my ( $class, $source ) = @_;
 
-    return [] unless defined $yaml && $yaml =~ /\S/;
+    my %normalized;
+    for my $key (@FOLDER_SOURCE_KEYS) {
+        $normalized{$key} = _scalar( $source->{$key} );
+    }
 
-    my $config = eval { Load($yaml) };
-    return [] if $@ || ref $config ne 'HASH' || ref $config->{sources} ne 'ARRAY';
+    $normalized{enabled} = _yes_no( $normalized{enabled}, 'yes' );
+    $normalized{pattern} ||= '*.xml';
+    $normalized{success_action} = _source_success_action( $normalized{success_action} );
+    $normalized{minimum_age_seconds} = 60
+        if !defined $normalized{minimum_age_seconds} || $normalized{minimum_age_seconds} eq '';
 
-    return $config->{sources};
+    return \%normalized;
 }
 
 sub _scalar {
@@ -269,6 +282,13 @@ sub _yes_no {
     $value = _scalar($value);
     return $default unless length $value;
     return $value =~ /\A(?:1|yes|true|on)\z/i ? 'yes' : 'no';
+}
+
+sub _source_success_action {
+    my ($value) = @_;
+
+    $value = _scalar($value);
+    return $value =~ /\A(?:keep|delete|archive)\z/ ? $value : 'keep';
 }
 
 1;

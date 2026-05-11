@@ -395,7 +395,7 @@
                                     <th>Remote</th>
                                     <th>Pattern</th>
                                     <th>Local target</th>
-                                    <th>After download</th>
+                                    <th>Successful import action</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -418,7 +418,7 @@
                                             <span class="editx-status-note">[% source.local_dir_note | html %]</span>
                                         </td>
                                         <td>
-                                            [% source.after_download | html %]
+                                            [% source.success_action | html %]
                                             [% IF source.remote_archive_dir %]
                                                 <span class="editx-status-note">Remote archive: [% source.remote_archive_dir | html %]</span>
                                             [% END %]

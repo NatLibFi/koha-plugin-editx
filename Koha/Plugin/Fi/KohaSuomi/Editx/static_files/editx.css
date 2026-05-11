@@ -330,6 +330,46 @@
     grid-template-columns: minmax(0, 1fr) minmax(6rem, 8rem);
 }
 
+.editx-source-success-controls,
+.editx-folder-path-pattern {
+    display: grid;
+    gap: 0.35rem;
+}
+
+.editx-source-success-controls {
+    grid-template-columns: minmax(0, 1fr) minmax(8rem, 10rem);
+}
+
+.editx-source-success-controls input[data-editx-archive-target] {
+    grid-column: 1 / -1;
+}
+
+.editx-folder-sources-table {
+    min-width: 58rem;
+    table-layout: fixed;
+    width: 100%;
+}
+
+.editx-folder-sources-table th:nth-child(1),
+.editx-folder-sources-table td:nth-child(1) {
+    width: 20%;
+}
+
+.editx-folder-sources-table th:nth-child(2),
+.editx-folder-sources-table td:nth-child(2) {
+    width: 42%;
+}
+
+.editx-folder-sources-table th:nth-child(3),
+.editx-folder-sources-table td:nth-child(3) {
+    width: 30%;
+}
+
+.editx-folder-sources-table .editx-folder-remove-cell {
+    text-align: right;
+    width: 7rem;
+}
+
 .editx-table-actions {
     margin-top: 0.65rem;
 }

@@ -22,7 +22,7 @@
                 <div class="page-section editx-page-header">
                     <div>
                         <h1>Configure EDItX plugin v[% plugin_display_version | html %]</h1>
-                        <p class="help-block">Configure the nightly SFTP download, import folders, EDItX processing rules, and ONIX ProductForm mappings.</p>
+                        <p class="help-block">Configure EDItX intake sources, import folders, processing rules, and ONIX ProductForm mappings.</p>
                     </div>
                     <div class="editx-status-strip">
                         <div class="editx-status-item">
@@ -62,7 +62,7 @@
                                        type="checkbox"
                                        value="1"
                                        [% IF nightly_sync_enabled %]checked="checked"[% END %] />
-                                <div class="hint">Runs SFTP download first and then imports downloaded EDItX files from Koha's nightly plugin cron hook.</div>
+                                <div class="hint">Runs enabled EDItX sources from Koha's nightly plugin cron hook.</div>
                             </li>
                         </ol>
                     </fieldset>
@@ -134,95 +134,212 @@
                         </div>
                     </fieldset>
 
-                    <fieldset class="rows">
-                        <legend>SFTP sources</legend>
-                        <div class="hint">Leave local target empty to use the temporary download folder above.</div>
-                        <div class="editx-table-wrap">
-                            <table id="editx-sftp-sources-table"
-                                   class="editx-config-table editx-sftp-sources-table"
+                        <fieldset class="rows">
+                            <legend>SFTP sources</legend>
+                            <div class="hint">Leave local target empty to use the temporary download folder above. Successful import action is applied to the remote source file after a later cleanup step.</div>
+                            <div class="editx-table-wrap">
+                                <table id="editx-sftp-sources-table"
+                                       class="editx-config-table editx-sftp-sources-table"
                                    data-default-identity-file="[% recommended_sftp_paths.identity_file | html %]"
                                    data-default-known-hosts-file="[% recommended_sftp_paths.known_hosts_file | html %]">
-                                <thead>
-                                    <tr>
-                                        <th data-editx-sftp-column="id">Source name</th>
-                                        <th data-editx-sftp-column="user">User</th>
-                                        <th data-editx-sftp-column="remote">Remote folder / Pattern</th>
-                                        <th data-editx-sftp-column="identity">Identity file</th>
+                                    <thead>
+                                        <tr>
+                                            <th data-editx-sftp-column="id">Enabled / Source name</th>
+                                            <th data-editx-sftp-column="user">User</th>
+                                            <th data-editx-sftp-column="remote">Remote folder / Pattern</th>
+                                            <th data-editx-sftp-column="identity">Identity file</th>
                                         <th class="NoSort editx-sftp-remove-cell" rowspan="2">&nbsp;</th>
                                     </tr>
                                     <tr>
-                                        <th data-editx-sftp-column="host">Host</th>
-                                        <th data-editx-sftp-column="port">Port</th>
-                                        <th data-editx-sftp-column="local">Local target</th>
-                                        <th data-editx-sftp-column="known-hosts">Known hosts</th>
-                                    </tr>
-                                </thead>
+                                            <th data-editx-sftp-column="host">Host</th>
+                                            <th data-editx-sftp-column="port">Port</th>
+                                            <th data-editx-sftp-column="local">Local target / Successful import action</th>
+                                            <th data-editx-sftp-column="known-hosts">Known hosts</th>
+                                        </tr>
+                                    </thead>
                                 [% IF sftp_sources.size %]
-                                    [% FOREACH source IN sftp_sources %]
-                                        <tbody class="editx-sftp-source" data-editx-sftp-source-row="1">
-                                            <tr>
-                                                <td><input name="sftp_id" type="text" value="[% source.id | html %]" placeholder="vendor_code" pattern="[A-Za-z0-9_]+" title="Use letters, numbers, and underscores only; no spaces." autocomplete="off" autocapitalize="none" spellcheck="false" data-editx-sftp-column="id" /></td>
-                                                <td><input name="sftp_user" type="text" value="[% source.user | html %]" placeholder="editx-user" data-editx-sftp-column="user" /></td>
-                                                <td>
-                                                    <div class="editx-sftp-remote-pattern">
+                                        [% FOREACH source IN sftp_sources %]
+                                            <tbody class="editx-sftp-source" data-editx-sftp-source-row="1">
+                                                <tr>
+                                                    <td>
+                                                        <label class="editx-inline-check">
+                                                            <input name="sftp_enabled" type="hidden" value="[% IF source.enabled == 'no' %]0[% ELSE %]1[% END %]" data-editx-enabled-value />
+                                                            <input type="checkbox" value="1" [% UNLESS source.enabled == 'no' %]checked="checked"[% END %] data-editx-enabled-toggle />
+                                                            Enabled
+                                                        </label>
+                                                        <input name="sftp_id" type="text" value="[% source.id | html %]" placeholder="vendor_code" pattern="[A-Za-z0-9_]+" title="Use letters, numbers, and underscores only; no spaces." autocomplete="off" autocapitalize="none" spellcheck="false" data-editx-source-id="1" data-editx-sftp-column="id" />
+                                                    </td>
+                                                    <td><input name="sftp_user" type="text" value="[% source.user | html %]" placeholder="editx-user" data-editx-sftp-column="user" /></td>
+                                                    <td>
+                                                        <div class="editx-sftp-remote-pattern">
                                                         <input name="sftp_remote_dir" type="text" value="[% source.remote_dir | html %]" placeholder="/out/editx" data-editx-sftp-column="remote" />
                                                         <input name="sftp_pattern" type="text" value="[% source.pattern | html %]" placeholder="*.xml" data-editx-sftp-column="remote" />
                                                     </div>
-                                                </td>
-                                                <td><input name="sftp_identity_file" type="text" value="[% IF source.identity_file %][% source.identity_file | html %][% ELSE %][% recommended_sftp_paths.identity_file | html %][% END %]" placeholder="[% recommended_sftp_paths.identity_file | html %]" data-editx-sftp-column="identity" /></td>
-                                                <td class="editx-row-actions editx-sftp-remove-cell" rowspan="2">
-                                                    <input name="sftp_after_download" type="hidden" value="[% IF source.after_download %][% source.after_download | html %][% ELSE %]keep[% END %]" />
-                                                    <input name="sftp_remote_archive_dir" type="hidden" value="[% source.remote_archive_dir | html %]" />
-                                                    <input name="sftp_strict_host_key_checking" type="hidden" value="[% IF source.strict_host_key_checking %][% source.strict_host_key_checking | html %][% ELSE %]yes[% END %]" />
-                                                    <input name="sftp_ssh_config" type="hidden" value="[% source.ssh_config | html %]" />
-                                                    <button type="button" class="btn btn-default btn-sm js-editx-remove-row">Remove</button>
+                                                    </td>
+                                                    <td><input name="sftp_identity_file" type="text" value="[% IF source.identity_file %][% source.identity_file | html %][% ELSE %][% recommended_sftp_paths.identity_file | html %][% END %]" placeholder="[% recommended_sftp_paths.identity_file | html %]" data-editx-sftp-column="identity" /></td>
+                                                    <td class="editx-row-actions editx-sftp-remove-cell" rowspan="2">
+                                                        <input name="sftp_strict_host_key_checking" type="hidden" value="[% IF source.strict_host_key_checking %][% source.strict_host_key_checking | html %][% ELSE %]yes[% END %]" />
+                                                        <input name="sftp_ssh_config" type="hidden" value="[% source.ssh_config | html %]" />
+                                                        <button type="button" class="btn btn-default btn-sm js-editx-remove-row">Remove</button>
                                                 </td>
                                             </tr>
-                                            <tr>
-                                                <td><input name="sftp_host" type="text" value="[% source.host | html %]" placeholder="sftp.vendor.example" data-editx-sftp-column="host" /></td>
-                                                <td><input name="sftp_port" type="text" inputmode="numeric" pattern="6553[0-5]|655[0-2][0-9]|65[0-4][0-9]{2}|6[0-4][0-9]{3}|[1-5][0-9]{4}|[1-9][0-9]{0,3}" maxlength="5" value="[% source.port | html %]" placeholder="22" title="Use a TCP port number from 1 to 65535." data-editx-sftp-column="port" /></td>
-                                                <td><input name="sftp_local_dir" type="text" value="[% source.local_dir | html %]" placeholder="default tmp" data-editx-sftp-column="local" /></td>
-                                                <td><input name="sftp_known_hosts_file" type="text" value="[% IF source.known_hosts_file %][% source.known_hosts_file | html %][% ELSE %][% recommended_sftp_paths.known_hosts_file | html %][% END %]" placeholder="[% recommended_sftp_paths.known_hosts_file | html %]" data-editx-sftp-column="known-hosts" /></td>
-                                            </tr>
-                                        </tbody>
+                                                <tr>
+                                                    <td><input name="sftp_host" type="text" value="[% source.host | html %]" placeholder="sftp.vendor.example" data-editx-sftp-column="host" /></td>
+                                                    <td><input name="sftp_port" type="text" inputmode="numeric" pattern="6553[0-5]|655[0-2][0-9]|65[0-4][0-9]{2}|6[0-4][0-9]{3}|[1-5][0-9]{4}|[1-9][0-9]{0,3}" maxlength="5" value="[% source.port | html %]" placeholder="22" title="Use a TCP port number from 1 to 65535." data-editx-sftp-column="port" /></td>
+                                                    <td>
+                                                        <div class="editx-source-success-controls">
+                                                            <input name="sftp_local_dir" type="text" value="[% source.local_dir | html %]" placeholder="default tmp" data-editx-sftp-column="local" />
+                                                            <select name="sftp_success_action" data-editx-success-action="1" data-editx-sftp-column="local">
+                                                                <option value="keep" [% IF source.success_action == 'keep' || !source.success_action %]selected="selected"[% END %]>Keep source</option>
+                                                                <option value="delete" [% IF source.success_action == 'delete' %]selected="selected"[% END %]>Delete source</option>
+                                                                <option value="archive" [% IF source.success_action == 'archive' %]selected="selected"[% END %]>Archive source</option>
+                                                            </select>
+                                                            <input name="sftp_remote_archive_dir" type="text" value="[% source.remote_archive_dir | html %]" placeholder="remote archive folder" data-editx-archive-target="1" data-editx-sftp-column="local" />
+                                                        </div>
+                                                    </td>
+                                                    <td><input name="sftp_known_hosts_file" type="text" value="[% IF source.known_hosts_file %][% source.known_hosts_file | html %][% ELSE %][% recommended_sftp_paths.known_hosts_file | html %][% END %]" placeholder="[% recommended_sftp_paths.known_hosts_file | html %]" data-editx-sftp-column="known-hosts" /></td>
+                                                </tr>
+                                            </tbody>
                                     [% END %]
-                                [% ELSE %]
-                                    <tbody class="editx-sftp-source" data-editx-sftp-source-row="1">
-                                        <tr>
-                                            <td><input name="sftp_id" type="text" value="" placeholder="vendor_code" pattern="[A-Za-z0-9_]+" title="Use letters, numbers, and underscores only; no spaces." autocomplete="off" autocapitalize="none" spellcheck="false" data-editx-sftp-column="id" /></td>
-                                            <td><input name="sftp_user" type="text" value="" placeholder="editx-user" data-editx-sftp-column="user" /></td>
-                                            <td>
-                                                <div class="editx-sftp-remote-pattern">
+                                    [% ELSE %]
+                                        <tbody class="editx-sftp-source" data-editx-sftp-source-row="1">
+                                            <tr>
+                                                <td>
+                                                    <label class="editx-inline-check">
+                                                        <input name="sftp_enabled" type="hidden" value="1" data-editx-enabled-value />
+                                                        <input type="checkbox" value="1" checked="checked" data-editx-enabled-toggle />
+                                                        Enabled
+                                                    </label>
+                                                    <input name="sftp_id" type="text" value="" placeholder="vendor_code" pattern="[A-Za-z0-9_]+" title="Use letters, numbers, and underscores only; no spaces." autocomplete="off" autocapitalize="none" spellcheck="false" data-editx-source-id="1" data-editx-sftp-column="id" />
+                                                </td>
+                                                <td><input name="sftp_user" type="text" value="" placeholder="editx-user" data-editx-sftp-column="user" /></td>
+                                                <td>
+                                                    <div class="editx-sftp-remote-pattern">
                                                     <input name="sftp_remote_dir" type="text" value="" placeholder="/out/editx" data-editx-sftp-column="remote" />
                                                     <input name="sftp_pattern" type="text" value="*.xml" placeholder="*.xml" data-editx-sftp-column="remote" />
                                                 </div>
-                                            </td>
-                                            <td><input name="sftp_identity_file" type="text" value="[% recommended_sftp_paths.identity_file | html %]" placeholder="[% recommended_sftp_paths.identity_file | html %]" data-editx-sftp-column="identity" /></td>
-                                            <td class="editx-row-actions editx-sftp-remove-cell" rowspan="2">
-                                                <input name="sftp_after_download" type="hidden" value="keep" />
-                                                <input name="sftp_remote_archive_dir" type="hidden" value="" />
-                                                <input name="sftp_strict_host_key_checking" type="hidden" value="yes" />
-                                                <input name="sftp_ssh_config" type="hidden" value="" />
-                                                <button type="button" class="btn btn-default btn-sm js-editx-remove-row">Remove</button>
+                                                </td>
+                                                <td><input name="sftp_identity_file" type="text" value="[% recommended_sftp_paths.identity_file | html %]" placeholder="[% recommended_sftp_paths.identity_file | html %]" data-editx-sftp-column="identity" /></td>
+                                                <td class="editx-row-actions editx-sftp-remove-cell" rowspan="2">
+                                                    <input name="sftp_strict_host_key_checking" type="hidden" value="yes" />
+                                                    <input name="sftp_ssh_config" type="hidden" value="" />
+                                                    <button type="button" class="btn btn-default btn-sm js-editx-remove-row">Remove</button>
                                             </td>
                                         </tr>
                                         <tr>
                                             <td><input name="sftp_host" type="text" value="" placeholder="sftp.vendor.example" data-editx-sftp-column="host" /></td>
                                             <td><input name="sftp_port" type="text" inputmode="numeric" pattern="6553[0-5]|655[0-2][0-9]|65[0-4][0-9]{2}|6[0-4][0-9]{3}|[1-5][0-9]{4}|[1-9][0-9]{0,3}" maxlength="5" value="22" placeholder="22" title="Use a TCP port number from 1 to 65535." data-editx-sftp-column="port" /></td>
-                                            <td><input name="sftp_local_dir" type="text" value="" placeholder="default tmp" data-editx-sftp-column="local" /></td>
+                                            <td>
+                                                <div class="editx-source-success-controls">
+                                                    <input name="sftp_local_dir" type="text" value="" placeholder="default tmp" data-editx-sftp-column="local" />
+                                                    <select name="sftp_success_action" data-editx-success-action="1" data-editx-sftp-column="local">
+                                                        <option value="keep" selected="selected">Keep source</option>
+                                                        <option value="delete">Delete source</option>
+                                                        <option value="archive">Archive source</option>
+                                                    </select>
+                                                    <input name="sftp_remote_archive_dir" type="text" value="" placeholder="remote archive folder" data-editx-archive-target="1" data-editx-sftp-column="local" />
+                                                </div>
+                                            </td>
                                             <td><input name="sftp_known_hosts_file" type="text" value="[% recommended_sftp_paths.known_hosts_file | html %]" placeholder="[% recommended_sftp_paths.known_hosts_file | html %]" data-editx-sftp-column="known-hosts" /></td>
                                         </tr>
-                                    </tbody>
+                                        </tbody>
                                 [% END %]
                             </table>
                         </div>
-                        <div class="editx-table-actions">
-                            <button type="button" class="btn btn-default btn-sm" id="editx-add-sftp-source">Add SFTP source</button>
-                        </div>
-                    </fieldset>
+                            <div class="editx-table-actions">
+                                <button type="button" class="btn btn-default btn-sm" id="editx-add-sftp-source">Add SFTP source</button>
+                            </div>
+                        </fieldset>
 
-                    <fieldset class="rows">
-                        <legend>Processing rules</legend>
+                        <fieldset class="rows">
+                            <legend>Folder sources</legend>
+                            <div class="hint">Use this for EDItX files delivered into a local or mounted folder. Files will be copied into the plugin staging area before import.</div>
+                            <div class="editx-table-wrap">
+                                <table id="editx-folder-sources-table" class="editx-config-table editx-folder-sources-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Enabled / Source name</th>
+                                            <th>Folder / Pattern</th>
+                                            <th>Successful import action</th>
+                                            <th class="NoSort editx-folder-remove-cell">&nbsp;</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        [% IF folder_sources.size %]
+                                            [% FOREACH source IN folder_sources %]
+                                                <tr data-editx-folder-source-row="1">
+                                                    <td>
+                                                        <label class="editx-inline-check">
+                                                            <input name="folder_enabled" type="hidden" value="[% IF source.enabled == 'no' %]0[% ELSE %]1[% END %]" data-editx-enabled-value />
+                                                            <input type="checkbox" value="1" [% UNLESS source.enabled == 'no' %]checked="checked"[% END %] data-editx-enabled-toggle />
+                                                            Enabled
+                                                        </label>
+                                                        <input name="folder_id" type="text" value="[% source.id | html %]" placeholder="publisher_inbox" pattern="[A-Za-z0-9_]+" title="Use letters, numbers, and underscores only; no spaces." autocomplete="off" autocapitalize="none" spellcheck="false" data-editx-source-id="1" />
+                                                    </td>
+                                                    <td>
+                                                        <div class="editx-folder-path-pattern">
+                                                            <input name="folder_local_dir" type="text" value="[% source.local_dir | html %]" placeholder="/var/lib/koha/instance/editx/inbound" />
+                                                            <input name="folder_pattern" type="text" value="[% source.pattern | html %]" placeholder="*.xml" />
+                                                            <input name="folder_minimum_age_seconds" type="hidden" value="[% IF source.minimum_age_seconds %][% source.minimum_age_seconds | html %][% ELSE %]60[% END %]" />
+                                                        </div>
+                                                    </td>
+                                                    <td>
+                                                        <div class="editx-source-success-controls">
+                                                            <select name="folder_success_action" data-editx-success-action="1">
+                                                                <option value="keep" [% IF source.success_action == 'keep' || !source.success_action %]selected="selected"[% END %]>Keep source</option>
+                                                                <option value="delete" [% IF source.success_action == 'delete' %]selected="selected"[% END %]>Delete source</option>
+                                                                <option value="archive" [% IF source.success_action == 'archive' %]selected="selected"[% END %]>Archive source</option>
+                                                            </select>
+                                                            <input name="folder_local_archive_dir" type="text" value="[% source.local_archive_dir | html %]" placeholder="local archive folder" data-editx-archive-target="1" />
+                                                        </div>
+                                                    </td>
+                                                    <td class="editx-row-actions editx-folder-remove-cell">
+                                                        <button type="button" class="btn btn-default btn-sm js-editx-remove-row">Remove</button>
+                                                    </td>
+                                                </tr>
+                                            [% END %]
+                                        [% ELSE %]
+                                            <tr data-editx-folder-source-row="1">
+                                                <td>
+                                                    <label class="editx-inline-check">
+                                                        <input name="folder_enabled" type="hidden" value="1" data-editx-enabled-value />
+                                                        <input type="checkbox" value="1" checked="checked" data-editx-enabled-toggle />
+                                                        Enabled
+                                                    </label>
+                                                    <input name="folder_id" type="text" value="" placeholder="publisher_inbox" pattern="[A-Za-z0-9_]+" title="Use letters, numbers, and underscores only; no spaces." autocomplete="off" autocapitalize="none" spellcheck="false" data-editx-source-id="1" />
+                                                </td>
+                                                <td>
+                                                    <div class="editx-folder-path-pattern">
+                                                        <input name="folder_local_dir" type="text" value="" placeholder="/var/lib/koha/instance/editx/inbound" />
+                                                        <input name="folder_pattern" type="text" value="*.xml" placeholder="*.xml" />
+                                                        <input name="folder_minimum_age_seconds" type="hidden" value="60" />
+                                                    </div>
+                                                </td>
+                                                <td>
+                                                    <div class="editx-source-success-controls">
+                                                        <select name="folder_success_action" data-editx-success-action="1">
+                                                            <option value="keep" selected="selected">Keep source</option>
+                                                            <option value="delete">Delete source</option>
+                                                            <option value="archive">Archive source</option>
+                                                        </select>
+                                                        <input name="folder_local_archive_dir" type="text" value="" placeholder="local archive folder" data-editx-archive-target="1" />
+                                                    </div>
+                                                </td>
+                                                <td class="editx-row-actions editx-folder-remove-cell">
+                                                    <button type="button" class="btn btn-default btn-sm js-editx-remove-row">Remove</button>
+                                                </td>
+                                            </tr>
+                                        [% END %]
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div class="editx-table-actions">
+                                <button type="button" class="btn btn-default btn-sm" id="editx-add-folder-source">Add folder source</button>
+                            </div>
+                        </fieldset>
+
+                        <fieldset class="rows">
+                            <legend>Processing rules</legend>
                         <ol>
                             <li>
                                 <label for="authoriser">Order authoriser borrowernumber</label>
@@ -514,10 +631,12 @@ DG,LYHYT,LYHYTHH</code></pre>
 
             const logTail = document.getElementById("runtime_log_tail");
             const wrapToggle = document.getElementById("editx-runtime-log-wrap-toggle");
-            const collapsibleSections = document.querySelectorAll("[data-editx-collapsible]");
-            const sftpTable = document.getElementById("editx-sftp-sources-table");
-            const addSftpSourceButton = document.getElementById("editx-add-sftp-source");
-            const productformTable = document.getElementById("editx-productform-table");
+                const collapsibleSections = document.querySelectorAll("[data-editx-collapsible]");
+                const sftpTable = document.getElementById("editx-sftp-sources-table");
+                const addSftpSourceButton = document.getElementById("editx-add-sftp-source");
+                const folderTable = document.getElementById("editx-folder-sources-table");
+                const addFolderSourceButton = document.getElementById("editx-add-folder-source");
+                const productformTable = document.getElementById("editx-productform-table");
 
             function localStorageGet(key) {
                 try {
@@ -587,38 +706,59 @@ DG,LYHYT,LYHYTHH</code></pre>
                 syncRuntimeLogWrap();
             }
 
-            function clearRowInputs(row, table) {
-                row.querySelectorAll("input").forEach(function (input) {
-                    if (input.name === "sftp_port") {
-                        input.value = "22";
-                    } else if (input.name === "sftp_pattern") {
-                        input.value = "*.xml";
-                    } else if (input.name === "sftp_identity_file") {
-                        input.value = table ? table.dataset.defaultIdentityFile || "" : "";
-                    } else if (input.name === "sftp_known_hosts_file") {
-                        input.value = table ? table.dataset.defaultKnownHostsFile || "" : "";
-                    } else if (input.name === "sftp_after_download") {
-                        input.value = "keep";
-                    } else if (input.name === "sftp_strict_host_key_checking") {
-                        input.value = "yes";
-                    } else {
-                        input.value = "";
-                    }
-                });
-            }
-
-            function ensureTableHasRow(table) {
-                if (!table || table.querySelector("tbody[data-editx-sftp-source-row]")) {
-                    return;
+                function clearRowInputs(row, table) {
+                    row.querySelectorAll("input").forEach(function (input) {
+                        if (input.dataset.editxEnabledValue !== undefined) {
+                            input.value = "1";
+                        } else if (input.dataset.editxEnabledToggle !== undefined) {
+                            input.checked = true;
+                        } else if (input.name === "sftp_port") {
+                            input.value = "22";
+                        } else if (input.name === "sftp_pattern" || input.name === "folder_pattern") {
+                            input.value = "*.xml";
+                        } else if (input.name === "sftp_identity_file") {
+                            input.value = table ? table.dataset.defaultIdentityFile || "" : "";
+                        } else if (input.name === "sftp_known_hosts_file") {
+                            input.value = table ? table.dataset.defaultKnownHostsFile || "" : "";
+                        } else if (input.name === "sftp_strict_host_key_checking") {
+                            input.value = "yes";
+                        } else if (input.name === "folder_minimum_age_seconds") {
+                            input.value = "60";
+                        } else {
+                            input.value = "";
+                        }
+                    });
+                    row.querySelectorAll("select[data-editx-success-action]").forEach(function (select) {
+                        select.value = "keep";
+                    });
+                    syncArchiveTargets(row);
                 }
+
+                function sourceRowSelector(table) {
+                    return table && table.id === "editx-folder-sources-table"
+                        ? "tr[data-editx-folder-source-row]"
+                        : "tbody[data-editx-sftp-source-row]";
+                }
+
+                function ensureTableHasRow(table) {
+                    const selector = sourceRowSelector(table);
+                    if (!table || table.querySelector(selector)) {
+                        return;
+                    }
 
                 const templateRow = table.dataset.templateRow
                     ? document.getElementById(table.dataset.templateRow)
                     : null;
-                if (templateRow && templateRow.content) {
-                    table.appendChild(templateRow.content.firstElementChild.cloneNode(true));
+                    if (templateRow && templateRow.content) {
+                        const clone = templateRow.content.firstElementChild.cloneNode(true);
+                        if (table.tBodies.length && table.id === "editx-folder-sources-table") {
+                            table.tBodies[0].appendChild(clone);
+                        } else {
+                            table.appendChild(clone);
+                        }
+                        syncArchiveTargets(clone);
+                    }
                 }
-            }
 
             function setActiveSftpHeader(column) {
                 if (!sftpTable) {
@@ -638,15 +778,11 @@ DG,LYHYT,LYHYTHH</code></pre>
                 }
             }
 
-            function validateSftpSourceNames() {
-                if (!sftpTable) {
-                    return;
-                }
-
-                const nameInputs = Array.from(sftpTable.querySelectorAll("input[name='sftp_id']"));
-                const counts = {};
-                nameInputs.forEach(function (input) {
-                    const value = input.value.trim();
+                function validateSourceNames() {
+                    const nameInputs = Array.from(document.querySelectorAll("input[data-editx-source-id]"));
+                    const counts = {};
+                    nameInputs.forEach(function (input) {
+                        const value = input.value.trim();
                     input.setCustomValidity("");
                     if (value) {
                         counts[value] = (counts[value] || 0) + 1;
@@ -656,64 +792,107 @@ DG,LYHYT,LYHYTHH</code></pre>
                     const value = input.value.trim();
                     if (value && counts[value] > 1) {
                         input.setCustomValidity("Source name must be unique.");
-                    }
-                });
-            }
-
-            if (sftpTable && addSftpSourceButton) {
-                const firstSourceRow = sftpTable.querySelector("tbody[data-editx-sftp-source-row]");
-                if (firstSourceRow) {
-                    const template = document.createElement("template");
-                    template.id = "editx-sftp-source-row-template";
-                    const clone = firstSourceRow.cloneNode(true);
-                    clearRowInputs(clone, sftpTable);
-                    template.content.appendChild(clone);
-                    document.body.appendChild(template);
-                    sftpTable.dataset.templateRow = template.id;
+                        }
+                    });
                 }
 
-                addSftpSourceButton.addEventListener("click", function () {
-                    const template = document.getElementById(sftpTable.dataset.templateRow);
-                    if (template && template.content) {
-                        sftpTable.appendChild(template.content.firstElementChild.cloneNode(true));
-                        validateSftpSourceNames();
+                function syncEnabledToggle(toggle) {
+                    const row = toggle.closest("tbody[data-editx-sftp-source-row], tr[data-editx-folder-source-row]");
+                    const hidden = row ? row.querySelector("input[data-editx-enabled-value]") : null;
+                    if (hidden) {
+                        hidden.value = toggle.checked ? "1" : "0";
                     }
-                });
+                }
 
-                sftpTable.addEventListener("click", function (event) {
-                    const button = event.target.closest(".js-editx-remove-row");
-                    if (!button) {
+                function syncArchiveTargets(scope) {
+                    (scope || document).querySelectorAll("select[data-editx-success-action]").forEach(function (select) {
+                        const row = select.closest("tbody[data-editx-sftp-source-row], tr[data-editx-folder-source-row]");
+                        const archiveTarget = row ? row.querySelector("input[data-editx-archive-target]") : null;
+                        if (archiveTarget) {
+                            archiveTarget.disabled = select.value !== "archive";
+                        }
+                    });
+                }
+
+                function setupSourceTable(table, addButton, templateId) {
+                    if (!table || !addButton) {
                         return;
                     }
 
-                    const sourceRow = button.closest("tbody[data-editx-sftp-source-row]");
-                    if (sourceRow) {
-                        sourceRow.remove();
-                        ensureTableHasRow(sftpTable);
-                        validateSftpSourceNames();
+                    const selector = sourceRowSelector(table);
+                    const firstSourceRow = table.querySelector(selector);
+                    if (firstSourceRow) {
+                        const template = document.createElement("template");
+                        template.id = templateId;
+                        const clone = firstSourceRow.cloneNode(true);
+                        clearRowInputs(clone, table);
+                        template.content.appendChild(clone);
+                        document.body.appendChild(template);
+                        table.dataset.templateRow = template.id;
                     }
-                });
 
-                sftpTable.addEventListener("input", function () {
-                    validateSftpSourceNames();
-                });
-                sftpTable.addEventListener("change", function () {
-                    validateSftpSourceNames();
-                });
-                sftpTable.addEventListener("focusin", function (event) {
-                    const field = event.target.closest("[data-editx-sftp-column]");
-                    setActiveSftpHeader(field ? field.dataset.editxSftpColumn : null);
+                    addButton.addEventListener("click", function () {
+                        const template = document.getElementById(table.dataset.templateRow);
+                        if (template && template.content) {
+                            const clone = template.content.firstElementChild.cloneNode(true);
+                            if (table.tBodies.length && table.id === "editx-folder-sources-table") {
+                                table.tBodies[0].appendChild(clone);
+                            } else {
+                                table.appendChild(clone);
+                            }
+                            validateSourceNames();
+                            syncArchiveTargets(clone);
+                        }
+                    });
+
+                    table.addEventListener("click", function (event) {
+                        const button = event.target.closest(".js-editx-remove-row");
+                        if (!button) {
+                            return;
+                        }
+
+                        const sourceRow = button.closest(selector);
+                        if (sourceRow) {
+                            sourceRow.remove();
+                            ensureTableHasRow(table);
+                            validateSourceNames();
+                        }
+                    });
+
+                    table.addEventListener("input", function () {
+                        validateSourceNames();
+                    });
+                    table.addEventListener("change", function (event) {
+                        const enabledToggle = event.target.closest("[data-editx-enabled-toggle]");
+                        if (enabledToggle) {
+                            syncEnabledToggle(enabledToggle);
+                        }
+                        syncArchiveTargets(table);
+                        validateSourceNames();
+                    });
+
+                    table.querySelectorAll("[data-editx-enabled-toggle]").forEach(syncEnabledToggle);
+                    syncArchiveTargets(table);
+                }
+
+                setupSourceTable(sftpTable, addSftpSourceButton, "editx-sftp-source-row-template");
+                setupSourceTable(folderTable, addFolderSourceButton, "editx-folder-source-row-template");
+
+                if (sftpTable) {
+                    sftpTable.addEventListener("focusin", function (event) {
+                        const field = event.target.closest("[data-editx-sftp-column]");
+                        setActiveSftpHeader(field ? field.dataset.editxSftpColumn : null);
                 });
                 sftpTable.addEventListener("focusout", function () {
                     window.setTimeout(function () {
                         const active = document.activeElement;
                         if (!active || !sftpTable.contains(active)) {
                             setActiveSftpHeader(null);
-                        }
-                    }, 0);
-                });
-                validateSftpSourceNames();
-            }
+                            }
+                        }, 0);
+                    });
+                }
+                validateSourceNames();
 
             if (productformTable) {
                 const productformOriginalOnixCode = document.getElementById("mapping_original_onix_code");
