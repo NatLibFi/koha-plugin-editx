@@ -187,6 +187,7 @@ sub process_orders {
     my $processed = 0;
     my $failed = 0;
     my $skipped = 0;
+    my @processed_files;
     my @errors;
     my @skipped_files;
 
@@ -203,6 +204,7 @@ sub process_orders {
                 $self->_process_order_in_transaction( $file_name, $order, $order_processor, $logger );
                 $file_manager->archiveFile($file_name);
                 $processed++;
+                push @processed_files, $file_name;
 
                 $logger->info("Ended processing order from file $file_name");
             }
@@ -225,6 +227,7 @@ sub process_orders {
         processed => $processed,
         failed    => $failed,
         skipped   => $skipped,
+        @processed_files ? ( processed_files => \@processed_files ) : (),
         @errors ? ( errors => \@errors ) : (),
         @skipped_files ? ( skipped_files => \@skipped_files ) : (),
     };

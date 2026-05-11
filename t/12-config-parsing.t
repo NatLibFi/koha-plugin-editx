@@ -734,7 +734,7 @@ subtest 'Configured source ids must be unique across transports' => sub {
 
     sub new {
         my ( $class, $entries ) = @_;
-        return bless { entries => $entries, downloads => [] }, $class;
+        return bless { entries => $entries, downloads => [], removals => [], renames => [] }, $class;
     }
 
     sub ls {
@@ -750,6 +750,18 @@ subtest 'Configured source ids must be unique across transports' => sub {
         print {$fh} '<LibraryShipNotice />';
         close $fh;
         return 1;
+    }
+
+    sub remove {
+        my ( $self, $remote_path ) = @_;
+        push @{ $self->{removals} }, $remote_path;
+        return $self->{remove_fails} ? 0 : 1;
+    }
+
+    sub rename {
+        my ( $self, $remote_path, $archive_path ) = @_;
+        push @{ $self->{renames} }, [ $remote_path, $archive_path ];
+        return $self->{rename_fails} ? 0 : 1;
     }
 
     sub error      { return shift->{error} || 0; }
@@ -901,7 +913,7 @@ subtest 'Manual staged folder listing and copy uses local sources without SFTP' 
     is( scalar @{ $listing->{files} }, 1, 'Folder source listing returns only stable matching files' );
     is( $listing->{files}->[0]->{key}, 'publisher_inbox::LibraryShipNotice_22877649.xml', 'Folder source listing builds a stable source/file selection key' );
     is( $listing->{files}->[0]->{transport}, 'folder', 'Folder source listing marks the transport' );
-    is( $listing->{files}->[0]->{after_action}, 'manual keeps source', 'Folder source staged workflow does not mutate the source file' );
+    is( $listing->{files}->[0]->{after_action}, 'keep after successful import', 'Folder source listing reports the configured successful import action' );
     is( $listing->{source_operation}, "folder scan($source_dir)", 'Folder source listing reports the local scan operation' );
 
     my $copied = $plugin->_manual_stage_copy_folder_files( $source, {}, $run_dir, ['LibraryShipNotice_22877649.xml'] );
@@ -941,8 +953,154 @@ subtest 'Nightly folder source staging copies stable source files into import tm
 
     is( $result->{copied}, 1, 'Nightly folder source scan copies one stable file' );
     ok( -f File::Spec->catfile( $target_dir, 'LibraryShipNotice_22877649.xml' ), 'Nightly folder source scan copies into import tmp staging' );
-    ok( -f $source_file, 'Nightly folder source scan leaves the source file in place before cleanup support' );
+    ok( -f $source_file, 'Nightly folder source scan leaves the source file in place until import succeeds' );
     like( join( "\n", map { $_->{message} } @logs ), qr{copied to staging}, 'Nightly folder source scan logs copied files' );
+};
+
+subtest 'Source cleanup mutates folder sources only after successful imports' => sub {
+    no strict 'refs';
+    no warnings qw(once redefine);
+
+    my $root = tempdir( CLEANUP => 1 );
+    my $source_dir = File::Spec->catdir( $root, 'inbound' );
+    my $archive_dir = File::Spec->catdir( $root, 'archive' );
+    my $stage_dir = File::Spec->catdir( $root, 'stage' );
+    make_path( $source_dir, $archive_dir, $stage_dir );
+
+    my %source_files;
+    for my $filename (qw(delete.xml archive.xml keep.xml unprocessed.xml)) {
+        my $path = File::Spec->catfile( $source_dir, $filename );
+        open my $fh, '>', $path or die "Cannot write $path: $!";
+        print {$fh} '<LibraryShipNotice />';
+        close $fh;
+        $source_files{$filename} = $path;
+    }
+
+    my @logs;
+    local *{ $plugin_class . '::_log_runtime' } = _capture_runtime_log(\@logs);
+
+    my $result = $plugin->_apply_source_success_actions(
+        {
+            processed_files => [
+                File::Spec->catfile( $stage_dir, 'delete.xml' ),
+                'archive.xml',
+                'keep.xml',
+            ],
+        },
+        [
+            {
+                transport      => 'folder',
+                source_id      => 'folder_delete',
+                filename       => 'delete.xml',
+                source_path    => $source_files{'delete.xml'},
+                local_path     => File::Spec->catfile( $stage_dir, 'delete.xml' ),
+                success_action => 'delete',
+            },
+            {
+                transport         => 'folder',
+                source_id         => 'folder_archive',
+                filename          => 'archive.xml',
+                source_path       => $source_files{'archive.xml'},
+                local_path        => File::Spec->catfile( $stage_dir, 'archive.xml' ),
+                success_action    => 'archive',
+                local_archive_dir => $archive_dir,
+            },
+            {
+                transport      => 'folder',
+                source_id      => 'folder_keep',
+                filename       => 'keep.xml',
+                source_path    => $source_files{'keep.xml'},
+                local_path     => File::Spec->catfile( $stage_dir, 'keep.xml' ),
+                success_action => 'keep',
+            },
+            {
+                transport      => 'folder',
+                source_id      => 'folder_unprocessed',
+                filename       => 'unprocessed.xml',
+                source_path    => $source_files{'unprocessed.xml'},
+                local_path     => File::Spec->catfile( $stage_dir, 'unprocessed.xml' ),
+                success_action => 'delete',
+            },
+        ]
+    );
+
+    is_deeply(
+        $result,
+        { kept => 1, deleted => 1, archived => 1, failed => 0 },
+        'Folder source cleanup counts only successfully processed files'
+    );
+    ok( !-e $source_files{'delete.xml'}, 'Folder delete action removes the original source file' );
+    ok( !-e $source_files{'archive.xml'}, 'Folder archive action moves the original source file' );
+    ok( -f File::Spec->catfile( $archive_dir, 'archive.xml' ), 'Folder archive action creates the archive file' );
+    ok( -f $source_files{'keep.xml'}, 'Folder keep action leaves the original source file' );
+    ok( -f $source_files{'unprocessed.xml'}, 'Unprocessed folder source files are not cleaned up' );
+    like( join( "\n", map { $_->{message} } @logs ), qr{Source cleanup after successful import finished}i, 'Folder cleanup writes a runtime summary' );
+};
+
+subtest 'Source cleanup applies SFTP delete and archive actions after successful imports' => sub {
+    no strict 'refs';
+    no warnings qw(once redefine);
+
+    my $fake_sftp = t::EditXFakeSFTPConnection->new( [] );
+    local *{ $plugin_class . '::_manual_stage_sftp_connect' } = sub {
+        return $fake_sftp;
+    };
+    local *{ $plugin_class . '::_log_runtime' } = sub {
+        return 1;
+    };
+
+    my $result = $plugin->_apply_source_success_actions(
+        {
+            processed_files => [
+                '/var/lib/koha/kohadev/editx/load/delete.xml',
+                'archive.xml',
+                'keep.xml',
+            ],
+        },
+        [
+            {
+                transport      => 'sftp',
+                source_id      => 'sftp_delete',
+                filename       => 'delete.xml',
+                source_path    => '/out/delete.xml',
+                local_path     => '/var/lib/koha/kohadev/editx/tmp/delete.xml',
+                success_action => 'delete',
+            },
+            {
+                transport          => 'sftp',
+                source_id          => 'sftp_archive',
+                filename           => 'archive.xml',
+                source_path        => '/out/archive.xml',
+                local_path         => '/var/lib/koha/kohadev/editx/tmp/archive.xml',
+                success_action     => 'archive',
+                remote_archive_dir => '/done',
+            },
+            {
+                transport      => 'sftp',
+                source_id      => 'sftp_keep',
+                filename       => 'keep.xml',
+                source_path    => '/out/keep.xml',
+                local_path     => '/var/lib/koha/kohadev/editx/tmp/keep.xml',
+                success_action => 'keep',
+            },
+            {
+                transport      => 'sftp',
+                source_id      => 'sftp_unprocessed',
+                filename       => 'unprocessed.xml',
+                source_path    => '/out/unprocessed.xml',
+                local_path     => '/var/lib/koha/kohadev/editx/tmp/unprocessed.xml',
+                success_action => 'delete',
+            },
+        ]
+    );
+
+    is_deeply(
+        $result,
+        { kept => 1, deleted => 1, archived => 1, failed => 0 },
+        'SFTP source cleanup counts only successfully processed files'
+    );
+    is_deeply( $fake_sftp->{removals}, ['/out/delete.xml'], 'SFTP delete action removes only the processed remote file' );
+    is_deeply( $fake_sftp->{renames}, [ [ '/out/archive.xml', '/done/archive.xml' ] ], 'SFTP archive action renames the processed remote file into the archive folder' );
 };
 
 subtest 'Manual staged SFTP listing reports empty output to the caller' => sub {

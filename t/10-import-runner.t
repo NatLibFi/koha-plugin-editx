@@ -429,10 +429,11 @@ subtest 'run queues, parses, validates, processes, and archives a file' => sub {
     my $result = $runner->run;
 
     is_deeply(
-        $result,
+        { map { $_ => $result->{$_} } qw(processed failed skipped) },
         { processed => 1, failed => 0, skipped => 0 },
         'Runner returns processed and failed counters'
     );
+    is_deeply( $result->{processed_files}, [ '/tmp/editx/load/order.xml' ], 'Runner reports successfully processed files for source cleanup' );
     is_deeply( $parser->{paths}, [ '/tmp/editx/load' ], 'Runner parses the configured load path' );
     is_deeply( \@validated, [ '/tmp/editx/load/order.xml' ], 'Runner validates the parsed file path' );
     is_deeply( $file_manager->{checked_imported}, [ '/tmp/editx/load/order.xml' ], 'Runner checks import history before validation' );
@@ -518,6 +519,7 @@ subtest 'run_file_paths imports selected staged files and reports preparation fa
     is( scalar @{ $transaction_manager->{transactions} }, 1, 'Runner starts one transaction for the selected import' );
     is( $transaction_manager->{transactions}->[0]->{committed}, 1, 'Runner commits the selected import' );
     is_deeply( $file_manager->{archived}, [$selected_file], 'Runner archives the selected file after processing' );
+    is_deeply( $result->{processed_files}, [$selected_file], 'Selected staged import reports successfully processed files for source cleanup' );
     is_deeply( $file_manager->{failed}, [$missing_file], 'Runner moves missing selected files through the fail path' );
     is( $result->{errors}->[0]->{file}, $missing_file, 'Runner reports the missing selected file path' );
     like( $result->{errors}->[0]->{error}, qr{Selected EDItX file does not exist}, 'Runner reports a clear preparation error' );

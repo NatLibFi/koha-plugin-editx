@@ -5,7 +5,7 @@ use Modern::Perl;
 use base qw(Koha::Plugins::Base);
 ## We will also need to include any Koha libraries we want to access
 use File::Basename qw(basename);
-use File::Copy qw(copy);
+use File::Copy qw(copy move);
 use File::Path qw(make_path);
 use File::Spec;
 use File::Temp qw(tempfile tempdir);
@@ -739,6 +739,8 @@ sub _manual_stage_import_selected {
         return ( \@messages, $self->_manual_stage_manifest_for_template($manifest), undef );
     }
     $self->_manual_stage_enrich_import_result( $result, \@files );
+    my $cleanup_result = $self->_apply_source_success_actions( $result, \@files );
+    $result->{source_cleanup} = $cleanup_result if $cleanup_result;
 
     my $summary_loaded = eval {
         $manual_sync_result = $self->_manual_sync_result($run_started_at);
@@ -982,7 +984,7 @@ sub _manual_stage_list_folder_source {
             modified     => strftime( '%Y-%m-%d %H:%M:%S', localtime($mtime) ),
             local_status => 'source folder',
             source_dir   => $source_dir,
-            after_action => 'manual keeps source',
+            after_action => $self->_manual_stage_source_success_action_note($source),
         };
     }
 
@@ -1032,7 +1034,7 @@ sub _manual_stage_list_sftp_source {
             modified     => $modified,
             local_status => $local_status,
             remote_dir   => $source->{remote_dir},
-            after_action => 'manual keeps source',
+            after_action => $self->_manual_stage_source_success_action_note($source),
         };
     }
     $sftp->disconnect if $sftp->can('disconnect');
@@ -1082,6 +1084,13 @@ sub _manual_stage_download_sftp_files {
             local_path      => $local_path,
             success_action  => $source->{success_action},
             remote_archive_dir => $source->{remote_archive_dir},
+            host            => $source->{host},
+            port            => $source->{port},
+            user            => $source->{user},
+            identity_file   => $source->{identity_file},
+            known_hosts_file => $source->{known_hosts_file},
+            strict_host_key_checking => $source->{strict_host_key_checking},
+            ssh_config      => $source->{ssh_config},
         };
     }
     $sftp->disconnect if $sftp->can('disconnect');
@@ -1122,6 +1131,139 @@ sub _manual_stage_copy_folder_files {
     }
 
     return \@copied;
+}
+
+sub _manual_stage_source_success_action_note {
+    my ( $self, $source ) = @_;
+
+    my $action = $source->{success_action} || 'keep';
+    return 'delete after successful import'  if $action eq 'delete';
+    return 'archive after successful import' if $action eq 'archive';
+    return 'keep after successful import';
+}
+
+sub _apply_source_success_actions {
+    my ( $self, $import_result, $files ) = @_;
+
+    return if !$import_result || ref $import_result ne 'HASH';
+    my %processed = map {
+        my $path = $_;
+        defined $path && $path ne '' ? ( basename($path) => 1, $path => 1 ) : ()
+    } @{ $import_result->{processed_files} || [] };
+
+    my %result = ( kept => 0, deleted => 0, archived => 0, failed => 0 );
+    for my $file ( @{ $files || [] } ) {
+        my $local_path = $file->{local_path} // '';
+        my $filename = $file->{filename} || ( $local_path ? basename($local_path) : '' );
+        next if !$filename;
+        next if !$processed{$filename} && ( !$local_path || !$processed{$local_path} );
+
+        my $action = $file->{success_action} || 'keep';
+        if ( $action eq 'keep' ) {
+            $result{kept}++;
+            next;
+        }
+
+        my $ok = eval {
+            if ( ( $file->{transport} || '' ) eq 'folder' ) {
+                $self->_apply_folder_source_success_action( $file, $action );
+            } elsif ( ( $file->{transport} || '' ) eq 'sftp' ) {
+                $self->_apply_sftp_source_success_action( $file, $action );
+            } else {
+                die "Unknown source transport for $filename.\n";
+            }
+            1;
+        };
+        if ($ok) {
+            $result{ $action eq 'archive' ? 'archived' : 'deleted' }++;
+        } else {
+            $result{failed}++;
+            $self->_log_runtime(
+                error => 'EDItX source cleanup failed after successful import',
+                {
+                    operation  => 'source_cleanup',
+                    source_id  => $file->{source_id},
+                    transport  => $file->{transport},
+                    filename   => $filename,
+                    action     => $action,
+                    error      => $self->_compact_message($@),
+                }
+            );
+        }
+    }
+
+    $self->_log_runtime(
+        info => 'EDItX source cleanup after successful import finished',
+        {
+            operation => 'source_cleanup',
+            kept      => $result{kept},
+            deleted   => $result{deleted},
+            archived  => $result{archived},
+            failed    => $result{failed},
+        }
+    );
+
+    return \%result;
+}
+
+sub _apply_folder_source_success_action {
+    my ( $self, $file, $action ) = @_;
+
+    my $source_path = $file->{source_path} || '';
+    die "Folder source cleanup has no source path.\n" if !$source_path;
+
+    if ( $action eq 'delete' ) {
+        unlink $source_path or die "Cannot delete folder source file $source_path: $!";
+        $self->_log_runtime( info => 'Deleted EDItX folder source file after successful import', { operation => 'source_cleanup', source_id => $file->{source_id}, source_file => $source_path } );
+        return 1;
+    }
+
+    die "Unsupported folder source cleanup action '$action'.\n" if $action ne 'archive';
+    my $archive_dir = $file->{local_archive_dir} || '';
+    die "Folder source cleanup archive action has no local_archive_dir.\n" if !$archive_dir;
+    make_path($archive_dir) if !-d $archive_dir;
+    die "Folder source cleanup archive target is not a directory: $archive_dir\n" if !-d $archive_dir;
+    my $target_path = File::Spec->catfile( $archive_dir, $file->{filename} || basename($source_path) );
+    move( $source_path, $target_path )
+        or die "Cannot archive folder source file $source_path to $target_path: $!";
+    $self->_log_runtime( info => 'Archived EDItX folder source file after successful import', { operation => 'source_cleanup', source_id => $file->{source_id}, source_file => $source_path, archive_file => $target_path } );
+
+    return 1;
+}
+
+sub _apply_sftp_source_success_action {
+    my ( $self, $file, $action ) = @_;
+
+    my $remote_path = $file->{source_path} || '';
+    die "SFTP source cleanup has no remote path.\n" if !$remote_path;
+    my $sftp = $self->_manual_stage_sftp_connect($file);
+
+    if ( $action eq 'delete' ) {
+        if ( !$sftp->remove($remote_path) ) {
+            my $error = $self->_manual_stage_sftp_error($sftp);
+            $sftp->disconnect if $sftp->can('disconnect');
+            die "Cannot delete SFTP source file $remote_path: $error\n";
+        }
+        $sftp->disconnect if $sftp->can('disconnect');
+        $self->_log_runtime( info => 'Deleted EDItX SFTP source file after successful import', { operation => 'source_cleanup', source_id => $file->{source_id}, remote_file => $remote_path } );
+        return 1;
+    }
+
+    die "Unsupported SFTP source cleanup action '$action'.\n" if $action ne 'archive';
+    my $archive_dir = $file->{remote_archive_dir} || '';
+    die "SFTP source cleanup archive action has no remote_archive_dir.\n" if !$archive_dir;
+    $archive_dir =~ s{/+\z}{};
+    my $filename = $file->{filename} || basename($remote_path);
+    my $archive_path = $archive_dir eq '' || $archive_dir eq '/' ? "/$filename" : "$archive_dir/$filename";
+    if ( !$sftp->rename( $remote_path, $archive_path ) ) {
+        my $error = $self->_manual_stage_sftp_error($sftp);
+        $sftp->disconnect if $sftp->can('disconnect');
+        die "Cannot archive SFTP source file $remote_path to $archive_path: $error\n";
+    }
+    $sftp->disconnect if $sftp->can('disconnect');
+    $self->_log_runtime( info => 'Archived EDItX SFTP source file after successful import', { operation => 'source_cleanup', source_id => $file->{source_id}, remote_file => $remote_path, archive_file => $archive_path } );
+
+    return 1;
 }
 
 sub _manual_stage_sftp_connect {
@@ -1937,6 +2079,98 @@ sub _write_sftp_config_file {
     return $config_file;
 }
 
+sub _stage_sftp_sources_for_import {
+    my ($self) = @_;
+
+    my ( $sources, $messages, $has_errors ) = $self->_normalize_sftp_sources( $self->_sftp_sources );
+    die join( "\n", map { $_->{text} } @$messages ) . "\n" if $has_errors;
+    $sources = [ grep { ( $_->{enabled} // 'yes' ) eq 'yes' } @$sources ];
+    if ( !@$sources ) {
+        $self->_log_runtime( info => 'No enabled EDItX SFTP sources configured; skipping SFTP source scan', { operation => 'sftp_scan' } );
+        return { downloaded => 0, skipped => 0, sources => 0, files => [] };
+    }
+
+    my $procurement_settings = $self->_procurement_settings();
+    my $target_dir = $procurement_settings->{import_tmp_path};
+    die "Temporary download folder is not configured.\n" if !$target_dir;
+    die "Temporary download folder is not a directory: $target_dir\n" if !-d $target_dir;
+    die "Temporary download folder is not writable by the Koha process: $target_dir\n" if !-w $target_dir || !-x $target_dir;
+
+    my %total = ( downloaded => 0, skipped => 0, sources => scalar @$sources, files => [] );
+    for my $source (@$sources) {
+        $source->{transport} = 'sftp';
+        my $listed = $self->_manual_stage_list_sftp_source( $source, $procurement_settings );
+        my @filenames = map { $_->{filename} } @{ $listed->{files} || [] };
+        my $result = $self->_stage_sftp_source_for_import( $source, $target_dir, \@filenames );
+        $total{downloaded} += $result->{downloaded} || 0;
+        $total{skipped}    += $result->{skipped}    || 0;
+        push @{ $total{files} }, @{ $result->{files} || [] };
+    }
+
+    $self->_log_runtime(
+        info => 'EDItX SFTP source scan finished',
+        {
+            operation    => 'sftp_scan',
+            source_count => $total{sources},
+            downloaded   => $total{downloaded},
+            skipped      => $total{skipped},
+        }
+    );
+
+    return \%total;
+}
+
+sub _stage_sftp_source_for_import {
+    my ( $self, $source, $target_dir, $filenames ) = @_;
+
+    my $remote_dir = $source->{remote_dir} || '';
+    $remote_dir =~ s{/+\z}{};
+    my $sftp = $self->_manual_stage_sftp_connect($source);
+    my %result = ( downloaded => 0, skipped => 0, files => [] );
+
+    for my $filename (@$filenames) {
+        next if !$self->_manual_stage_safe_filename($filename);
+        my $target_path = File::Spec->catfile( $target_dir, $filename );
+        if ( -e $target_path ) {
+            $result{skipped}++;
+            $self->_log_runtime( warn => 'EDItX SFTP source file skipped because target staging file already exists', { operation => 'sftp_scan', source_id => $source->{id}, target_file => $target_path } );
+            next;
+        }
+
+        my $remote_path = $remote_dir eq '' || $remote_dir eq '/' ? "/$filename" : "$remote_dir/$filename";
+        if ( !$sftp->get( $remote_path, $target_path ) ) {
+            my $error = $self->_manual_stage_sftp_error($sftp);
+            $sftp->disconnect if $sftp->can('disconnect');
+            die "EDItX SFTP source file was not downloaded: $filename: $error\n";
+        }
+        die "EDItX SFTP source file was not downloaded: $filename\n" if !-f $target_path;
+        $result{downloaded}++;
+        push @{ $result{files} }, {
+            id                       => $self->_manual_stage_file_id( $source->{id}, $filename ),
+            source_id                => $source->{id},
+            source_name              => $source->{id},
+            transport                => 'sftp',
+            remote_file              => $filename,
+            filename                 => $filename,
+            source_path              => $remote_path,
+            local_path               => $target_path,
+            success_action           => $source->{success_action},
+            remote_archive_dir       => $source->{remote_archive_dir},
+            host                     => $source->{host},
+            port                     => $source->{port},
+            user                     => $source->{user},
+            identity_file            => $source->{identity_file},
+            known_hosts_file         => $source->{known_hosts_file},
+            strict_host_key_checking => $source->{strict_host_key_checking},
+            ssh_config               => $source->{ssh_config},
+        };
+        $self->_log_runtime( info => 'EDItX SFTP source file downloaded to staging', { operation => 'sftp_scan', source_id => $source->{id}, remote_file => $remote_path, target_file => $target_path } );
+    }
+    $sftp->disconnect if $sftp->can('disconnect');
+
+    return \%result;
+}
+
 sub _stage_folder_sources_for_import {
     my ($self) = @_;
 
@@ -1954,11 +2188,12 @@ sub _stage_folder_sources_for_import {
     die "Temporary download folder is not a directory: $target_dir\n" if !-d $target_dir;
     die "Temporary download folder is not writable by the Koha process: $target_dir\n" if !-w $target_dir || !-x $target_dir;
 
-    my %total = ( copied => 0, skipped => 0, sources => scalar @$sources );
+    my %total = ( copied => 0, skipped => 0, sources => scalar @$sources, files => [] );
     for my $source (@$sources) {
         my $result = $self->_stage_folder_source_for_import( $source, $target_dir );
         $total{copied}  += $result->{copied}  || 0;
         $total{skipped} += $result->{skipped} || 0;
+        push @{ $total{files} }, @{ $result->{files} || [] };
     }
 
     $self->_log_runtime(
@@ -1997,7 +2232,7 @@ sub _stage_folder_source_for_import {
         }
     );
 
-    my %result = ( copied => 0, skipped => 0 );
+    my %result = ( copied => 0, skipped => 0, files => [] );
     my $now = time;
     for my $filename ( sort @entries ) {
         if ( !$self->_manual_stage_safe_filename($filename) ) {
@@ -2033,6 +2268,17 @@ sub _stage_folder_source_for_import {
         copy( $source_path, $target_path )
             or die "Cannot copy EDItX folder source file $source_path to $target_path: $!";
         $result{copied}++;
+        push @{ $result{files} }, {
+            id                => $self->_manual_stage_file_id( $source->{id}, $filename ),
+            source_id         => $source->{id},
+            source_name       => $source->{id},
+            transport         => 'folder',
+            filename          => $filename,
+            source_path       => $source_path,
+            local_path        => $target_path,
+            success_action    => $source->{success_action},
+            local_archive_dir => $source->{local_archive_dir},
+        };
         $self->_log_runtime( info => 'EDItX folder source file copied to staging', { operation => 'folder_scan', source_id => $source->{id}, source_file => $source_path, target_file => $target_path } );
     }
 
@@ -2047,15 +2293,9 @@ sub _run_nightly_sync {
     my $koha_instance = $self->_koha_instance();
     die "Koha instance could not be detected from Koha configuration." unless $koha_instance;
 
-    my $plugin_path = $self->bundle_path();
-    my $fetch_script = "$plugin_path/cronjobs/fetch_editx_sftp.sh";
-    my $import_script = "$plugin_path/cronjobs/runEditXImport.pl";
     my $lock_instance = $koha_instance;
     $lock_instance =~ s/[^A-Za-z0-9_.-]/_/g;
     my $lock_dir = "/tmp/editx-nightly-$lock_instance.lock";
-    my $sftp_config_file;
-
-    die "No EDItX import script: $import_script" unless -f $import_script;
 
     if ( !mkdir $lock_dir ) {
         $self->_log_runtime( warn => 'EDItX synchronization skipped because another run is active', { operation => 'sync', koha_instance => $koha_instance } );
@@ -2064,28 +2304,37 @@ sub _run_nightly_sync {
     }
 
     my $success = eval {
-        $sftp_config_file = $self->_write_sftp_config_file($koha_instance);
         local $ENV{EDITX_RUNTIME_LOG} = Koha::Plugin::Fi::KohaSuomi::Editx::RuntimeLog->path;
         local $ENV{EDITX_RUNTIME_LOG_LEVEL} = $self->_runtime_log_level();
 
         $self->_log_runtime( info => 'Starting EDItX synchronization chain', { operation => 'sync', koha_instance => $koha_instance } );
         $self->_sync_print( $options, "Starting EDItX nightly synchronization for $koha_instance.\n" );
-        if ($sftp_config_file) {
-            die "No executable EDItX SFTP fetch script: $fetch_script" unless -x $fetch_script;
-            $self->_run_command( $options, $fetch_script, $sftp_config_file, $koha_instance );
+        my @source_files;
+        my $sftp_result = $self->_stage_sftp_sources_for_import();
+        if ( $sftp_result && $sftp_result->{sources} ) {
+            push @source_files, @{ $sftp_result->{files} || [] };
+            $self->_sync_print( $options, "SFTP source scan downloaded $sftp_result->{downloaded} EDItX file(s) to staging.\n" );
         }
         my $folder_result = $self->_stage_folder_sources_for_import();
         if ( $folder_result && $folder_result->{sources} ) {
+            push @source_files, @{ $folder_result->{files} || [] };
             $self->_sync_print( $options, "Folder source scan copied $folder_result->{copied} EDItX file(s) to staging.\n" );
         }
-        $self->_run_command( $options, $^X, $import_script );
+        my $import_result = $self->_run_import_runner_for_sync($options);
+        my $cleanup_result = $self->_apply_source_success_actions( $import_result, \@source_files );
+        if ($cleanup_result) {
+            $self->_sync_print(
+                $options,
+                "Source cleanup: kept $cleanup_result->{kept}, deleted $cleanup_result->{deleted}, archived $cleanup_result->{archived}, failed $cleanup_result->{failed}.\n"
+            );
+        }
+        die "EDItX import failed for $import_result->{failed} file(s).\n" if $import_result->{failed};
         $self->_sync_print( $options, "Finished EDItX nightly synchronization for $koha_instance.\n" );
         $self->_log_runtime( info => 'Finished EDItX synchronization chain', { operation => 'sync', koha_instance => $koha_instance } );
         1;
     };
     my $error = $@;
 
-    unlink $sftp_config_file if $sftp_config_file && -f $sftp_config_file;
     if ( !rmdir $lock_dir ) {
         my $message = "Could not remove EDItX nightly lock $lock_dir: $!";
         $self->_log_runtime( warn => $message, { operation => 'sync', koha_instance => $koha_instance } );
@@ -2096,6 +2345,26 @@ sub _run_nightly_sync {
     die $error unless $success;
 
     return 1;
+}
+
+sub _run_import_runner_for_sync {
+    my ( $self, $options ) = @_;
+
+    require Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::ImportRunner;
+    my $result = Koha::Plugin::Fi::KohaSuomi::Editx::Procurement::ImportRunner->new( { echo => 0 } )->run;
+    die "EDItX import runner did not return a result.\n" if ref $result ne 'HASH';
+
+    $self->_sync_print(
+        $options,
+        "EDItX import result: processed $result->{processed}, failed $result->{failed}, skipped $result->{skipped}.\n"
+    );
+    for my $error ( @{ $result->{errors} || [] } ) {
+        my $file = $error->{file} // '';
+        my $message = $self->_compact_message( $error->{error} );
+        $self->_sync_print( $options, "Failed EDItX file $file: $message\n" );
+    }
+
+    return $result;
 }
 
 sub _run_nightly_sync_for_web {

@@ -66,7 +66,9 @@ like( $plugin_pm, qr{sub\s+_manual_stage_import_selected\s*\{}, 'Plugin can impo
 like( $plugin_pm, qr{Selected EDItX files include duplicate notices and were not imported}, 'Staged import keeps duplicate files blocked server-side' );
 like( $plugin_pm, qr{ImportRunner->new\(\s*\{\s*echo\s*=>\s*0\s*\}\s*\)->run_file_paths}, 'Manual staged web import suppresses runner console echo before rendering the Koha response' );
 like( $plugin_pm, qr{sub\s+_manual_stage_preview_file\s*\{}, 'Plugin builds EDItX previews for staged files' );
-like( $plugin_pm, qr{manual keeps source}, 'Manual staged workflow does not archive or delete source files' );
+like( $plugin_pm, qr{_manual_stage_source_success_action_note}, 'Manual staged workflow reports per-source successful import actions' );
+like( $plugin_pm, qr{_apply_source_success_actions}, 'Plugin applies configured source cleanup after successful imports' );
+like( $plugin_pm, qr{ImportRunner->new\(\s*\{\s*echo\s*=>\s*0\s*\}\s*\)->run}, 'Full-chain web import suppresses runner console echo before rendering the Koha response' );
 like( $plugin_pm, qr{print\s+\$cgi->redirect\(\s*\$self->_manual_stage_url\(\s*\$manual_stage->\{run_id\},\s*'downloaded'\s*\)\s*\)}, 'Stage download POST redirects to a reload-safe GET page' );
 like( $plugin_pm, qr{print\s+\$cgi->redirect\(\s*\$self->_manual_stage_url\(\s*\$manual_stage->\{run_id\},\s*'imported'\s*\)\s*\)}, 'Stage import POST redirects to a reload-safe GET page' );
 like( $plugin_pm, qr{recommended_import_paths}, 'Configure template receives recommended import path examples' );
@@ -226,6 +228,7 @@ unlike( $tool, qr{function\s+applyDuplicateOverride|function\s+duplicateOverride
 like( $tool, qr{function\s+allCheckboxes[\s\S]+dataTable\.rows\(\)\.nodes\(\)\.toArray\(\)[\s\S]+allCheckboxes\(table, name\)\.forEach}, 'Staged file submit handling covers DataTables rows beyond the visible page' );
 like( $tool, qr{dragState[\s\S]+mousedown[\s\S]+mouseover[\s\S]+is-editx-selection-drag-active}, 'Staged file tables support mouse-drag checkbox selection' );
 like( $tool, qr{Selected EDItX import result[\s\S]+manual_stage\.import_result\.skipped_files[\s\S]+Skipped files[\s\S]+Existing Koha basket[\s\S]+Existing Koha orders}, 'Tool page renders skipped staged import files with Koha duplicate details' );
+like( $tool, qr{Source cleanup:[\s\S]+source_cleanup\.deleted[\s\S]+source_cleanup\.archived}, 'Tool page reports source cleanup results after staged import' );
 like( $tool, qr{Check source files again}, 'Tool page offers a restart action after a staged import result' );
 like( $tool, qr{href="\[%\s*tool_href\s*\|\s*html\s*%\]">Return to start</a>}, 'Tool page lets staff return from the staged import result to the start screen' );
 like( $tool, qr{No EDItX files matched the configured sources[\s\S]+Check source files again[\s\S]+Return to start}, 'Tool page gives explicit actions when no staged source files match' );
@@ -277,6 +280,7 @@ my $file_manager = read_file('Koha/Plugin/Fi/KohaSuomi/Editx/Procurement/File.pm
 like( $run_import, qr{exit\(\s*\$result->\{failed\}\s*\?\s*1\s*:\s*0\s*\)}, 'Console import wrapper exits non-zero when import files failed' );
 like( $run_import, qr{Failed EDItX file}, 'Console import wrapper prints failed file diagnostics' );
 like( $import_runner, qr{sub\s+run_file_paths\s*\{}, 'ImportRunner can import selected explicit file paths' );
+like( $import_runner, qr{processed_files}, 'ImportRunner reports successfully processed file paths for source cleanup' );
 like( $file_manager, qr{sub\s+registerFileForImport\s*\{}, 'File manager can register selected staged files before import' );
 like( $plugin_pm, qr{use Net::SFTP::Foreign;}, 'Manual staged workflow uses Koha-packaged Net::SFTP::Foreign' );
 like( $plugin_pm, qr{Net::SFTP::Foreign->new}, 'Manual staged workflow connects through the Perl SFTP client' );

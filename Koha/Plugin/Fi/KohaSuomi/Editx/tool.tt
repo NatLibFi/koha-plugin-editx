@@ -115,7 +115,7 @@
                                             <th class="editx-stage-modified-cell">Modified</th>
                                             <th>Size</th>
                                             <th>Local status</th>
-                                            <th>Manual action</th>
+                                            <th>Successful import action</th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -249,6 +249,18 @@
                                 failed <strong>[% manual_stage.import_result.failed | html %]</strong>,
                                 skipped <strong>[% manual_stage.import_result.skipped | html %]</strong>.
                             </p>
+                            [% IF manual_stage.import_result.source_cleanup %]
+                                <p class="editx-stage-result-note">
+                                    Source cleanup:
+                                    kept <strong>[% manual_stage.import_result.source_cleanup.kept | html %]</strong>,
+                                    deleted <strong>[% manual_stage.import_result.source_cleanup.deleted | html %]</strong>,
+                                    archived <strong>[% manual_stage.import_result.source_cleanup.archived | html %]</strong>,
+                                    failed <strong>[% manual_stage.import_result.source_cleanup.failed | html %]</strong>.
+                                    [% IF manual_stage.import_result.source_cleanup.failed %]
+                                        Review the EDItX runtime log before retrying source cleanup manually.
+                                    [% END %]
+                                </p>
+                            [% END %]
                             [% IF manual_stage.import_result.skipped_files && manual_stage.import_result.skipped_files.size %]
                                 <h4>Skipped files</h4>
                                 <p class="editx-stage-result-note">
