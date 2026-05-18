@@ -29,6 +29,7 @@ use XML::LibXML;
 use utf8;
 
 use constant PRODUCTFORM_MAPPINGS_ANCHOR => 'ProductFormMappings';
+use constant CONFIGURE_FLASH_COOKIE_PATH => '/cgi-bin/koha/plugins/run.pl';
 
 ## Here we set our plugin version
 our $VERSION = "0.0.2";
@@ -190,16 +191,13 @@ sub configure {
     my $is_delete_mapping_row = $cgi->request_method eq 'POST' && $cgi->param('delete_mapping_row');
     my $is_mapping_action = $is_import_mapping_csv || $is_add_mapping_row || $is_update_mapping_row || $is_delete_mapping_row;
     my $flash = $cgi->request_method eq 'GET'
-        ? Koha::Plugin::Fi::KohaSuomi::Editx::FlashCookie->consume(
+        ? $self->_configure_flash->consume(
             {
                 cgi       => $cgi,
-                namespace => 'editx_configure',
             }
         )
         : {};
-    if ( my $flash_message = $self->_configure_flash_message( $flash->{code} ) ) {
-        push @messages, $flash_message;
-    }
+    push @messages, @{ $flash->{messages} || [] };
 
     my $runtime_log_level =
           $is_save
@@ -325,7 +323,9 @@ sub configure {
             { runtime_log_level => $runtime_log_level }
         );
 
-        $self->_redirect_configure_with_flash('configuration_saved');
+        my $flash = $self->_configure_flash;
+        $flash->success('EDItX plugin configuration saved.');
+        $self->_redirect_configure_with_flash($flash);
         return;
     }
 
@@ -1729,7 +1729,6 @@ sub _output_configure_page {
         $template->output(),
         undef,
         undef,
-        undef,
         Koha::Plugin::Fi::KohaSuomi::Editx::FlashCookie->merge_cookies(
             $self->{_auth_cookies},
             $params{cookies},
@@ -1789,20 +1788,20 @@ sub _handle_productform_mapping_action {
         }
 
         $self->_store_last_configured_by();
-        $self->_redirect_configure_with_flash( 'productform_mapping_deleted', PRODUCTFORM_MAPPINGS_ANCHOR );
+        $self->_redirect_configure_success( 'ProductForm mapping row deleted.', PRODUCTFORM_MAPPINGS_ANCHOR );
         return 1;
     }
 
-    my ( $row, $original_mapping_onix_code, $mapping_editor, $action_code );
+    my ( $row, $original_mapping_onix_code, $mapping_editor, $action_message );
     if ( $cgi->param('update_mapping_row') ) {
         $row = $self->_productform_mapping_row_from_cgi( $cgi, 'add_mapping', 'Mapping row' );
         $original_mapping_onix_code = $self->_trim_csv_value( scalar $cgi->param('mapping_original_onix_code') );
         $mapping_editor = $self->_productform_mapping_editor_from_cgi($cgi);
-        $action_code = 'productform_mapping_updated';
+        $action_message = 'ProductForm mapping row updated.';
     } else {
         $row = $self->_productform_mapping_row_from_cgi( $cgi, 'add_mapping', 'New mapping row' );
         $mapping_editor = $self->_productform_mapping_editor_from_cgi($cgi);
-        $action_code = 'productform_mapping_added';
+        $action_message = 'ProductForm mapping row added.';
     }
 
     my ( $rows, $row_messages, $has_blocking_errors ) = $self->_normalize_productform_mapping_rows( [$row] );
@@ -1836,8 +1835,8 @@ sub _handle_productform_mapping_action {
     }
 
     $self->_store_last_configured_by();
-    $self->_redirect_configure_with_flash(
-        $action_code,
+    $self->_redirect_configure_success(
+        $action_message,
         PRODUCTFORM_MAPPINGS_ANCHOR,
         { productform_focus => $rows->[0]->{onix_code} }
     );
@@ -1891,7 +1890,7 @@ sub _handle_productform_mapping_csv_import {
     }
 
     $self->_store_last_configured_by();
-    $self->_redirect_configure_with_flash( 'productform_mapping_imported', PRODUCTFORM_MAPPINGS_ANCHOR );
+    $self->_redirect_configure_success( 'ProductForm mapping CSV imported.', PRODUCTFORM_MAPPINGS_ANCHOR );
     return 1;
 }
 
@@ -1926,16 +1925,34 @@ sub _productform_csv_import_blocked_message {
     return $self->_configure_message( error => $text );
 }
 
-sub _redirect_configure_with_flash {
-    my ( $self, $code, $anchor, $query ) = @_;
+sub _configure_flash {
+    my ($self) = @_;
 
-    Koha::Plugin::Fi::KohaSuomi::Editx::FlashCookie->redirect_with_flash(
+    return Koha::Plugin::Fi::KohaSuomi::Editx::FlashCookie->new(
         {
-            cgi       => $self->{'cgi'},
-            uri       => $self->_configure_uri( anchor => $anchor, query => $query ),
             namespace => 'editx_configure',
-            code      => $code,
-            cookies   => $self->{_auth_cookies},
+            path      => CONFIGURE_FLASH_COOKIE_PATH,
+        }
+    );
+}
+
+sub _redirect_configure_success {
+    my ( $self, $text, $anchor, $query ) = @_;
+
+    my $flash = $self->_configure_flash;
+    $flash->success($text);
+
+    return $self->_redirect_configure_with_flash( $flash, $anchor, $query );
+}
+
+sub _redirect_configure_with_flash {
+    my ( $self, $flash, $anchor, $query ) = @_;
+
+    $flash->redirect(
+        {
+            cgi     => $self->{'cgi'},
+            uri     => $self->_configure_uri( anchor => $anchor, query => $query ),
+            cookies => $self->{_auth_cookies},
         }
     );
 
@@ -1959,24 +1976,6 @@ sub _configure_uri {
     $uri .= '#' . $anchor if defined $anchor && $anchor =~ /\A[A-Za-z][A-Za-z0-9_-]*\z/;
 
     return $uri;
-}
-
-sub _configure_flash_message {
-    my ( $self, $code ) = @_;
-
-    return unless defined $code && length $code;
-
-    my %messages = (
-        configuration_saved          => [ success => 'EDItX plugin configuration saved.' ],
-        productform_mapping_added    => [ success => 'ProductForm mapping row added.' ],
-        productform_mapping_updated  => [ success => 'ProductForm mapping row updated.' ],
-        productform_mapping_deleted  => [ success => 'ProductForm mapping row deleted.' ],
-        productform_mapping_imported => [ success => 'ProductForm mapping CSV imported.' ],
-    );
-
-    return unless $messages{$code};
-
-    return $self->_configure_message( @{ $messages{$code} } );
 }
 
 sub _store_last_configured_by {
@@ -3517,13 +3516,9 @@ sub _trim_csv_value {
 }
 
 sub _configure_message {
-    my ( $self, $type, $text ) = @_;
+    my ( $self, $type, $text, %params ) = @_;
 
-    return {
-        type        => $type,
-        alert_class => $type eq 'error' ? 'danger' : $type,
-        text        => $text,
-    };
+    return Koha::Plugin::Fi::KohaSuomi::Editx::FlashCookie->message( $type, $text, %params );
 }
 
 sub _runtime_log_level {

@@ -44,7 +44,16 @@
                 </div>
 
                 [% FOREACH message IN messages %]
-                    <div class="alert alert-[% message.alert_class | html %]">[% message.text | html %]</div>
+                    <div class="alert alert-[% message.alert_class | html %]" role="[% message.role | html %]">
+                        <p class="mb-0">[% message.text | html %]</p>
+                        [% IF message.details && message.details.size %]
+                            <ul class="mb-0">
+                                [% FOREACH detail IN message.details %]
+                                    <li>[% detail | html %]</li>
+                                [% END %]
+                            </ul>
+                        [% END %]
+                    </div>
                 [% END %]
 
                 <form method="post" enctype="multipart/form-data" class="page-section editx-config-form">
