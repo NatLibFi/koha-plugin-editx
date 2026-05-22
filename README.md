@@ -22,13 +22,13 @@ To set up the Koha plugin system you must first make some changes to your instal
 Once set up is complete you will need to alter your UseKohaPlugins system preference. On the Tools page you will see the Tools Plugins and on the Reports page you will see the Reports Plugins.
 # Configuring
 
-Install the KPZ and configure the plugin from Koha staff interface. The configuration page stores EDItX settings in Koha `plugin_data`.
+Install the KPZ and configure the plugin from the Koha staff interface. The configuration page stores EDItX settings in Koha `plugin_data` as the plugin-owned `config_json` value.
 
-The legacy `/etc/koha/sites/<instance>/procurement-config.xml` file is still read as a fallback when plugin settings have not been saved yet. New installs should use the web configuration page instead.
+New installs should use the web configuration page. During plugin upgrade, a legacy `/etc/koha/sites/<instance>/procurement-config.xml` file is migrated into `config_json` when no saved plugin configuration exists yet. After a successful migration the XML file is moved aside so this plugin version cannot keep reading stale deployment-managed configuration.
 
 ## Nightly EDItX synchronization
 
-The plugin importer reads incoming EDItX XML from `import_tmp_path` in the plugin configuration page. New configurations are prefilled with instance-owned folders under `/var/lib/koha/<instance>/spool/editx/`:
+The plugin importer reads incoming EDItX XML from the configured intake folders. New configurations are prefilled with instance-owned folders under `/var/lib/koha/<instance>/editx/`:
 
 - `tmp`
 - `load`
@@ -40,29 +40,16 @@ These folder paths can still be overridden with other absolute paths, for exampl
 
 The plugin implements Koha's `cronjob_nightly` hook, so the normal Koha nightly plugin cron can download SFTP files and import them.
 
-Configure SFTP sources from the plugin configuration page. The YAML field accepts one or more sources:
+Configure SFTP sources and folder sources from the plugin configuration page. Each source has its own `Active` flag. Nightly synchronization scans active sources only; inactive sources remain saved for later use.
 
-```yaml
-sources:
-  - id: alexandria_library
-    host: sftp.example.org
-    port: 22
-    user: editx-user
-    identity_file: /var/lib/koha/<instance>/.ssh/editx_sftp
-    remote_dir: /out/alexandria
-    local_dir:
-    pattern: "*.xml"
-    after_download: keep
-    remote_archive_dir:
-    known_hosts_file:
-    strict_host_key_checking: "yes"
-    ssh_config:
-```
+SFTP sources use strict host key checking by default. Leave the local target empty to use the temporary download folder from the import folder configuration. The normal production policy is to keep vendor remote files after download and rely on local duplicate detection for idempotency.
 
-Leave `local_dir` empty to use `import_tmp_path` from the plugin configuration page.
+Folder sources can import EDItX files dropped by another transfer process. They support a local source directory, file pattern, successful-file action, optional local archive directory, and minimum file age.
 
-Enable automatic synchronization from the plugin configuration page. When the checkbox is disabled, `cronjob_nightly` returns without doing any work.
-The operations page also has a manual download and import test action. It first shows a confirmation summary of the saved SFTP sources and import folders, then uses the last saved plugin configuration after confirmation. This action is intended for short preproduction checks; the nightly plugin cron remains the normal production path.
+The operations page supports manual runs:
+
+- The staged workflow checks remote/source files, downloads or stages selected files for preview, and then imports selected local files.
+- The full manual run uses the saved active sources and import folders directly for short preproduction checks. The nightly plugin cron remains the normal production path.
 
 The same configuration page includes the EDItX runtime log level and a recent log viewer. The log covers plugin configuration, manual and nightly synchronization, SFTP downloads, EDItX parsing, validation, file moves, and order creation. The log file is written under Koha `logdir` when available, with a temporary-directory fallback.
 

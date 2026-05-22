@@ -144,6 +144,34 @@ branch before any merge strategy:
 - Runtime logging and staff-visible diagnostics.
 - KPZ packaging and versioning.
 
+## Lifecycle And Schema Rules
+
+Current `main` lifecycle behavior is intentional and should not be replaced by
+older thread assumptions without re-auditing the code:
+
+- `install()` creates only plugin-qualified tables and does not inspect or
+  migrate legacy tables.
+- `upgrade()` is the only lifecycle path that touches legacy schema or legacy
+  XML configuration.
+- `upgrade()` creates or maintains the plugin-qualified `sequences` and
+  `map_productform` tables, migrates supported legacy data when the qualified
+  target table did not already exist, logs the migration, and drops the legacy
+  source table after a successful copy or explicit skip.
+- The supported KohaSuomi legacy source tables for copy migration are
+  `sequences` and `map_productform`.
+- The old KohaSuomi `procurement_file` table is an obsolete file-hash ledger.
+  It is cleaned up during upgrade; it is not migrated into a new table.
+- `uninstall()` drops only the current plugin-qualified tables. It must not
+  remove old legacy tables or unsupported experimental table names.
+- Upgrade SQL must stay portable and must not depend on `RENAME TABLE IF
+  EXISTS`.
+- Intermediate `editx_*` legacy table names are lower priority historical
+  experiments and should not drive the main lifecycle design unless the current
+  code or a verified deployment requires a cleanup path.
+
+Tests in `t/09-tool-config-ui.t` and `t/12-config-parsing.t` currently encode
+these expectations. Re-run the focused tests before changing lifecycle behavior.
+
 ## Strategic Plan
 
 1. Keep `main` clean and buildable.
@@ -163,3 +191,20 @@ not because generated framework code happened to exist.
 The next technical step is a read-only, commit-by-commit review of `ks25-v2`.
 The output should be a harvest matrix that lists each useful change, the exact
 commit or file that introduced it, and the proposed action for `main`.
+
+Recommended sequence:
+
+1. Verify branch divergence and locate the merge base between `main` and
+   `ks25-v2`.
+2. Walk every `ks25-v2` commit from the merge base to `ks25-v2`, recording the
+   EDItX knowledge it adds and whether it changes UI architecture, lifecycle,
+   import behavior, tests, fixtures, or operational assumptions.
+3. Inspect the final `ks25-v2` tree for generated assets, bundled frontend
+   dependencies, OpenAPI routes, fixtures, and changed business rules that may
+   not be obvious from commit subjects.
+4. Build a harvest matrix with exact commit/file references and classify each
+   item as adopt, adapt, reject, or defer.
+5. Pull accepted knowledge into `main` in small commits, keeping Koha-native UI
+   unless Nug explicitly chooses a different direction.
+6. After each completed implementation step, run focused tests and build a fresh
+   KPZ for web installation testing.
