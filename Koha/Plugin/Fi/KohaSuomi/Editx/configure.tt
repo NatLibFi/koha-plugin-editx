@@ -209,8 +209,8 @@
                                         <tr class="editx-source-main-row">
                                             <td class="editx-source-enabled-cell">
                                                 <label class="editx-source-run-toggle" title="Active source; scanned automatically by nightly synchronization">
-                                                    <input name="sftp_enabled" type="hidden" value="1" data-editx-enabled-value />
-                                                    <input type="checkbox" value="1" checked="checked" data-editx-enabled-toggle aria-label="Activate this SFTP source for nightly synchronization" />
+                                                    <input name="sftp_enabled" type="hidden" value="0" data-editx-enabled-value />
+                                                    <input type="checkbox" value="1" data-editx-enabled-toggle aria-label="Activate this SFTP source for nightly synchronization" />
                                                 </label>
                                             </td>
                                             <td><input name="sftp_id" type="text" value="" placeholder="vendor_code" pattern="[A-Za-z0-9_]+" title="Use letters, numbers, and underscores only; no spaces." autocomplete="off" autocapitalize="none" spellcheck="false" data-editx-source-id="1" data-editx-sftp-column="id" /></td>
@@ -269,25 +269,25 @@
                     <fieldset class="rows">
                         <legend>Folder sources</legend>
                         <div class="hint">Active sources are scanned by the nightly plugin cron and by full intake runs. Use this for EDItX files delivered into a local or mounted folder; files are copied into plugin staging before import.</div>
-                        <div class="editx-table-wrap">
-                            <table id="editx-folder-sources-table" class="editx-config-table editx-folder-sources-table">
+                        <div class="table-responsive">
+                            <table id="editx-folder-sources-table" class="table table-striped table-sm editx-folder-source-editor">
                                 <thead>
                                     <tr>
-                                        <th class="editx-source-enabled-cell" title="Active sources are scanned automatically by nightly synchronization">Active</th>
+                                        <th title="Active sources are scanned automatically by nightly synchronization">Active</th>
                                         <th>Source</th>
                                         <th>Folder</th>
                                         <th>Pattern</th>
                                         <th>After import</th>
                                         <th>Local archive</th>
-                                        <th class="NoSort editx-source-remove-cell">&nbsp;</th>
+                                        <th>&nbsp;</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     [% IF folder_sources.size %]
                                         [% FOREACH source IN folder_sources %]
                                             <tr data-editx-folder-source-row="1">
-                                                <td class="editx-source-enabled-cell">
-                                                    <label class="editx-source-run-toggle" title="Active source; scanned automatically by nightly synchronization">
+                                                <td>
+                                                    <label title="Active source; scanned automatically by nightly synchronization">
                                                         <input name="folder_enabled" type="hidden" value="[% IF source.enabled == 'no' %]0[% ELSE %]1[% END %]" data-editx-enabled-value />
                                                         <input type="checkbox" value="1" [% UNLESS source.enabled == 'no' %]checked="checked"[% END %] data-editx-enabled-toggle aria-label="Activate this folder source for nightly synchronization" />
                                                     </label>
@@ -306,17 +306,17 @@
                                                     </select>
                                                 </td>
                                                 <td><input name="folder_local_archive_dir" type="text" value="[% source.local_archive_dir | html %]" placeholder="local archive folder" data-editx-archive-target="1" /></td>
-                                                <td class="editx-row-actions editx-source-remove-cell">
+                                                <td>
                                                     <button type="button" class="btn btn-default btn-sm js-editx-remove-row">Remove</button>
                                                 </td>
                                             </tr>
                                         [% END %]
                                     [% ELSE %]
                                         <tr data-editx-folder-source-row="1">
-                                            <td class="editx-source-enabled-cell">
-                                                <label class="editx-source-run-toggle" title="Active source; scanned automatically by nightly synchronization">
-                                                    <input name="folder_enabled" type="hidden" value="1" data-editx-enabled-value />
-                                                    <input type="checkbox" value="1" checked="checked" data-editx-enabled-toggle aria-label="Activate this folder source for nightly synchronization" />
+                                            <td>
+                                                <label title="Active source; scanned automatically by nightly synchronization">
+                                                    <input name="folder_enabled" type="hidden" value="0" data-editx-enabled-value />
+                                                    <input type="checkbox" value="1" data-editx-enabled-toggle aria-label="Activate this folder source for nightly synchronization" />
                                                 </label>
                                             </td>
                                             <td><input name="folder_id" type="text" value="" placeholder="publisher_inbox" pattern="[A-Za-z0-9_]+" title="Use letters, numbers, and underscores only; no spaces." autocomplete="off" autocapitalize="none" spellcheck="false" data-editx-source-id="1" /></td>
@@ -333,7 +333,7 @@
                                                 </select>
                                             </td>
                                             <td><input name="folder_local_archive_dir" type="text" value="" placeholder="local archive folder" data-editx-archive-target="1" /></td>
-                                            <td class="editx-row-actions editx-source-remove-cell">
+                                            <td>
                                                 <button type="button" class="btn btn-default btn-sm js-editx-remove-row">Remove</button>
                                             </td>
                                         </tr>
@@ -717,9 +717,9 @@ DG,LYHYT,LYHYTHH</code></pre>
                 function clearRowInputs(row, table) {
                     row.querySelectorAll("input").forEach(function (input) {
                         if (input.dataset.editxEnabledValue !== undefined) {
-                            input.value = "1";
+                            input.value = "0";
                         } else if (input.dataset.editxEnabledToggle !== undefined) {
-                            input.checked = true;
+                            input.checked = false;
                         } else if (input.name === "sftp_port") {
                             input.value = "22";
                         } else if (input.name === "sftp_pattern" || input.name === "folder_pattern") {

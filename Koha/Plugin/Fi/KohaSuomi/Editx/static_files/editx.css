@@ -209,13 +209,6 @@
     vertical-align: top;
 }
 
-.editx-config-table thead th {
-    background: #fff;
-    position: sticky;
-    top: 0;
-    z-index: 1;
-}
-
 .editx-config-table input,
 .editx-config-table select {
     box-sizing: border-box;
@@ -281,14 +274,7 @@
     width: 100%;
 }
 
-.editx-folder-sources-table {
-    min-width: 54rem;
-    table-layout: fixed;
-    width: 100%;
-}
-
-.editx-sftp-sources-table th,
-.editx-folder-sources-table th {
+.editx-sftp-sources-table th {
     white-space: nowrap;
 }
 
@@ -296,8 +282,7 @@
     border-top: 0.18rem solid #d9dee3;
 }
 
-.editx-sftp-sources-table .editx-source-main-row td,
-.editx-folder-sources-table td {
+.editx-sftp-sources-table .editx-source-main-row td {
     vertical-align: middle;
 }
 
@@ -389,29 +374,22 @@
     text-align: right;
 }
 
-.editx-folder-sources-table th:nth-child(2),
-.editx-folder-sources-table td:nth-child(2) {
-    width: 12%;
+.editx-folder-source-editor th:first-child,
+.editx-folder-source-editor td:first-child {
+    text-align: center;
+    vertical-align: middle;
+    white-space: nowrap;
+    width: 1%;
 }
 
-.editx-folder-sources-table th:nth-child(3),
-.editx-folder-sources-table td:nth-child(3) {
-    width: 30%;
+.editx-folder-source-editor td:first-child label {
+    align-items: center;
+    display: inline-flex;
+    margin: 0;
 }
 
-.editx-folder-sources-table th:nth-child(4),
-.editx-folder-sources-table td:nth-child(4) {
-    width: 8%;
-}
-
-.editx-folder-sources-table th:nth-child(5),
-.editx-folder-sources-table td:nth-child(5) {
-    width: 10%;
-}
-
-.editx-folder-sources-table th:nth-child(6),
-.editx-folder-sources-table td:nth-child(6) {
-    width: 15%;
+.editx-folder-source-editor td:first-child input[type="checkbox"] {
+    margin: 0;
 }
 
 .editx-table-actions {
@@ -422,6 +400,13 @@
     min-width: 0;
     table-layout: auto;
     width: auto;
+}
+
+.editx-productform-table thead th {
+    background: #fff;
+    position: sticky;
+    top: 0;
+    z-index: 1;
 }
 
 .editx-productform-table th:nth-child(1),
