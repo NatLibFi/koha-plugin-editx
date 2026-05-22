@@ -1,5 +1,9 @@
 # Koha-Suomi plugin Editx
 Adds EDItX import support for Koha
+
+# Development coordination
+Current branch strategy, LLM-friendly UI guidance, and the KohaSuomi `ks25-v2` knowledge-harvest plan are tracked in [docs/WORKPLAN.md](docs/WORKPLAN.md).
+
 # Downloading
 From the release page you can download the latest \*.kpz file
 # Installing
