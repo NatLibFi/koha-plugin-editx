@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<LibraryShipNotice version="1.0">
+  <Header>
+    <ShipNoticeNumber>KS25-BTJ-INFO-0001</ShipNoticeNumber>
+    <IssueDateTime>20250205T1730</IssueDateTime>
+    <PurposeCode>Original</PurposeCode>
+    <BuyerParty>
+      <PartyID>
+        <PartyIDType>VendorAssignedID</PartyIDType>
+        <Identifier>12345</Identifier>
+      </PartyID>
+      <PartyName>
+        <NameLine>Kohala;FI-KOHA;016</NameLine>
+      </PartyName>
+      <ContactPerson>
+        <PersonName>Koha Acquisitions</PersonName>
+      </ContactPerson>
+    </BuyerParty>
+    <SellerParty>
+      <PartyID>
+        <PartyIDType>BuyerAssignedID</PartyIDType>
+        <Identifier>FI-BTJ</Identifier>
+      </PartyID>
+      <PartyName>
+        <NameLine>BTJ Finland Oy</NameLine>
+      </PartyName>
+    </SellerParty>
+  </Header>
+  <ItemDetail>
+    <LineNumber>1</LineNumber>
+    <ProductID>
+      <ProductIDType>EAN13</ProductIDType>
+      <Identifier>9789510506103</Identifier>
+    </ProductID>
+    <ItemDescription>
+      <ProductForm>BK</ProductForm>
+      <Title>Message only fixture</Title>
+      <Author>Example Author</Author>
+      <PublisherName>WSOY</PublisherName>
+      <YearOfPublication>2026</YearOfPublication>
+    </ItemDescription>
+    <QuantityShipping>1</QuantityShipping>
+    <CopyDetail>
+      <SubLineNumber>1</SubLineNumber>
+      <CopyQuantity>1</CopyQuantity>
+      <DeliverToLocation>OUPKAIK2025</DeliverToLocation>
+      <DestinationLocation>OUPKAIK2025</DestinationLocation>
+      <FundDetail>
+        <FundNumber>OUPKAIK2025</FundNumber>
+        <MonetaryAmount>12.00</MonetaryAmount>
+      </FundDetail>
+      <Message>
+        <MessageType>01</MessageType>
+        <MessageLine>Simple message</MessageLine>
+      </Message>
+    </CopyDetail>
+  </ItemDetail>
+  <Summary>
+    <NumberOfLines>1</NumberOfLines>
+    <UnitsShipped>1</UnitsShipped>
+  </Summary>
+</LibraryShipNotice>
