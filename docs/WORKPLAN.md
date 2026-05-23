@@ -109,6 +109,11 @@ Only then decide whether any UI structure is worth keeping.
 Before merging or porting anything, review every `ks25-v2` commit from the
 branch point against our `main` branch. Do not cherry-pick by commit title alone.
 
+The durable harvest matrix and decision log is
+`docs/KS25_V2_HARVEST.md`. Update that file whenever the local `origin/ks25-v2`
+snapshot changes, when a harvested item is implemented in `main`, or when Nug
+approves/rejects a behavior-changing direction.
+
 Harvest categories:
 
 - Real EDItX XML examples and edge cases.
@@ -188,23 +193,20 @@ not because generated framework code happened to exist.
 
 ## Next Immediate Work
 
-The next technical step is a read-only, commit-by-commit review of `ks25-v2`.
-The output should be a harvest matrix that lists each useful change, the exact
-commit or file that introduced it, and the proposed action for `main`.
+The read-only harvest is recorded in `docs/KS25_V2_HARVEST.md`. The next
+technical step is to pull accepted knowledge into `main` in small commits.
+Fixtures and tests can move first because they preserve business rules without
+forcing a runtime architecture decision.
 
 Recommended sequence:
 
-1. Verify branch divergence and locate the merge base between `main` and
-   `ks25-v2`.
-2. Walk every `ks25-v2` commit from the merge base to `ks25-v2`, recording the
-   EDItX knowledge it adds and whether it changes UI architecture, lifecycle,
-   import behavior, tests, fixtures, or operational assumptions.
-3. Inspect the final `ks25-v2` tree for generated assets, bundled frontend
-   dependencies, OpenAPI routes, fixtures, and changed business rules that may
-   not be obvious from commit subjects.
-4. Build a harvest matrix with exact commit/file references and classify each
-   item as adopt, adapt, reject, or defer.
-5. Pull accepted knowledge into `main` in small commits, keeping Koha-native UI
-   unless Nug explicitly chooses a different direction.
+1. Add harvested EDItX fixtures and current-style parser/validator tests.
+2. Add further focused validator tests that can run without fragile Koha DB
+   setup.
+3. Design `edifact_messages` and cron hardening against current `ImportRunner`,
+   source success actions, runtime logging, and Koha-native staff UI.
+4. Add duplicate/idempotency tests before changing import behavior.
+5. Pull approved behavior into `main`, keeping Koha-native UI unless Nug
+   explicitly chooses a different direction.
 6. After each completed implementation step, run focused tests and build a fresh
    KPZ for web installation testing.
